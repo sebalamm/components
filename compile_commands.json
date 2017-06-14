@@ -1,0 +1,7 @@
+[
+{
+  "directory": "/Users/sebastianlamm/Documents/work/connected_components/code/build",
+  "command": "mpicxx   -I/Users/sebastianlamm/Documents/work/connected_components/code/app -I/Users/sebastianlamm/Documents/work/connected_components/code/lib -I/Users/sebastianlamm/Documents/work/connected_components/code/lib/components -I/Users/sebastianlamm/Documents/work/connected_components/code/lib/data_structures -I/Users/sebastianlamm/Documents/work/connected_components/code/lib/io -I/Users/sebastianlamm/Documents/work/connected_components/code/lib/tools   -DNDEBUG -fno-omit-frame-pointer -Wall -g -O3 -std=c++11 -O3 -DNDEBUG   -o CMakeFiles/components.dir/app/components.cpp.o -c /Users/sebastianlamm/Documents/work/connected_components/code/app/components.cpp",
+  "file": "/Users/sebastianlamm/Documents/work/connected_components/code/app/components.cpp"
+}
+]
