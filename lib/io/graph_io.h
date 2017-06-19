@@ -24,11 +24,11 @@
 
 #include <mpi.h>
 
-#include <sstream>
+#include <algorithm>
 #include <fstream>
 #include <iostream>
+#include <sstream>
 #include <vector>
-#include <algorithm>
 
 #include "config.h"
 #include "graph_access.h"
@@ -38,7 +38,8 @@ class GraphIO {
   GraphIO() {}
   virtual ~GraphIO() {}
 
-  static GraphAccess ReadDistributedGraph(const Config &config, PEID rank, PEID size, const MPI_Comm &comm) {
+  static GraphAccess ReadDistributedGraph(const Config &config, PEID rank,
+                                          PEID size, const MPI_Comm &comm) {
     std::string line;
     std::string filename(config.input_file);
 
@@ -61,12 +62,12 @@ class GraphIO {
 
     // Read the lines i*ceil(n/size) to (i+1)*floor(n/size) lines of that file
     VertexID from = rank * ceil(number_of_vertices / (double)size);
-    VertexID to = std::min((VertexID)((rank + 1) * ceil(number_of_vertices / (double)size) - 1), number_of_vertices - 1);
+    VertexID to = std::min(
+        (VertexID)((rank + 1) * ceil(number_of_vertices / (double)size) - 1),
+        number_of_vertices - 1);
 
     VertexID number_of_local_vertices = to - from + 1;
-    std::cout << "rank " << rank 
-              << " from " << from 
-              << " to " << to 
+    std::cout << "rank " << rank << " from " << from << " to " << to
               << " amount " << number_of_local_vertices << std::endl;
 
     std::vector<std::vector<VertexID>> local_edge_lists;
@@ -106,13 +107,15 @@ class GraphIO {
 
     MPI_Barrier(comm);
 
-    GraphAccess G;
+    GraphAccess G(rank, size);
+    G.Construct(number_of_local_vertices, 2*edge_counter, 
+                node_counter, 2*number_of_edges);
     G.SetLocalRange(from, to);
 
     std::vector<VertexID> vertex_dist(size + 1, 0);
-    for (PEID rank = 0; rank <= size; rank++) 
-      vertex_dist[rank] = rank * ceil(number_of_vertices / (double)size); 
-    G.InitRangeArray(std::move(vertex_dist));
+    for (PEID rank = 0; rank <= size; rank++)
+      vertex_dist[rank] = rank * ceil(number_of_vertices / (double)size);
+    G.SetRangeArray(std::move(vertex_dist));
 
     for (VertexID i = 0; i < number_of_local_vertices; ++i) {
       VertexID node = G.CreateVertex();
