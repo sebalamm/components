@@ -1,3 +1,5 @@
+#include <iostream> 
+
 #include "ghost_communicator.h"
 
 void GhostCommunicator::AddLabel(const VertexID v, const VertexID label) {
