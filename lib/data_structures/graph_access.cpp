@@ -1,3 +1,5 @@
+#include <iostream>
+
 #include "graph_access.h"
 #include "ghost_communicator.h"
 
