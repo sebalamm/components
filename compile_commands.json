@@ -1,7 +1,17 @@
 [
 {
-  "directory": "/Users/sebastianlamm/Documents/work/connected_components/code/build",
-  "command": "mpicxx   -I/Users/sebastianlamm/Documents/work/connected_components/code/app -I/Users/sebastianlamm/Documents/work/connected_components/code/lib -I/Users/sebastianlamm/Documents/work/connected_components/code/lib/components -I/Users/sebastianlamm/Documents/work/connected_components/code/lib/data_structures -I/Users/sebastianlamm/Documents/work/connected_components/code/lib/io -I/Users/sebastianlamm/Documents/work/connected_components/code/lib/tools   -DNDEBUG -fno-omit-frame-pointer -Wall -g -O3 -std=c++11 -O3 -DNDEBUG   -o CMakeFiles/components.dir/app/components.cpp.o -c /Users/sebastianlamm/Documents/work/connected_components/code/app/components.cpp",
-  "file": "/Users/sebastianlamm/Documents/work/connected_components/code/app/components.cpp"
+  "directory": "/home/lamm/work/components/build",
+  "command": "mpicxx     -DNDEBUG -fno-omit-frame-pointer -Wall -g -O3 -std=c++14 -O3 -DNDEBUG -I/home/lamm/work/components/app -I/home/lamm/work/components/lib -I/home/lamm/work/components/lib/communication -I/home/lamm/work/components/lib/components -I/home/lamm/work/components/lib/data_structures -I/home/lamm/work/components/lib/io -I/home/lamm/work/components/lib/tools    -o CMakeFiles/components.dir/lib/communication/ghost_communicator.cpp.o -c /home/lamm/work/components/lib/communication/ghost_communicator.cpp",
+  "file": "/home/lamm/work/components/lib/communication/ghost_communicator.cpp"
+},
+{
+  "directory": "/home/lamm/work/components/build",
+  "command": "mpicxx     -DNDEBUG -fno-omit-frame-pointer -Wall -g -O3 -std=c++14 -O3 -DNDEBUG -I/home/lamm/work/components/app -I/home/lamm/work/components/lib -I/home/lamm/work/components/lib/communication -I/home/lamm/work/components/lib/components -I/home/lamm/work/components/lib/data_structures -I/home/lamm/work/components/lib/io -I/home/lamm/work/components/lib/tools    -o CMakeFiles/components.dir/lib/data_structures/graph_access.cpp.o -c /home/lamm/work/components/lib/data_structures/graph_access.cpp",
+  "file": "/home/lamm/work/components/lib/data_structures/graph_access.cpp"
+},
+{
+  "directory": "/home/lamm/work/components/build",
+  "command": "mpicxx     -DNDEBUG -fno-omit-frame-pointer -Wall -g -O3 -std=c++14 -O3 -DNDEBUG -I/home/lamm/work/components/app -I/home/lamm/work/components/lib -I/home/lamm/work/components/lib/communication -I/home/lamm/work/components/lib/components -I/home/lamm/work/components/lib/data_structures -I/home/lamm/work/components/lib/io -I/home/lamm/work/components/lib/tools    -o CMakeFiles/components.dir/app/components.cpp.o -c /home/lamm/work/components/app/components.cpp",
+  "file": "/home/lamm/work/components/app/components.cpp"
 }
 ]

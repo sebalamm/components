@@ -37,11 +37,15 @@ void ParseParameters(int argn, char **argv,
   conf.seed = args.Get<ULONG>("seed", 1);
 
   // I/O
+  conf.input_file = args.Get<std::string>("in", "in");
   conf.output_file = args.Get<std::string>("out", "out");
   conf.debug_output_file = args.Get<std::string>("debug_out", "tmp");
 
   // Benchmarks
   conf.iterations = args.Get<ULONG>("i", 10);
+
+  // Label propagation
+  conf.prop_iterations = args.Get<ULONG>("pi", 3);
 }
 
 #endif

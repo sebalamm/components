@@ -108,8 +108,8 @@ class GraphIO {
     MPI_Barrier(comm);
 
     GraphAccess G(rank, size);
-    G.Construct(number_of_local_vertices, 2*edge_counter, 
-                node_counter, 2*number_of_edges);
+    G.StartConstruct(number_of_local_vertices, 2*edge_counter, 
+                     number_of_vertices, 2*number_of_edges);
     G.SetLocalRange(from, to);
 
     std::vector<VertexID> vertex_dist(size + 1, 0);
@@ -118,15 +118,15 @@ class GraphIO {
     G.SetRangeArray(std::move(vertex_dist));
 
     for (VertexID i = 0; i < number_of_local_vertices; ++i) {
-      VertexID node = G.CreateVertex();
-      G.SetVertexLabel(node, from + node);
+      VertexID v = G.CreateVertex();
+      G.SetVertexLabel(v, from + v);
 
       for (VertexID j = 0; j < local_edge_lists[i].size(); j++) {
         VertexID target = local_edge_lists[i][j] - 1;
-        EdgeID e = G.CreateEdge(node, target);
+        G.CreateEdge(v, target);
       }
     }
-
+    G.FinishConstruct();
     MPI_Barrier(comm);
 
     return G;

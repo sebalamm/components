@@ -28,6 +28,7 @@
 #include "timer.h"
 
 #include "components/components.h"
+#include "components/propagation.h"
 
 int main(int argn, char **argv) {
   // Init MPI
@@ -59,16 +60,15 @@ int main(int argn, char **argv) {
 
     // Generator
     conf.seed = user_seed + i;
-    Components comp(conf);
-    comp.FindComponents();
+    Propagation comp;
+    comp.FindComponents(G, conf, rank);
+    comp.Output(G);
 
     // Output
     local_time = t.Elapsed();
     MPI_Reduce(&local_time, &total_time, 1, MPI_DOUBLE, MPI_MAX, ROOT,
                MPI_COMM_WORLD);
     if (rank == ROOT) stats.Push(total_time);
-
-    comp.Output();
   }
 
   if (rank == ROOT) {

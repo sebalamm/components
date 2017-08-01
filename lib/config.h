@@ -40,6 +40,8 @@ struct Config {
   std::string debug_output_file;
   // Benchmarks
   unsigned int iterations;
+  // Label propagation
+  unsigned int prop_iterations;
 };
 
 #endif

@@ -3,6 +3,6 @@
 mkdir build
 cd build
 cmake ..
-make
+make 
 
 cp compile_commands.json ..
