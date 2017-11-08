@@ -5,18 +5,18 @@
 #include "macros_assertions.h"
 
 // template-based loop unrolling
-template <size_t N>
+template<size_t N>
 struct FauxUnroll {
-  template <typename F>
+  template<typename F>
   static void call(F &&f) {
     FauxUnroll<N - 1>::call(f);
     f(N - 1);
   }
 };
 
-template <>
+template<>
 struct FauxUnroll<0> {
-  template <typename F>
+  template<typename F>
   static void call(F &&) {}
 };
 
