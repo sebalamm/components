@@ -42,6 +42,8 @@ struct Config {
   unsigned int iterations;
   // Label propagation
   unsigned int prop_iterations;
+  // Decomposition
+  double beta;
 };
 
 #endif

@@ -108,26 +108,25 @@ class GraphIO {
     MPI_Barrier(comm);
 
     GraphAccess G(rank, size);
-    G.StartConstruct(number_of_local_vertices, 2*edge_counter, 
-                     number_of_vertices, 2*number_of_edges);
-    G.SetLocalRange(from, to);
+    G.StartConstruct(number_of_local_vertices, 2*edge_counter, from);
 
     std::vector<VertexID> vertex_dist(size + 1, 0);
     for (PEID rank = 0; rank <= size; rank++)
       vertex_dist[rank] = rank * ceil(number_of_vertices / (double)size);
-    G.SetRangeArray(std::move(vertex_dist));
+    G.SetOffsetArray(std::move(vertex_dist));
 
     for (VertexID i = 0; i < number_of_local_vertices; ++i) {
-      VertexID v = G.CreateVertex();
+      VertexID v = G.AddVertex();
       G.SetVertexLabel(v, from + v);
 
       for (VertexID j = 0; j < local_edge_lists[i].size(); j++) {
         VertexID target = local_edge_lists[i][j] - 1;
-        G.CreateEdge(v, target);
+        G.AddEdge(v, target, size);
       }
     }
     G.FinishConstruct();
     MPI_Barrier(comm);
+    std::cout << "done construction" << std::endl;
 
     return G;
   }

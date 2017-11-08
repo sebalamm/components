@@ -19,22 +19,34 @@
  * this program.  If not, see <http://www.gnu.org/licenses/>.
  *****************************************************************************/
 
-#ifndef _COMPONENTS_H_
-#define _COMPONENTS_H_
+#ifndef _UTILITY_H_
+#define _UTILITY_H_
+
+#include <queue>
 
 #include "graph_access.h"
 
 class Utility {
-  template <typename F>
-  static void LocalBFS(const GraphAccess &G, const Vertex &root, F &&callback) {
-    std::vector<bool> visited(G.NumberOfLocalVertices(), false);
-    std::queue<Vertex> q;
-
-    q.push(root);
-    while (!q.empty()) {
-      const Vertex &v = q.front(); q.pop();
+  public: 
+    static void BFS(GraphAccess &g, 
+                    const VertexID &start, 
+                    std::vector<bool> &marked, 
+                    std::vector<VertexID> &parent) {
+      // Standard BFS
+      std::queue<VertexID> q;
+      q.push(start);
+      while (!q.empty()) {
+        VertexID v = q.front(); 
+        q.pop();
+        parent[v] = start;
+        marked[v] = true;
+        g.ForallNeighbors(v, [&](VertexID w) {
+          if (g.IsLocal(w) && !marked[w]) {
+            q.push(w);
+          }
+        });
+      }
     }
-  }
-}
+};
 
 #endif

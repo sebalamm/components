@@ -1,7 +1,7 @@
 /******************************************************************************
- * parse_parameters.h
+ * components.h
  *
- * Parse I/O parameters and build config
+ * Distributed computation of connected components
  ******************************************************************************
  * Copyright (C) 2017 Sebastian Lamm <lamm@kit.edu>
  *
@@ -18,37 +18,35 @@
  * You should have received a copy of the GNU General Public License along with
  * this program.  If not, see <http://www.gnu.org/licenses/>.
  *****************************************************************************/
+#ifndef _EDGE_HASH_H_
+#define _EDGE_HASH_H_
 
-#ifndef _PARSE_PARAMETERS_H_
-#define _PARSE_PARAMETERS_H_
-
-#include <string.h>
-
-#include "config.h"
-#include "tools/arg_parser.h"
+#include <unordered_map>
 
 #include "definitions.h"
+#include "limits.h"
 
-void ParseParameters(int argn, char **argv,
-                     Config &conf) {
-  ArgParser args(argn, argv);
+struct HashedEdge {
+  VertexID k;
+  VertexID source;
+  VertexID target;
+  PEID rank;
+};
 
-  // RNG
-  conf.seed = args.Get<ULONG>("seed", 1);
+struct HashFunction {
+   EdgeID operator() (const HashedEdge e) const {
+     if(e.source < e.target) return e.source*e.k + e.target;
+     else return e.target*e.k + e.source;
+   }
+};
 
-  // I/O
-  conf.input_file = args.Get<std::string>("in", "in");
-  conf.output_file = args.Get<std::string>("out", "out");
-  conf.debug_output_file = args.Get<std::string>("debug_out", "tmp");
+struct EdgeComparator {
+  bool operator() (const HashedEdge e1, const HashedEdge e2) const {
+    bool eq = (e1.source == e2.source && e1.target == e2.target);
+    return (eq || (e1.source == e2.target && e1.target == e2.source));
+  }
+};
 
-  // Benchmarks
-  conf.iterations = args.Get<ULONG>("i", 10);
+typedef std::unordered_set<HashedEdge, HashFunction, EdgeComparator> EdgeHash;
 
-  // Label propagation
-  conf.prop_iterations = args.Get<ULONG>("pi", 3);
-
-  // Decomposition
-  conf.beta = args.Get<double>("beta", 0.5);
-}
-
-#endif
+#endif 

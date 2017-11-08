@@ -40,29 +40,29 @@ struct Vertex {
 
 struct LocalVertexData {
   VertexID label_;
-  bool is_interface_node_;
+  bool is_interface_vertex_;
 
   LocalVertexData()
-    : label_(0), is_interface_node_(false) {}
+    : label_(0), is_interface_vertex_(false) {}
   LocalVertexData(VertexID label, bool interface)
-      : label_(label), is_interface_node_(interface) {}
+      : label_(label), is_interface_vertex_(interface) {}
 };
 
-struct NonLocalVertexData {
+struct GhostVertexData {
   PEID rank_;
   VertexID global_id_;
 
-  NonLocalVertexData()
+  GhostVertexData()
     : rank_(0), global_id_(0) {}
-  NonLocalVertexData(PEID rank, VertexID global_id)
+  GhostVertexData(PEID rank, VertexID global_id)
       : rank_(rank), global_id_(global_id) {}
 };
 
 struct Edge {
-  VertexID local_target_;
+  VertexID target_;
 
-  Edge() : local_target_(0) {}
-  Edge(VertexID target) : local_target_(target) {}
+  Edge() : target_(0) {}
+  Edge(VertexID target) : target_(target) {}
 };
 
 class GhostCommunicator;
@@ -71,19 +71,10 @@ class GraphAccess {
   GraphAccess(const PEID rank, const PEID size)
       : rank_(rank),
         size_(size),
-        max_degree_(0),
-        pe_div_(0),
-        prev_from_(0),
         number_of_vertices_(0),
-        range_from_(0),
-        range_to_(0),
-        ghost_offset_(0),
         number_of_local_vertices_(0),
-        number_of_global_vertices_(0),
-        number_of_local_edges_(0),
-        number_of_global_edges_(0),
+        number_of_edges_(0),
         vertex_counter_(0),
-        degree_counter_(0),
         edge_counter_(0) {}
   virtual ~GraphAccess() {}
 
@@ -91,75 +82,70 @@ class GraphAccess {
 
   GraphAccess(const GraphAccess &rhs) = default;
 
-  void StartConstruct(const VertexID local_n, const EdgeID local_m,
-                      const VertexID global_n, const EdgeID global_m);
+  //////////////////////////////////////////////
+  // Graph construction
+  //////////////////////////////////////////////
+  void StartConstruct(const VertexID local_n, const EdgeID local_m, const VertexID local_offset);
 
-  void FinishConstruct() {
-    number_of_local_edges_ = edge_counter_;
-    edges_.resize(edge_counter_);
-    // Isolated vertex
-    if (prev_from_ != number_of_local_vertices_ - 1) {
-      for (VertexID i = number_of_local_vertices_; i > prev_from_ + 1; i--) {
-        vertices_[i].first_edge_ = vertices_[prev_from_+1].first_edge_;
-      }
-    }
-  }
+  void FinishConstruct() { number_of_edges_ = edge_counter_; }
 
+  //////////////////////////////////////////////
+  // Graph iterators
+  //////////////////////////////////////////////
   template <typename F>
   void ForallLocalVertices(F &&callback) {
-    for (VertexID v = 0; v < NumberOfLocalVertices(); ++v) {
+    for (VertexID v = 0; v < GetNumberOfLocalVertices(); ++v) {
       callback(v);
     }
   }
 
   template <typename F>
   void ForallNeighbors(const VertexID v, F &&callback) {
-    ForallAdjacentEdges(v,
-                        [&](EdgeID e) { callback(edges_[e].local_target_); });
-  }
-
-  template <typename F>
-  void ForallLocalEdges(F &&callback) {
-    for (EdgeID e = 0; e < NumberOfLocalEdges(); ++e) {
-      callback(e);
-    }
+    ForallAdjacentEdges(v, [&](EdgeID e) { callback(edges_[v][e].target_); });
   }
 
   template <typename F>
   void ForallAdjacentEdges(const VertexID v, F &&callback) {
-    for (EdgeID e = FirstEdge(v); e < FirstInvalidEdge(v); ++e) {
+    for (EdgeID e = 0; e < GetVertexDegree(v); ++e) {
       callback(e);
     }
   }
 
-  inline VertexID VertexDegree(const VertexID v) const {
-    return FirstEdge(v + 1) - FirstEdge(v);
+  //////////////////////////////////////////////
+  // Graph contraction
+  //////////////////////////////////////////////
+  inline void AllocateContractionVertices() {
+    contraction_vertices_.resize(vertices_.size());
   }
 
-  inline VertexID NumberOfLocalVertices() const {
-    return number_of_local_vertices_;
+  inline void SetContractionVertex(VertexID v, VertexID cv) {
+    contraction_vertices_[v] = cv;
   }
 
-  inline VertexID NumberOfGhostVertices() const {
-    return vertices_.size() - number_of_local_vertices_ - 1;
+  inline VertexID GetContractionVertex(VertexID v) const {
+    return contraction_vertices_[v];
   }
 
-  inline VertexID NumberOfGlobalVertices() const {
-    return number_of_global_vertices_;
+  //////////////////////////////////////////////
+  // Vertex mappings
+  //////////////////////////////////////////////
+  inline void SetOffsetArray(std::vector<VertexID> && vertex_dist) {
+    offset_array_ = vertex_dist;
   }
 
-  inline EdgeID NumberOfLocalEdges() const { return number_of_local_edges_; }
-
-  inline EdgeID NumberOfGlobalEdges() const { return number_of_global_edges_; }
-
-  inline VertexID MaxVertexDegree() const { return max_degree_; }
+  PEID GetPEFromOffset(const VertexID v) const {
+    for (PEID i = 1; i < (PEID) offset_array_.size(); ++i) {
+      if (v < offset_array_[i]) return i - 1;
+    }
+    return rank_;
+  }
 
   inline bool IsLocal(VertexID v) const {
     return v < number_of_local_vertices_;
   }
 
   inline bool IsLocalFromGlobal(VertexID v) const {
-    return (range_from_ <= v && v <= range_to_);
+    return local_offset_ <= v && v < local_offset_ + number_of_local_vertices_;
   }
 
   inline bool IsGhost(VertexID v) const {
@@ -170,31 +156,41 @@ class GraphAccess {
     return global_to_local_map_.find(v) != global_to_local_map_.end();
   }
 
-  inline VertexID GetLocalID(VertexID v) {
-    return IsLocalFromGlobal(v) ? v - range_from_
-                      : global_to_local_map_[v];
+  inline bool IsInterface(VertexID v) const {
+    return local_vertices_data_[v].is_interface_vertex_;
+  }
+
+  inline bool IsInterfaceFromGlobal(VertexID v) const {
+    return local_vertices_data_[GetLocalID(v)].is_interface_vertex_;
+  }
+
+  inline VertexID GetLocalID(VertexID v) const {
+    return IsLocalFromGlobal(v) ? v - local_offset_
+                      : global_to_local_map_.find(v)->second;
   }
 
   inline VertexID GetGlobalID(VertexID v) const {
-    return IsLocal(v) ? v + range_from_
-                      : non_local_vertices_data_[v - ghost_offset_].global_id_;
+    return IsLocal(v) ? v + local_offset_
+                      : ghost_vertices_data_[v - ghost_offset_].global_id_;
                       
   }
 
-  PEID GetPE(VertexID v) const {
+  inline PEID GetPE(VertexID v) const {
     return IsLocal(v) ? rank_
-                      : non_local_vertices_data_[v - ghost_offset_].rank_;
+                      : ghost_vertices_data_[v - ghost_offset_].rank_;
                       
   }
 
-  VertexID CreateVertex() {
-    degree_counter_ = 0;
-    return vertex_counter_++;
+  //////////////////////////////////////////////
+  // Manage local vertices/edges
+  //////////////////////////////////////////////
+  inline VertexID GetNumberOfVertices() const { return number_of_vertices_; }
+
+  inline VertexID GetNumberOfLocalVertices() const {
+    return number_of_local_vertices_;
   }
 
-  EdgeID CreateEdge(VertexID from, VertexID to);
-
-  void UpdateGhostVertices();
+  inline EdgeID GetNumberOfEdges() const { return number_of_edges_; }
 
   void SetVertexLabel(const VertexID v, const VertexID label);
 
@@ -202,65 +198,87 @@ class GraphAccess {
     return local_vertices_data_[v].label_;
   }
 
-  inline void SetLocalRange(const VertexID from, const VertexID to) {
-    range_from_ = from;
-    range_to_ = to;
+  inline VertexID AddVertex() { return vertex_counter_++; }
+
+  EdgeID AddEdge(VertexID from, VertexID to, PEID rank);
+
+  inline VertexID GetVertexDegree(const VertexID v) const {
+    return edges_[v].size();
   }
 
-  inline std::pair<VertexID, VertexID> GetLocalRange() const {
-    return std::make_pair(range_from_, range_to_);
+  //////////////////////////////////////////////
+  // Manage ghost vertices
+  //////////////////////////////////////////////
+  void UpdateGhostVertices();
+
+  inline VertexID NumberOfGhostVertices() const {
+    return vertices_.size() - number_of_local_vertices_ - 1;
   }
 
-  inline void SetRangeArray(std::vector<VertexID> &&dist) {
-    vertex_ranges_ = std::move(dist);
+  inline void HandleGhostUpdate(const VertexID v, const VertexID label) {
+    VertexID current_label = GetVertexLabel(v);
+    if (label < current_label) SetVertexLabel(v, label);
   }
 
-  // Get target PE from vertex ranges
-  PEID GetPEFromRange(const VertexID v) const {
-    for (PEID i = 1; i < (PEID)vertex_ranges_.size(); i++) {
-      if (v < vertex_ranges_[i]) {
-        return (i - 1);
-      }
-    }
-    return -1;
+  //////////////////////////////////////////////
+  // Manage adjacent PEs
+  //////////////////////////////////////////////
+  inline PEID GetNumberOfAdjacentPEs() const {
+    PEID counter = 0; 
+    for (const bool is_adj : adjacent_pes_)
+      if (is_adj) counter++;
+    return counter;
   }
 
+  inline bool IsAdjacentPE(const PEID pe) const {
+    return adjacent_pes_[pe];
+  }
+
+  inline void SetAdjacentPE(const PEID pe, const bool is_adj) {
+    adjacent_pes_[pe] = is_adj;
+  }
+
+  //////////////////////////////////////////////
+  // I/O
+  //////////////////////////////////////////////
   void OutputLocal();
 
  private:
+  // Network information
   PEID rank_, size_;
 
+  // Vertices and edges
   std::vector<Vertex> vertices_;
-  std::vector<Edge> edges_;
+  std::vector<std::vector<Edge>> edges_;
+
   std::vector<LocalVertexData> local_vertices_data_;
-  std::vector<NonLocalVertexData> non_local_vertices_data_;
-  std::vector<VertexID> vertex_ranges_;
-
-  std::unordered_map<VertexID, VertexID> global_to_local_map_;
-
-  VertexID max_degree_;
-  VertexID pe_div_;
-  VertexID prev_from_;
+  std::vector<GhostVertexData> ghost_vertices_data_;
 
   VertexID number_of_vertices_;
-  VertexID range_from_, range_to_;
+  VertexID number_of_local_vertices_;
+  VertexID number_of_ghost_vertices_;
+
+  EdgeID number_of_edges_;
+  
+  // Vertex mapping
+  VertexID local_offset_;
+  std::vector<VertexID> offset_array_;
+
   VertexID ghost_offset_;
-  VertexID number_of_local_vertices_, number_of_global_vertices_;
-  EdgeID number_of_local_edges_, number_of_global_edges_;
+  std::unordered_map<VertexID, VertexID> global_to_local_map_;
 
-  VertexID vertex_counter_;
-  VertexID degree_counter_;
-  EdgeID edge_counter_;
+  // Contraction
+  std::vector<VertexID> contraction_vertices_;
 
+  // Adjacent PEs
+  std::vector<bool> adjacent_pes_;
+
+  // Communication interface
   GhostCommunicator *ghost_comm_;
 
-  inline EdgeID FirstEdge(const VertexID v) const {
-    return vertices_[v].first_edge_;
-  }
-
-  inline EdgeID FirstInvalidEdge(const VertexID v) const {
-    return vertices_[v + 1].first_edge_;
-  }
+  // Temporary counters
+  VertexID vertex_counter_;
+  EdgeID edge_counter_;
 };
 
 #endif

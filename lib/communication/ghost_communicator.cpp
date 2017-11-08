@@ -45,7 +45,7 @@ void GhostCommunicator::ReceiveIncomingMessages() {
       VertexID label = message[i+1];
 
       VertexID local_id = g_->GetLocalID(global_id);
-      g_->SetVertexLabel(local_id, label);
+      g_->HandleGhostUpdate(local_id, label);
     }
   }
 

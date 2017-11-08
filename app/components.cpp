@@ -60,9 +60,9 @@ int main(int argn, char **argv) {
 
     // Generator
     conf.seed = user_seed + i;
-    Propagation comp;
-    comp.FindComponents(G, conf, rank);
-    comp.Output(G);
+    Components comp(conf, rank, size);
+    comp.FindComponents(G);
+    comp.Output(G, rank);
 
     // Output
     local_time = t.Elapsed();

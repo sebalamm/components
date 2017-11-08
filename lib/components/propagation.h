@@ -51,7 +51,7 @@ class Propagation {
 
   private:
     void FindLocalComponents(GraphAccess &g) {
-      g.ForallLocalVertices([&](VertexID v)  {
+      g.ForallLocalVertices([&](VertexID v) {
         // Gather min label of all neighbors
         VertexID min_label = g.GetVertexLabel(v);
         g.ForallNeighbors(v, [&](VertexID u) {
@@ -63,7 +63,7 @@ class Propagation {
 
     void GatherComponents(GraphAccess &g) {
       // Gather local components
-      std::vector<VertexID> local_components(g.NumberOfLocalVertices());
+      std::vector<VertexID> local_components(g.GetNumberOfLocalVertices());
       g.ForallLocalVertices([&](VertexID v)  {
           local_components[v] = g.GetVertexLabel(v);
       });
