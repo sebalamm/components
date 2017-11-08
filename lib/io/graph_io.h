@@ -61,7 +61,7 @@ class GraphIO {
     ss >> number_of_edges;
 
     // Read the lines i*ceil(n/size) to (i+1)*floor(n/size) lines of that file
-    VertexID from = static_cast<VertexID>(rank * ceil(number_of_vertices / (double) size));
+    auto from = static_cast<VertexID>(rank * ceil(number_of_vertices / (double) size));
     VertexID to = std::min(
         (VertexID) ((rank + 1) * ceil(number_of_vertices / (double) size) - 1),
         number_of_vertices - 1);
@@ -84,7 +84,7 @@ class GraphIO {
 
       if (counter >= from) {
         oldstr = &line[0];
-        newstr = 0;
+        newstr = nullptr;
 
         for (;;) {
           VertexID target;

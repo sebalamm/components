@@ -61,7 +61,7 @@ class Contraction {
   std::unordered_set<VertexID> local_components_{};
 
   // Local edges
-  EdgeHash local_edges_;
+  EdgeHash local_edges_{};
 
   void ComputeComponentPrefixSum() {
     // Gather local components O(max(#component))

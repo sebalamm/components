@@ -35,7 +35,7 @@ struct Vertex {
   EdgeID first_edge_;
 
   Vertex() : first_edge_(0) {}
-  Vertex(EdgeID e) : first_edge_(e) {}
+  explicit Vertex(EdgeID e) : first_edge_(e) {}
 };
 
 struct LocalVertexData {
@@ -62,7 +62,7 @@ struct Edge {
   VertexID target_;
 
   Edge() : target_(0) {}
-  Edge(VertexID target) : target_(target) {}
+  explicit Edge(VertexID target) : target_(target) {}
 };
 
 class GhostCommunicator;
@@ -76,7 +76,7 @@ class GraphAccess {
         number_of_edges_(0),
         vertex_counter_(0),
         edge_counter_(0) {}
-  virtual ~GraphAccess() {}
+  virtual ~GraphAccess() = default;
 
   GraphAccess(GraphAccess &&rhs) = default;
 
@@ -85,7 +85,7 @@ class GraphAccess {
   //////////////////////////////////////////////
   // Graph construction
   //////////////////////////////////////////////
-  void StartConstruct(const VertexID local_n, const EdgeID local_m, const VertexID local_offset);
+  void StartConstruct(VertexID local_n, EdgeID local_m, VertexID local_offset);
 
   void FinishConstruct() { number_of_edges_ = edge_counter_; }
 
@@ -256,15 +256,15 @@ class GraphAccess {
 
   VertexID number_of_vertices_;
   VertexID number_of_local_vertices_;
-  VertexID number_of_ghost_vertices_;
+  VertexID number_of_ghost_vertices_{};
 
   EdgeID number_of_edges_;
 
   // Vertex mapping
-  VertexID local_offset_;
+  VertexID local_offset_{};
   std::vector<VertexID> offset_array_;
 
-  VertexID ghost_offset_;
+  VertexID ghost_offset_{};
   std::unordered_map<VertexID, VertexID> global_to_local_map_;
 
   // Contraction
@@ -274,7 +274,7 @@ class GraphAccess {
   std::vector<bool> adjacent_pes_;
 
   // Communication interface
-  GhostCommunicator *ghost_comm_;
+  GhostCommunicator *ghost_comm_{};
 
   // Temporary counters
   VertexID vertex_counter_;

@@ -24,7 +24,7 @@
 #include <unordered_map>
 
 #include "definitions.h"
-#include "limits.h"
+#include <climits>
 
 struct HashedEdge {
   VertexID k;

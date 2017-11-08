@@ -78,7 +78,13 @@ class Propagation {
     MPI_Comm_rank(MPI_COMM_WORLD, &rank);
     MPI_Comm_size(MPI_COMM_WORLD, &size);
     std::vector<VertexID> num_components(static_cast<unsigned long>(size));
-    MPI_Allgather(&num_local_components, 1, MPI_INT, &num_components[0], 1, MPI_INT, MPI_COMM_WORLD);
+    MPI_Allgather(&num_local_components,
+                  1,
+                  MPI_UNSIGNED_LONG,
+                  &num_components[0],
+                  1,
+                  MPI_UNSIGNED_LONG,
+                  MPI_COMM_WORLD);
 
     VertexID num_total_components = 0;
     for (VertexID &comps : num_components) num_total_components += comps;

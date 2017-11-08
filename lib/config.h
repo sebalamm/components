@@ -27,11 +27,11 @@
 
 // Configuration for the generator.
 struct Config {
-  Config() {}
-  virtual ~Config() {}
+  Config() = default;
+  virtual ~Config() = default;
 
   // Seed for the PRNG
-  int seed;
+  int seed{};
   // Input filename
   std::string input_file;
   // Output filename
@@ -39,11 +39,11 @@ struct Config {
   // Debug output
   std::string debug_output_file;
   // Benchmarks
-  unsigned int iterations;
+  unsigned int iterations{};
   // Label propagation
-  unsigned int prop_iterations;
+  unsigned int prop_iterations{};
   // Decomposition
-  double beta;
+  double beta{};
 };
 
 #endif
