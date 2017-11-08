@@ -18,10 +18,10 @@ include_directories(
         lib
         lib/communication
         lib/components
+        lib/contraction
         lib/data_structures
         lib/io
         lib/tools
-        ${MPI_CXX_INCLUDE_PATH}
 )
 
 
@@ -31,6 +31,7 @@ set(SOURCES
         lib/communication
         lib/communication/ghost_communicator.cpp
         lib/components
+        lib/contraction
         lib/data_structures
         lib/data_structures/graph_access.cpp
         lib/io

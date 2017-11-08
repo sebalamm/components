@@ -22,8 +22,6 @@
 #ifndef _PARSE_PARAMETERS_H_
 #define _PARSE_PARAMETERS_H_
 
-#include <string.h>
-
 #include "config.h"
 #include "tools/arg_parser.h"
 
@@ -34,7 +32,7 @@ void ParseParameters(int argn, char **argv,
   ArgParser args(argn, argv);
 
   // RNG
-  conf.seed = args.Get<ULONG>("seed", 1);
+  conf.seed = args.Get<int>("seed", 1);
 
   // I/O
   conf.input_file = args.Get<std::string>("in", "in");
@@ -42,10 +40,10 @@ void ParseParameters(int argn, char **argv,
   conf.debug_output_file = args.Get<std::string>("debug_out", "tmp");
 
   // Benchmarks
-  conf.iterations = args.Get<ULONG>("i", 10);
+  conf.iterations = args.Get<unsigned int>("i", 10);
 
   // Label propagation
-  conf.prop_iterations = args.Get<ULONG>("pi", 3);
+  conf.prop_iterations = args.Get<unsigned int>("pi", 3);
 
   // Decomposition
   conf.beta = args.Get<double>("beta", 0.5);

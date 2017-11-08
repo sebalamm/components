@@ -23,22 +23,17 @@
 #define _DEFINITIONS_H_
 
 // Constants
-typedef long long LONG;
-typedef unsigned long long ULONG;
-typedef int INT;
-typedef unsigned int UINT;
 typedef int PEID;
-
 const PEID ROOT = 0;
 
 // High/low prec
 typedef long double HPFloat;
 typedef double LPFloat;
-typedef ULONG SInt;
-typedef LONG SSInt;
+typedef long long LONG;
+typedef unsigned long long ULONG;
 
 // Graph access
-typedef ULONG VertexID;
-typedef ULONG EdgeID;
+typedef unsigned long long VertexID;
+typedef unsigned long long EdgeID;
 
 #endif

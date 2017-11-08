@@ -37,8 +37,8 @@ class Timer {
  private:
   /** Returns a timestamp ('now') in seconds (incl. a fractional part). */
   inline double timestamp() {
-    struct timeval tp;
-    gettimeofday(&tp, NULL);
+    struct timeval tp{};
+    gettimeofday(&tp, nullptr);
     return double(tp.tv_sec) + tp.tv_usec / 1000000.;
   }
 

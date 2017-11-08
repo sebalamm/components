@@ -40,7 +40,7 @@ class ArgParser {
   /// Get a named argument's value
   /// \param key the argument name
   /// \param default_value the value to return if the argument wasn't set
-  template <typename T>
+  template<typename T>
   T Get(const std::string &key, const T default_value = T()) const {
     T retval;
     auto it = named_args_.find(key);

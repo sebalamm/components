@@ -27,26 +27,26 @@
 #include "graph_access.h"
 
 class Utility {
-  public: 
-    static void BFS(GraphAccess &g, 
-                    const VertexID &start, 
-                    std::vector<bool> &marked, 
-                    std::vector<VertexID> &parent) {
-      // Standard BFS
-      std::queue<VertexID> q;
-      q.push(start);
-      while (!q.empty()) {
-        VertexID v = q.front(); 
-        q.pop();
-        parent[v] = start;
-        marked[v] = true;
-        g.ForallNeighbors(v, [&](VertexID w) {
-          if (g.IsLocal(w) && !marked[w]) {
-            q.push(w);
-          }
-        });
-      }
+ public:
+  static void BFS(GraphAccess &g,
+                  const VertexID &start,
+                  std::vector<bool> &marked,
+                  std::vector<VertexID> &parent) {
+    // Standard BFS
+    std::queue<VertexID> q;
+    q.push(start);
+    while (!q.empty()) {
+      VertexID v = q.front();
+      q.pop();
+      parent[v] = start;
+      marked[v] = true;
+      g.ForallNeighbors(v, [&](VertexID w) {
+        if (g.IsLocal(w) && !marked[w]) {
+          q.push(w);
+        }
+      });
     }
+  }
 };
 
 #endif

@@ -35,8 +35,8 @@
 
 class GraphIO {
  public:
-  GraphIO() {}
-  virtual ~GraphIO() {}
+  GraphIO() = default;
+  virtual ~GraphIO() = default;
 
   static GraphAccess ReadDistributedGraph(const Config &config, PEID rank,
                                           PEID size, const MPI_Comm &comm) {
@@ -61,9 +61,9 @@ class GraphIO {
     ss >> number_of_edges;
 
     // Read the lines i*ceil(n/size) to (i+1)*floor(n/size) lines of that file
-    VertexID from = rank * ceil(number_of_vertices / (double)size);
+    VertexID from = static_cast<VertexID>(rank * ceil(number_of_vertices / (double) size));
     VertexID to = std::min(
-        (VertexID)((rank + 1) * ceil(number_of_vertices / (double)size) - 1),
+        (VertexID) ((rank + 1) * ceil(number_of_vertices / (double) size) - 1),
         number_of_vertices - 1);
 
     VertexID number_of_local_vertices = to - from + 1;
@@ -88,7 +88,7 @@ class GraphIO {
 
         for (;;) {
           VertexID target;
-          target = (VertexID)strtol(oldstr, &newstr, 10);
+          target = (VertexID) strtol(oldstr, &newstr, 10);
 
           if (target == 0) break;
           oldstr = newstr;
@@ -108,20 +108,19 @@ class GraphIO {
     MPI_Barrier(comm);
 
     GraphAccess G(rank, size);
-    G.StartConstruct(number_of_local_vertices, 2*edge_counter, from);
+    G.StartConstruct(number_of_local_vertices, 2 * edge_counter, from);
 
-    std::vector<VertexID> vertex_dist(size + 1, 0);
-    for (PEID rank = 0; rank <= size; rank++)
-      vertex_dist[rank] = rank * ceil(number_of_vertices / (double)size);
+    std::vector<VertexID> vertex_dist(static_cast<unsigned long>(size + 1), 0);
+    for (PEID peid = 0; peid <= size; peid++)
+      vertex_dist[peid] = static_cast<VertexID>(peid * ceil(number_of_vertices / (double) size));
     G.SetOffsetArray(std::move(vertex_dist));
 
     for (VertexID i = 0; i < number_of_local_vertices; ++i) {
       VertexID v = G.AddVertex();
       G.SetVertexLabel(v, from + v);
 
-      for (VertexID j = 0; j < local_edge_lists[i].size(); j++) {
-        VertexID target = local_edge_lists[i][j] - 1;
-        G.AddEdge(v, target, size);
+      for (VertexID j : local_edge_lists[i]) {
+        G.AddEdge(v, j - 1, size);
       }
     }
     G.FinishConstruct();

@@ -28,7 +28,6 @@
 #include "timer.h"
 
 #include "components/components.h"
-#include "components/propagation.h"
 
 int main(int argn, char **argv) {
   // Init MPI
@@ -53,8 +52,8 @@ int main(int argn, char **argv) {
   double local_time = 0.0;
   double total_time = 0.0;
 
-  SInt user_seed = conf.seed;
-  for (SInt i = 0; i < conf.iterations; ++i) {
+  int user_seed = conf.seed;
+  for (int i = 0; i < conf.iterations; ++i) {
     MPI_Barrier(MPI_COMM_WORLD);
     t.Restart();
 

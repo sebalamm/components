@@ -34,14 +34,14 @@ struct HashedEdge {
 };
 
 struct HashFunction {
-   EdgeID operator() (const HashedEdge e) const {
-     if(e.source < e.target) return e.source*e.k + e.target;
-     else return e.target*e.k + e.source;
-   }
+  EdgeID operator()(const HashedEdge e) const {
+    if (e.source < e.target) return e.source * e.k + e.target;
+    else return e.target * e.k + e.source;
+  }
 };
 
 struct EdgeComparator {
-  bool operator() (const HashedEdge e1, const HashedEdge e2) const {
+  bool operator()(const HashedEdge e1, const HashedEdge e2) const {
     bool eq = (e1.source == e2.source && e1.target == e2.target);
     return (eq || (e1.source == e2.target && e1.target == e2.source));
   }

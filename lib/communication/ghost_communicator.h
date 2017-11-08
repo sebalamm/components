@@ -33,17 +33,17 @@ using Buffer = std::vector<VertexID>;
 
 class GhostCommunicator {
  public:
-  GhostCommunicator(GraphAccess *g, const PEID rank, const PEID size, MPI_Comm communicator) 
-    : communicator_(communicator), g_(g), rank_(rank), size_(size) {
-    packed_pes_.resize(size_, false);
-    adjacent_pes_.resize(size_, false);
-    send_buffers_a_.resize(size_);
-    send_buffers_b_.resize(size_);
+  GhostCommunicator(GraphAccess *g, const PEID rank, const PEID size, MPI_Comm communicator)
+      : communicator_(communicator), g_(g), rank_(rank), size_(size) {
+    packed_pes_.resize(static_cast<unsigned long>(size_), false);
+    adjacent_pes_.resize(static_cast<unsigned long>(size_), false);
+    send_buffers_a_.resize(static_cast<unsigned long>(size_));
+    send_buffers_b_.resize(static_cast<unsigned long>(size_));
     current_send_buffers_ = &send_buffers_a_;
-    current_send_tag_ = 100*size_;
-    current_recv_tag_ = 100*size_;
+    current_send_tag_ = static_cast<unsigned int>(100 * size_);
+    current_recv_tag_ = static_cast<unsigned int>(100 * size_);
   }
-  virtual ~GhostCommunicator() {}
+  virtual ~GhostCommunicator() = default;
 
   GhostCommunicator(const GhostCommunicator &rhs) = default;
   GhostCommunicator(GhostCommunicator &&rhs) = default;
@@ -53,16 +53,16 @@ class GhostCommunicator {
   }
 
   inline PEID GetNumberOfAdjacentPEs() const {
-    PEID counter = 0; 
+    PEID counter = 0;
     for (const bool is_adj : adjacent_pes_)
       if (is_adj) counter++;
     return counter;
   }
 
-  void AddLabel(const VertexID v, const VertexID label);
+  void AddLabel(VertexID v, VertexID label);
 
   void UpdateGhostVertices() {
-    if (current_send_tag_ > 100*size_) ReceiveIncomingMessages();
+    if (current_send_tag_ > 100 * size_) ReceiveIncomingMessages();
     SendMessages();
     ClearAndSwitchBuffers();
   }
@@ -78,7 +78,7 @@ class GhostCommunicator {
   std::vector<Buffer> *current_send_buffers_;
   std::vector<Buffer> send_buffers_a_;
   std::vector<Buffer> send_buffers_b_;
-  std::vector<MPI_Request*> isend_requests_;
+  std::vector<MPI_Request *> isend_requests_;
 
   unsigned int current_send_tag_;
   unsigned int current_recv_tag_;
@@ -92,13 +92,13 @@ class GhostCommunicator {
           (*current_send_buffers_)[pe].emplace_back(0);
       }
 
-      MPI_Request *request = new MPI_Request();
-      MPI_Isend(&(*current_send_buffers_)[pe][0], 
-                (*current_send_buffers_)[pe].size(),
+      auto *request = new MPI_Request();
+      MPI_Isend(&(*current_send_buffers_)[pe][0],
+                static_cast<int>((*current_send_buffers_)[pe].size()),
                 MPI_LONG, pe,
                 current_send_tag_, communicator_, request);
       isend_requests_.push_back(request);
-    } 
+    }
   }
 
   void ReceiveIncomingMessages();

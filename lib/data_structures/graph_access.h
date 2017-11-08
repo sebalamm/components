@@ -43,7 +43,7 @@ struct LocalVertexData {
   bool is_interface_vertex_;
 
   LocalVertexData()
-    : label_(0), is_interface_vertex_(false) {}
+      : label_(0), is_interface_vertex_(false) {}
   LocalVertexData(VertexID label, bool interface)
       : label_(label), is_interface_vertex_(interface) {}
 };
@@ -53,7 +53,7 @@ struct GhostVertexData {
   VertexID global_id_;
 
   GhostVertexData()
-    : rank_(0), global_id_(0) {}
+      : rank_(0), global_id_(0) {}
   GhostVertexData(PEID rank, VertexID global_id)
       : rank_(rank), global_id_(global_id) {}
 };
@@ -92,19 +92,19 @@ class GraphAccess {
   //////////////////////////////////////////////
   // Graph iterators
   //////////////////////////////////////////////
-  template <typename F>
+  template<typename F>
   void ForallLocalVertices(F &&callback) {
     for (VertexID v = 0; v < GetNumberOfLocalVertices(); ++v) {
       callback(v);
     }
   }
 
-  template <typename F>
+  template<typename F>
   void ForallNeighbors(const VertexID v, F &&callback) {
     ForallAdjacentEdges(v, [&](EdgeID e) { callback(edges_[v][e].target_); });
   }
 
-  template <typename F>
+  template<typename F>
   void ForallAdjacentEdges(const VertexID v, F &&callback) {
     for (EdgeID e = 0; e < GetVertexDegree(v); ++e) {
       callback(e);
@@ -129,7 +129,7 @@ class GraphAccess {
   //////////////////////////////////////////////
   // Vertex mappings
   //////////////////////////////////////////////
-  inline void SetOffsetArray(std::vector<VertexID> && vertex_dist) {
+  inline void SetOffsetArray(std::vector<VertexID> &&vertex_dist) {
     offset_array_ = vertex_dist;
   }
 
@@ -166,19 +166,19 @@ class GraphAccess {
 
   inline VertexID GetLocalID(VertexID v) const {
     return IsLocalFromGlobal(v) ? v - local_offset_
-                      : global_to_local_map_.find(v)->second;
+                                : global_to_local_map_.find(v)->second;
   }
 
   inline VertexID GetGlobalID(VertexID v) const {
     return IsLocal(v) ? v + local_offset_
                       : ghost_vertices_data_[v - ghost_offset_].global_id_;
-                      
+
   }
 
   inline PEID GetPE(VertexID v) const {
     return IsLocal(v) ? rank_
                       : ghost_vertices_data_[v - ghost_offset_].rank_;
-                      
+
   }
 
   //////////////////////////////////////////////
@@ -192,7 +192,7 @@ class GraphAccess {
 
   inline EdgeID GetNumberOfEdges() const { return number_of_edges_; }
 
-  void SetVertexLabel(const VertexID v, const VertexID label);
+  void SetVertexLabel(VertexID v, VertexID label);
 
   inline VertexID GetVertexLabel(const VertexID v) const {
     return local_vertices_data_[v].label_;
@@ -224,7 +224,7 @@ class GraphAccess {
   // Manage adjacent PEs
   //////////////////////////////////////////////
   inline PEID GetNumberOfAdjacentPEs() const {
-    PEID counter = 0; 
+    PEID counter = 0;
     for (const bool is_adj : adjacent_pes_)
       if (is_adj) counter++;
     return counter;
@@ -259,7 +259,7 @@ class GraphAccess {
   VertexID number_of_ghost_vertices_;
 
   EdgeID number_of_edges_;
-  
+
   // Vertex mapping
   VertexID local_offset_;
   std::vector<VertexID> offset_array_;

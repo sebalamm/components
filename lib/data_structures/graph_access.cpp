@@ -15,7 +15,7 @@ void GraphAccess::StartConstruct(const VertexID local_n, const EdgeID local_m, c
   local_offset_ = local_offset;
   ghost_offset_ = number_of_local_vertices_;
 
-  adjacent_pes_.resize(size_, false);
+  adjacent_pes_.resize(static_cast<unsigned long>(size_), false);
   ghost_comm_ = new GhostCommunicator(this, rank_, size_, MPI_COMM_WORLD);
 }
 
@@ -79,18 +79,18 @@ void GraphAccess::OutputLocal() {
 
   std::cout << "check label" << std::endl;
   ForallLocalVertices([&](const VertexID v) {
-      std::cout << v << " -> " << GetVertexLabel(v) << " r " << rank << std::endl;
-    });
+    std::cout << v << " -> " << GetVertexLabel(v) << " r " << rank << std::endl;
+  });
   std::cout << std::endl;
 
   std::cout << "check neighbors" << std::endl;
   ForallLocalVertices([&](const VertexID v) {
-      std::cout << v << " -> ";
-      ForallNeighbors(v, [&](VertexID u) {
-        std::cout << u << "(" << IsGhost(u) << "," << GetGlobalID(u) << "," << GetVertexLabel(u) << ") ";
-        });
-      std::cout << " r " << rank << std::endl;
+    std::cout << v << " -> ";
+    ForallNeighbors(v, [&](VertexID u) {
+      std::cout << u << "(" << IsGhost(u) << "," << GetGlobalID(u) << "," << GetVertexLabel(u) << ") ";
     });
+    std::cout << " r " << rank << std::endl;
+  });
   std::cout << std::endl;
 
   // std::cout << "check edges" << std::endl;
