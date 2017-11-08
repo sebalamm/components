@@ -61,10 +61,10 @@ class GraphIO {
     ss >> number_of_edges;
 
     // Read the lines i*ceil(n/size) to (i+1)*floor(n/size) lines of that file
-    auto from = static_cast<VertexID>(rank * ceil(number_of_vertices / (double) size));
-    VertexID to = std::min(
-        (VertexID) ((rank + 1) * ceil(number_of_vertices / (double) size) - 1),
-        number_of_vertices - 1);
+    VertexID leftover_vertices = number_of_vertices % size;
+    VertexID num_vertices = (number_of_vertices / size) + static_cast<VertexID>(rank < leftover_vertices);
+    VertexID from = (rank * num_vertices) + static_cast<VertexID>(rank >= leftover_vertices ? leftover_vertices : 0);
+    VertexID to = from + num_vertices - 1;
 
     VertexID number_of_local_vertices = to - from + 1;
     std::cout << "rank " << rank << " from " << from << " to " << to
@@ -77,21 +77,21 @@ class GraphIO {
     VertexID node_counter = 0;
     EdgeID edge_counter = 0;
 
-    char *oldstr, *newstr;
+    char *old_str, *new_str;
     while (std::getline(in, line)) {
       if (counter > to) break;
       if (line[0] == '%') continue;
 
       if (counter >= from) {
-        oldstr = &line[0];
-        newstr = nullptr;
+        old_str = &line[0];
+        new_str = nullptr;
 
         for (;;) {
           VertexID target;
-          target = (VertexID) strtol(oldstr, &newstr, 10);
+          target = (VertexID) strtol(old_str, &new_str, 10);
 
           if (target == 0) break;
-          oldstr = newstr;
+          old_str = new_str;
 
           local_edge_lists[node_counter].push_back(target);
           edge_counter++;
@@ -111,8 +111,11 @@ class GraphIO {
     G.StartConstruct(number_of_local_vertices, 2 * edge_counter, from);
 
     std::vector<VertexID> vertex_dist(static_cast<unsigned long>(size + 1), 0);
-    for (PEID peid = 0; peid <= size; peid++)
-      vertex_dist[peid] = static_cast<VertexID>(peid * ceil(number_of_vertices / (double) size));
+    for (PEID pe_id = 1; pe_id <= size; pe_id++) {
+      VertexID num_vertices_for_pe = (number_of_vertices / size) + static_cast<VertexID>(pe_id < leftover_vertices);
+      vertex_dist[pe_id] = static_cast<VertexID>((pe_id * num_vertices_for_pe)
+          + static_cast<VertexID>(num_vertices_for_pe >= leftover_vertices ? leftover_vertices : 0));
+    }
     G.SetOffsetArray(std::move(vertex_dist));
 
     for (VertexID i = 0; i < number_of_local_vertices; ++i) {

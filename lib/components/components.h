@@ -42,14 +42,16 @@ class Components {
   virtual ~Components() = default;
 
   void FindComponents(GraphAccess &g) {
+    // if (rank_ == 1) g.OutputLocal();
     FindLocalComponents(g);
     Contraction cont(g, rank_, size_);
     GraphAccess cag = cont.BuildComponentAdjacencyGraph();
     PerformDecomposition(cag);
+    // if (rank_ == 1) cag.OutputLocal();
   }
 
   void Output(GraphAccess &g, const PEID rank) {
-    g.OutputLocal();
+    // if (rank == ROOT) g.OutputLocal();
   }
 
  private:
@@ -60,8 +62,9 @@ class Components {
   Config config_;
 
   void PerformDecomposition(GraphAccess &g) {
-    ExchangeNeighborReductions(g);
-    RunExponentialBFS(g);
+    std::cout << "rank " << rank_ << " perform decomposition" << std::endl;
+    // ExchangeNeighborReductions(g);
+    // RunExponentialBFS(g);
     // DetermineSupernodes(g);
     // GraphAccess cg = ContractDecomposition(g);
     // PerformDecomposition(cg);

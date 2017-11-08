@@ -83,9 +83,9 @@ class Contraction {
 
     num_smaller_components_ = component_prefix_sum - num_local_components_;
 
-    // std::cout << "local components " << num_local_components_ << std::endl;
-    // std::cout << "global components " << num_global_components_ << std::endl;
-    // std::cout << "smaller components " << num_smaller_components_ << std::endl;
+    // std::cout << "rank " << rank_ << " local components " << num_local_components_ << std::endl;
+    // std::cout << "rank " << rank_ << " global components " << num_global_components_ << std::endl;
+    // std::cout << "rank " << rank_ << " smaller components " << num_smaller_components_ << std::endl;
   }
 
   void ComputeLocalContractionMapping() {
@@ -130,7 +130,7 @@ class Contraction {
       }
     });
 
-    // Send ghost vertex updates O(cut size_) (communication)
+    // Send ghost vertex updates O(cut size) (communication)
     for (PEID i = 0; i < (PEID) send_buffers.size(); ++i) {
       if (g_.IsAdjacentPE(i)) {
         if (send_buffers[i].empty()) send_buffers[i].push_back(0);
@@ -145,7 +145,7 @@ class Contraction {
       };
     }
 
-    // Receive updates O(cut size_)
+    // Receive updates O(cut size)
     PEID num_adjacent_pes = g_.GetNumberOfAdjacentPEs();
     PEID recv_messages = 0;
     while (recv_messages < num_adjacent_pes) {
@@ -189,14 +189,14 @@ class Contraction {
   }
 
   void ExchangeGhostContractionEdges() {
-    // Determine edge targets O(cut size_)
+    // Determine edge targets O(cut size)
     std::vector<std::vector<VertexID>> messages(static_cast<unsigned long>(size_));
     for (const auto &e : local_edges_) {
       messages[e.rank].push_back(e.target);
       messages[e.rank].push_back(e.source);
     }
 
-    // Send edges O(cut size_) (communication)
+    // Send edges O(cut size) (communication)
     for (PEID i = 0; i < size_; ++i) {
       if (i != rank_) {
         if (messages[i].empty()) messages[i].push_back(0);
@@ -206,7 +206,7 @@ class Contraction {
       }
     }
 
-    // Receive updates O(cut size_)
+    // Receive updates O(cut size)
     PEID num_adjacent_pes = g_.GetNumberOfAdjacentPEs();
     PEID recv_messages = 0;
     while (recv_messages < num_adjacent_pes) {

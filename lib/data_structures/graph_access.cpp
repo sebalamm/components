@@ -40,6 +40,7 @@ EdgeID GraphAccess::AddEdge(VertexID from, VertexID to, PEID rank) {
       global_to_local_map_[to] = number_of_vertices_++;
       edges_[from].emplace_back(global_to_local_map_[to]);
 
+      if (rank_ == ROOT && rank == size_) std::cout << "get PE from offset for " << to << std::endl;
       PEID neighbor = (rank == size_) ? GetPEFromOffset(to) : rank;
       vertices_.emplace_back(0);
       local_vertices_data_.emplace_back(to, false);
@@ -87,7 +88,8 @@ void GraphAccess::OutputLocal() {
   ForallLocalVertices([&](const VertexID v) {
     std::cout << v << " -> ";
     ForallNeighbors(v, [&](VertexID u) {
-      std::cout << u << "(" << IsGhost(u) << "," << GetGlobalID(u) << "," << GetVertexLabel(u) << ") ";
+      std::cout << u << "(" << IsGhost(u) << "," << GetGlobalID(u) << "," << GetVertexLabel(u) << "," << GetPE(u)
+                << ") ";
     });
     std::cout << " r " << rank << std::endl;
   });
