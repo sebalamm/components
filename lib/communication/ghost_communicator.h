@@ -59,10 +59,19 @@ class GhostCommunicator {
     return counter;
   }
 
-  void AddLabel(VertexID v, VertexID label);
+  void AddLabel(VertexID v, VertexID label, VertexID msg);
 
   void UpdateGhostVertices() {
     if (current_send_tag_ > 100 * size_) ReceiveIncomingMessages();
+    SendMessages();
+    ClearAndSwitchBuffers();
+  }
+
+  void RecvGhostUpdates() {
+    ReceiveIncomingMessages();
+  }
+
+  void SendGhostUpdates() {
     SendMessages();
     ClearAndSwitchBuffers();
   }

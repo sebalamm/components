@@ -32,6 +32,7 @@
 #include "graph_access.h"
 #include "graph_contraction.h"
 #include "utils.h"
+#include "propagation.h"
 
 class Components {
  public:
@@ -42,17 +43,13 @@ class Components {
   virtual ~Components() = default;
 
   void FindComponents(GraphAccess &g) {
-    // if (rank_ == 1) g.OutputLocal();
     FindLocalComponents(g);
     Contraction cont(g, rank_, size_);
     GraphAccess cag = cont.BuildComponentAdjacencyGraph();
     PerformDecomposition(cag);
-    // if (rank_ == 1) cag.OutputLocal();
   }
 
-  void Output(GraphAccess &g, const PEID rank) {
-    // if (rank == ROOT) g.OutputLocal();
-  }
+  void Output(GraphAccess &g, const PEID rank) {}
 
  private:
   // Network information
@@ -62,9 +59,8 @@ class Components {
   Config config_;
 
   void PerformDecomposition(GraphAccess &g) {
-    std::cout << "rank " << rank_ << " perform decomposition" << std::endl;
-    // ExchangeNeighborReductions(g);
-    // RunExponentialBFS(g);
+    // FindGhostReductions(g);
+    RunExponentialBFS(g);
     // DetermineSupernodes(g);
     // GraphAccess cg = ContractDecomposition(g);
     // PerformDecomposition(cg);
@@ -86,93 +82,122 @@ class Components {
     });
   }
 
-  void ExchangeNeighborReductions(GraphAccess &g) {
-    std::vector<PEID> adjacent_pes;
+  // TODO: This is an optimization
+  void FindGhostReductions(GraphAccess &g) {
+    // Find local vertices connected by same ghost vertex
+    std::unordered_map<VertexID, std::vector<VertexID>> vertex_buckets(g.NumberOfGhostVertices());
     g.ForallLocalVertices([&](const VertexID v) {
-      PEID neighbor_pe = 0;
-      bool neighbor = false;
+      ASSERT_TRUE(g.IsInterface(v))
       g.ForallNeighbors(v, [&](const VertexID w) {
-        if (g.IsGhost(w)) {
-          PEID target_pe = g.GetPE(w);
-          // reductions[target_pe].push_back(w);
-        }
+        ASSERT_TRUE(g.IsGhost(w))
+        vertex_buckets[w].push_back(v);
       });
     });
 
-    // Send reductions to neighbors
-    for (PEID p : adjacent_pes) {
-      // Send locally determined CCs
+    // Update labels for local vertices
+    for (auto &bucket : vertex_buckets) {
+      if (bucket.second.size() >= 2) {
+        VertexID min_label = g.GetNumberOfVertices();
+        for (VertexID &v : bucket.second) min_label = std::min(g.GetVertexLabel(v), min_label);
+        for (VertexID &v : bucket.second) g.SetVertexLabel(v, min_label);
+      }
     }
-  }
 
-  void RunExponentialBFS(GraphAccess &g) {
-    // Initialize PRNG
-    std::mt19937 generator(static_cast<unsigned int>(config_.seed + rank_));
-    std::exponential_distribution<double> distribution(config_.beta);
-
-    // Draw exponential deviate per vertex
-    std::vector<double> delta(g.GetNumberOfLocalVertices());
-    g.ForallLocalVertices([&](const VertexID v) { delta[v] = distribution(generator); });
-
-    // Exchange deviates
-    ExchangeDeviates(delta);
-
-    // Each vertex maintains vertices with lower/higher deviate
-    std::vector<std::unordered_set<VertexID>> ancestors(g.GetNumberOfLocalVertices());
-    std::vector<std::unordered_set<VertexID>> successors(g.GetNumberOfLocalVertices());
+    // Find ghost vertices connected by same local vertex
+    std::unordered_map<VertexID, std::vector<VertexID>> ghost_buckets(g.GetNumberOfLocalVertices());
     g.ForallLocalVertices([&](const VertexID v) {
+      ASSERT_TRUE(g.IsInterface(v))
       g.ForallNeighbors(v, [&](const VertexID w) {
-        if (delta[w] < delta[v] - 1) ancestors[v].insert(w);
-        else if (delta[w] - 1 < delta[v]) successors[v].insert(w);
+        ASSERT_TRUE(g.IsGhost(w))
+        ghost_buckets[v].push_back(w);
       });
     });
 
-    // Each vertex with an unprocessed ancestor is idle
-    std::vector<VertexID> active_partition(g.GetNumberOfLocalVertices());
-    std::iota(begin(active_partition), end(active_partition), 0);
-    VertexID num_active_vertices = g.GetNumberOfLocalVertices();
-    for (VertexID i = 0; i < g.GetNumberOfLocalVertices(); ++i) {
-      VertexID v = active_partition[i];
-      if (!ancestors[v].empty()) {
-        std::swap(active_partition[i], active_partition[num_active_vertices - 1]);
-        num_active_vertices--;
+    // Group buckets by PE
+    std::unordered_map<PEID, std::unordered_map<VertexID, std::vector<VertexID>>>
+        pe_ghost_buckets(static_cast<unsigned long>(g.GetNumberOfAdjacentPEs()));
+    for (auto &bucket : ghost_buckets) {
+      for (VertexID &v : bucket.second) {
+        PEID target_pe = g.GetPE(v);
+        pe_ghost_buckets[target_pe][bucket.first].push_back(v);
       }
     }
 
-    // While we still have idle vertices
-    VertexID visited_vertices = 0;
-    while (visited_vertices < g.GetNumberOfLocalVertices()) {
-      for (VertexID i = 0; i < num_active_vertices; ++i) {
-        VertexID v = active_partition[i];
-        // Make changes to successors
-        for (const VertexID w : successors[v]) {
-          g.SetVertexLabel(w, v + 1);
-        }
-      }
-
-      // Propagate successor changes
-      g.UpdateGhostVertices();
-      HandleGhostUpdates();
-
-      // Check for newly activated vertices
-      for (VertexID i = num_active_vertices; i < g.GetNumberOfLocalVertices(); ++i) {
-        VertexID v = active_partition[i];
-        // Search for ancestors to remove
-        for (VertexID w : ancestors[v]) { if (delta[w] >= delta[v] - 1) w = ancestors[v].erase(w); }
-        // Vertex active?
-        if (ancestors[v].empty()) {
-          std::swap(active_partition[i], active_partition[num_active_vertices]);
-          num_active_vertices++;
-        }
+    // Update labels for ghost vertices
+    for (auto &pe_bucket : pe_ghost_buckets) {
+      for (auto &pe_vertex_bucket: pe_bucket.second) {
+        VertexID min_label = g.GetNumberOfVertices();
+        for (VertexID &v : pe_vertex_bucket.second) min_label = std::min(g.GetVertexLabel(v), min_label);
+        for (VertexID &v : pe_vertex_bucket.second) g.SetVertexLabel(v, min_label);
       }
     }
+
+    // Merge local vertices and remove excess edges
+    g.ForallLocalVertices([&](const VertexID v) {
+      // Active component
+      if (g.GetVertexLabel(v) == g.GetGlobalID(v)) {
+        std::vector<std::pair<VertexID, VertexID>> edges_to_remove;
+        g.ForallNeighbors(v, [&](VertexID w) {
+          // Remove edges to inactive neigbors (all ghosts)
+          if (g.GetVertexLabel(w) != g.GetGlobalID(w)) edges_to_remove.emplace_back(v, w);
+        });
+        for (auto &edge : edges_to_remove) g.RemoveEdge(edge.first, edge.second);
+      }
+        // Inactive component
+      else {
+        std::vector<std::pair<VertexID, VertexID>> edges_to_remove;
+        g.ForallNeighbors(v, [&](VertexID w) {
+          // Remove all edges
+          edges_to_remove.emplace_back(v, w);
+        });
+        for (auto &edge : edges_to_remove) g.RemoveEdge(edge.first, edge.second);
+      }
+    });
 
     MPI_Barrier(MPI_COMM_WORLD);
   }
 
-  void ExchangeDeviates(std::vector<double> &deviates) {}
+  void RunExponentialBFS(GraphAccess &g) {
+    // Initialize PRNG
+    std::mt19937 generator(static_cast<unsigned int>(config_.seed + config_.n + rank_));
+    std::exponential_distribution<double> distribution(config_.beta);
 
-  void HandleGhostUpdates() {}
+    // Draw exponential deviate per vertex
+    g.ForallLocalVertices([&](const VertexID v) {
+      g.SetVertexMsg(v, static_cast<VertexID>(distribution(generator)));
+    });
+    // Send initial deviates
+    MPI_Barrier(MPI_COMM_WORLD);
+    g.UpdateGhostVertices();
+
+    unsigned int iteration = 0;
+    bool converged_globally = false;
+    while (!converged_globally) {
+      bool converged_locally = true;
+
+
+      // Perform update for local vertices
+      g.ForallLocalVertices([&](VertexID v) {
+        g.ForallNeighbors(v, [&](VertexID w) {
+          if (g.GetVertexMsg(w) + 1 < g.GetVertexMsg(v)) {
+            g.SetVertexLabel(v, g.GetVertexLabel(w), g.GetVertexMsg(w) + 1);
+            converged_locally = false;
+          }
+        });
+      });
+
+      MPI_Barrier(MPI_COMM_WORLD);
+      g.UpdateGhostVertices();
+
+      // Check if all PEs are done
+      MPI_Allreduce(&converged_locally, &converged_globally, 1, MPI_INT, MPI_MAX, MPI_COMM_WORLD);
+    }
+    // Output converged deviates
+    MPI_Barrier(MPI_COMM_WORLD);
+    g.UpdateGhostVertices();
+    g.OutputLocal();
+  }
+
 };
 
 #endif

@@ -40,12 +40,13 @@ struct Vertex {
 
 struct LocalVertexData {
   VertexID label_;
+  VertexID msg_;
   bool is_interface_vertex_;
 
   LocalVertexData()
-      : label_(0), is_interface_vertex_(false) {}
+      : label_(0), msg_(std::numeric_limits<VertexID>::max() - 1), is_interface_vertex_(false) {}
   LocalVertexData(VertexID label, bool interface)
-      : label_(label), is_interface_vertex_(interface) {}
+      : label_(label), msg_(std::numeric_limits<VertexID>::max() - 1), is_interface_vertex_(interface) {}
 };
 
 struct GhostVertexData {
@@ -73,9 +74,13 @@ class GraphAccess {
         size_(size),
         number_of_vertices_(0),
         number_of_local_vertices_(0),
+        number_of_ghost_vertices_(0),
         number_of_edges_(0),
         vertex_counter_(0),
-        edge_counter_(0) {}
+        edge_counter_(0),
+        local_offset_(0),
+        ghost_offset_(0),
+        ghost_comm_(nullptr) {}
   virtual ~GraphAccess() = default;
 
   GraphAccess(GraphAccess &&rhs) = default;
@@ -194,8 +199,18 @@ class GraphAccess {
 
   void SetVertexLabel(VertexID v, VertexID label);
 
+  void SetVertexLabel(VertexID v, VertexID label, VertexID msg);
+
+  inline void SetVertexMsg(VertexID v, VertexID msg) {
+    SetVertexLabel(v, GetVertexLabel(v), msg);
+  }
+
   inline VertexID GetVertexLabel(const VertexID v) const {
     return local_vertices_data_[v].label_;
+  }
+
+  inline VertexID GetVertexMsg(const VertexID v) const {
+    return local_vertices_data_[v].msg_;
   }
 
   inline VertexID AddVertex() { return vertex_counter_++; }
@@ -206,18 +221,23 @@ class GraphAccess {
     return edges_[v].size();
   }
 
+  void RemoveEdge(VertexID from, VertexID to);
+
   //////////////////////////////////////////////
   // Manage ghost vertices
   //////////////////////////////////////////////
   void UpdateGhostVertices();
 
+  void SendGhostUpdates();
+  void RecvGhostUpdates();
+
   inline VertexID NumberOfGhostVertices() const {
     return vertices_.size() - number_of_local_vertices_ - 1;
   }
 
-  inline void HandleGhostUpdate(const VertexID v, const VertexID label) {
-    VertexID current_label = GetVertexLabel(v);
-    if (label < current_label) SetVertexLabel(v, label);
+  inline void HandleGhostUpdate(const VertexID v, const VertexID label, const VertexID msg) {
+    if (label < GetVertexLabel(v)) SetVertexLabel(v, label);
+    if (msg < GetVertexMsg(v)) SetVertexMsg(v, msg);
   }
 
   //////////////////////////////////////////////
@@ -228,6 +248,14 @@ class GraphAccess {
     for (const bool is_adj : adjacent_pes_)
       if (is_adj) counter++;
     return counter;
+  }
+
+  inline std::vector<PEID> GetAdjacentPEs() const {
+    std::vector<PEID> adjacent_pes;
+    for (PEID i = 0; i < adjacent_pes_.size(); ++i) {
+      if (adjacent_pes_[i]) adjacent_pes.push_back(i);
+    }
+    return adjacent_pes;
   }
 
   inline bool IsAdjacentPE(const PEID pe) const {
@@ -256,15 +284,15 @@ class GraphAccess {
 
   VertexID number_of_vertices_;
   VertexID number_of_local_vertices_;
-  VertexID number_of_ghost_vertices_{};
+  VertexID number_of_ghost_vertices_;
 
   EdgeID number_of_edges_;
 
   // Vertex mapping
-  VertexID local_offset_{};
+  VertexID local_offset_;
   std::vector<VertexID> offset_array_;
 
-  VertexID ghost_offset_{};
+  VertexID ghost_offset_;
   std::unordered_map<VertexID, VertexID> global_to_local_map_;
 
   // Contraction
@@ -274,7 +302,7 @@ class GraphAccess {
   std::vector<bool> adjacent_pes_;
 
   // Communication interface
-  GhostCommunicator *ghost_comm_{};
+  GhostCommunicator *ghost_comm_;
 
   // Temporary counters
   VertexID vertex_counter_;

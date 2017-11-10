@@ -1,4 +1,5 @@
 #include <iostream>
+#include <sstream>
 
 #include "graph_access.h"
 #include "ghost_communicator.h"
@@ -23,10 +24,24 @@ void GraphAccess::UpdateGhostVertices() {
   ghost_comm_->UpdateGhostVertices();
 }
 
+void GraphAccess::SendGhostUpdates() {
+  ghost_comm_->SendGhostUpdates();
+}
+
+void GraphAccess::RecvGhostUpdates() {
+  ghost_comm_->RecvGhostUpdates();
+}
+
 void GraphAccess::SetVertexLabel(const VertexID v, const VertexID label) {
-  if (local_vertices_data_[v].label_ != label && local_vertices_data_[v].is_interface_vertex_)
-    ghost_comm_->AddLabel(v, label);
+  SetVertexLabel(v, label, GetVertexMsg(v));
+}
+
+void GraphAccess::SetVertexLabel(const VertexID v, const VertexID label, const VertexID msg) {
+  if ((local_vertices_data_[v].label_ != label || local_vertices_data_[v].msg_ != msg)
+      && local_vertices_data_[v].is_interface_vertex_)
+    ghost_comm_->AddLabel(v, label, msg);
   local_vertices_data_[v].label_ = label;
+  local_vertices_data_[v].msg_ = msg;
 }
 
 EdgeID GraphAccess::AddEdge(VertexID from, VertexID to, PEID rank) {
@@ -51,6 +66,13 @@ EdgeID GraphAccess::AddEdge(VertexID from, VertexID to, PEID rank) {
   }
 
   return edge_counter_++;
+}
+
+void GraphAccess::RemoveEdge(const VertexID from, const VertexID to) {
+  for (EdgeID i = 0; i < edges_[from].size() - 1; ++i) {
+    if (edges_[from][i].target_ == to) iter_swap(edges_[from].begin() + i, edges_[from].end() - 1);
+  }
+  edges_[from].pop_back();
 }
 
 void GraphAccess::OutputLocal() {
@@ -78,22 +100,22 @@ void GraphAccess::OutputLocal() {
   MPI_Comm_rank(MPI_COMM_WORLD, &rank);
   MPI_Comm_size(MPI_COMM_WORLD, &size);
 
-  std::cout << "check label" << std::endl;
   ForallLocalVertices([&](const VertexID v) {
-    std::cout << v << " -> " << GetVertexLabel(v) << " r " << rank << std::endl;
+    std::stringstream out;
+    out << "[R" << rank << "] " << v << " (label=" << GetVertexLabel(v) << ", msg=" << GetVertexMsg(v) << ", pe="
+        << rank << ")";
+    std::cout << out.str() << std::endl;
   });
-  std::cout << std::endl;
 
-  std::cout << "check neighbors" << std::endl;
   ForallLocalVertices([&](const VertexID v) {
-    std::cout << v << " -> ";
+    std::stringstream out;
+    out << "[R" << rank << "] " << v << " -> ";
     ForallNeighbors(v, [&](VertexID u) {
-      std::cout << u << "(" << IsGhost(u) << "," << GetGlobalID(u) << "," << GetVertexLabel(u) << "," << GetPE(u)
-                << ") ";
+      out << "local_id=" << u << " (is_ghost=" << IsGhost(u) << ", global_id=" << GetGlobalID(u) << ", label="
+          << GetVertexLabel(u) << ", msg=" << GetVertexMsg(u) << ", pe=" << GetPE(u) << ") ";
     });
-    std::cout << " r " << rank << std::endl;
+    std::cout << out.str() << std::endl;
   });
-  std::cout << std::endl;
 
   // std::cout << "check edges" << std::endl;
   // ForallLocalEdges([&](EdgeID e) {

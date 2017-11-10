@@ -38,7 +38,7 @@ class GraphIO {
   GraphIO() = default;
   virtual ~GraphIO() = default;
 
-  static GraphAccess ReadDistributedGraph(const Config &config, PEID rank,
+  static GraphAccess ReadDistributedGraph(Config &config, PEID rank,
                                           PEID size, const MPI_Comm &comm) {
     std::string line;
     std::string filename(config.input_file);
@@ -59,6 +59,9 @@ class GraphIO {
     std::stringstream ss(line);
     ss >> number_of_vertices;
     ss >> number_of_edges;
+
+    config.n = number_of_vertices;
+    config.m = number_of_edges;
 
     // Read the lines i*ceil(n/size) to (i+1)*floor(n/size) lines of that file
     VertexID leftover_vertices = number_of_vertices % size;
