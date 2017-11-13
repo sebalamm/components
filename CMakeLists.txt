@@ -13,6 +13,8 @@ endif (NOT CMAKE_BUILD_TYPE)
 
 set(CMAKE_CXX_FLAGS "${CMAKE_CXX_FLAGS} ${MPI_COMPILE_FLAGS} -DNDEBUG -fno-omit-frame-pointer -Wall -g -O3 -std=c++11")
 
+include_directories(SYSTEM ${MPI_CXX_INCLUDE_PATH})
+
 include_directories(
         app
         lib

@@ -189,6 +189,7 @@ class Components {
       MPI_Barrier(MPI_COMM_WORLD);
       g.UpdateGhostVertices();
 
+      g.UpdateGhostVertices();
       // Check if all PEs are done
       MPI_Allreduce(&converged_locally, &converged_globally, 1, MPI_INT, MPI_MAX, MPI_COMM_WORLD);
     }

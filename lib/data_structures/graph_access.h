@@ -28,6 +28,7 @@
 #include <vector>
 #include <memory>
 #include <cmath>
+#include <limits>
 
 #include "config.h"
 

@@ -105,8 +105,8 @@ class Propagation {
                 static_cast<int>(num_components[rank]),
                 MPI_LONG,
                 &global_components[0],
-                reinterpret_cast<const int *>(&num_components[0]),
-                reinterpret_cast<const int *>(&displ[0]),
+                reinterpret_cast<int *>(&num_components[0]),
+                reinterpret_cast<int *>(&displ[0]),
                 MPI_LONG,
                 ROOT,
                 MPI_COMM_WORLD);
