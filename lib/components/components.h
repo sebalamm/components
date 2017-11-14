@@ -25,6 +25,7 @@
 #include <iostream>
 #include <unordered_set>
 #include <random>
+#include <set>
 
 #include "config.h"
 #include "definitions.h"
@@ -61,7 +62,7 @@ class Components {
   void PerformDecomposition(GraphAccess &g) {
     // FindGhostReductions(g);
     RunExponentialBFS(g);
-    // DetermineSupernodes(g);
+    DetermineSupernodes(g);
     // GraphAccess cg = ContractDecomposition(g);
     // PerformDecomposition(cg);
     // UncontractDecomposition(g, cg);
@@ -166,15 +167,16 @@ class Components {
     g.ForallLocalVertices([&](const VertexID v) {
       g.SetVertexMsg(v, static_cast<VertexID>(distribution(generator)));
     });
+
     // Send initial deviates
-    MPI_Barrier(MPI_COMM_WORLD);
     g.UpdateGhostVertices();
 
     unsigned int iteration = 0;
     bool converged_globally = false;
     while (!converged_globally) {
       bool converged_locally = true;
-
+      // Receive variates
+      g.UpdateGhostVertices();
 
       // Perform update for local vertices
       g.ForallLocalVertices([&](VertexID v) {
@@ -186,17 +188,36 @@ class Components {
         });
       });
 
-      MPI_Barrier(MPI_COMM_WORLD);
-      g.UpdateGhostVertices();
-
-      g.UpdateGhostVertices();
       // Check if all PEs are done
       MPI_Allreduce(&converged_locally, &converged_globally, 1, MPI_INT, MPI_MAX, MPI_COMM_WORLD);
     }
     // Output converged deviates
-    MPI_Barrier(MPI_COMM_WORLD);
-    g.UpdateGhostVertices();
     g.OutputLocal();
+  }
+
+  void DetermineSupernodes(GraphAccess &g) {
+    // Build MPI groups based on local deviates
+    std::cout << "[R" << rank_ << "] global comm " << rank_ << "/" << size_ << std::endl;
+    std::unordered_set<VertexID> groups;
+    g.ForallLocalVertices([&](VertexID v) {
+      VertexID group = g.GetVertexLabel(v);
+      if (groups.find(group) == groups.end()) {
+        groups.insert(group);
+        std::cout << "[R" << rank_ << "] label=" << group << std::endl;
+      }
+    });
+
+    // std::unordered_map<VertexID, MPI_Comm> comms;
+    // for (VertexID id : groups) {
+    //   MPI_Comm label_comm;
+    //   MPI_Comm_split(MPI_COMM_WORLD, static_cast<int>(id), rank_, &label_comm);
+    //   comms[id] = label_comm;
+    //   PEID label_rank, label_size;
+    //   MPI_Comm_rank(label_comm, &label_rank);
+    //   MPI_Comm_size(label_comm, &label_size);
+    //   std::cout << "[R" << rank_ << "] join comm for label= " << id << " with rank " << label_rank << "/" << label_size
+    //     << std::endl;
+    // }
   }
 
 };

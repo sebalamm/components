@@ -11,9 +11,9 @@ if (NOT CMAKE_BUILD_TYPE)
     set(CMAKE_BUILD_TYPE Release)
 endif (NOT CMAKE_BUILD_TYPE)
 
-set(CMAKE_CXX_FLAGS "${CMAKE_CXX_FLAGS} ${MPI_COMPILE_FLAGS} -DNDEBUG -fno-omit-frame-pointer -Wall -g -O3 -std=c++11")
-
 include_directories(SYSTEM ${MPI_CXX_INCLUDE_PATH})
+set(CMAKE_CXX_FLAGS "${CMAKE_CXX_FLAGS} ${MPI_COMPILE_FLAGS} -DNDEBUG -fno-omit-frame-pointer -Wall -g -O3 -std=c++11")
+set(CMAKE_CXX_LINK_FLAGS ${CMAKE_CXX_LINK_FLAGS} ${MPI_LINK_FLAGS})
 
 include_directories(
         app

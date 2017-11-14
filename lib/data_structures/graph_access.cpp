@@ -102,16 +102,17 @@ void GraphAccess::OutputLocal() {
 
   ForallLocalVertices([&](const VertexID v) {
     std::stringstream out;
-    out << "[R" << rank << "] " << v << " (label=" << GetVertexLabel(v) << ", msg=" << GetVertexMsg(v) << ", pe="
+    out << "[R" << rank << "] [V] " << GetGlobalID(v) << " (local_id=" << v << ", label=" << GetVertexLabel(v)
+        << ", msg=" << GetVertexMsg(v) << ", pe="
         << rank << ")";
     std::cout << out.str() << std::endl;
   });
 
   ForallLocalVertices([&](const VertexID v) {
     std::stringstream out;
-    out << "[R" << rank << "] " << v << " -> ";
+    out << "[R" << rank << "] [N] " << GetGlobalID(v) << " -> ";
     ForallNeighbors(v, [&](VertexID u) {
-      out << "local_id=" << u << " (is_ghost=" << IsGhost(u) << ", global_id=" << GetGlobalID(u) << ", label="
+      out << GetGlobalID(u) << " (local_id=" << u << ", label="
           << GetVertexLabel(u) << ", msg=" << GetVertexMsg(u) << ", pe=" << GetPE(u) << ") ";
     });
     std::cout << out.str() << std::endl;

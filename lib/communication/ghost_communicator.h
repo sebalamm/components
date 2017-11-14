@@ -106,6 +106,14 @@ class GhostCommunicator {
                 static_cast<int>((*current_send_buffers_)[pe].size()),
                 MPI_LONG, pe,
                 current_send_tag_, communicator_, request);
+
+      // if ((*current_send_buffers_)[pe].size() > 1) {
+      //   for (int i = 0; i < (*current_send_buffers_)[pe].size() - 1; i += 3) {
+      //     std::cout << "[R" << rank_ << "] send (" << (*current_send_buffers_)[pe][i] << ","
+      //               << (*current_send_buffers_)[pe][i + 1] << "," << (*current_send_buffers_)[pe][i + 2] << ") to pe "
+      //               << pe << " with tag " << current_send_tag_ << " length " << (*current_send_buffers_)[pe].size() << std::endl;
+      //   }
+      // }
       isend_requests_.push_back(request);
     }
   }
