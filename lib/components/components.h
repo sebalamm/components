@@ -196,7 +196,6 @@ class Components {
     // Send initial deviates
     g.UpdateGhostVertices();
 
-    unsigned int iteration = 0;
     bool converged_globally = false;
     while (!converged_globally) {
       bool converged_locally = true;
@@ -234,7 +233,7 @@ class Components {
       RunExponentialBFS(g, true);
     }
     std::cout << "[R" << rank_ << "] done" << std::endl;
-    // g.OutputLocal();
+    g.OutputLocal();
     g.MoveUpContraction();
     MPI_Barrier(MPI_COMM_WORLD);
   }
