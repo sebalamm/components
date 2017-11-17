@@ -29,6 +29,8 @@
 #include <memory>
 #include <cmath>
 #include <limits>
+#include <sstream>
+#include <deque>
 
 #include "config.h"
 
@@ -40,14 +42,40 @@ struct Vertex {
 };
 
 struct LocalVertexData {
-  VertexID label_;
-  VertexID msg_;
+  VertexID local_id_;
   bool is_interface_vertex_;
 
   LocalVertexData()
-      : label_(0), msg_(std::numeric_limits<VertexID>::max() - 1), is_interface_vertex_(false) {}
-  LocalVertexData(VertexID label, bool interface)
-      : label_(label), msg_(std::numeric_limits<VertexID>::max() - 1), is_interface_vertex_(interface) {}
+      : local_id_(0), is_interface_vertex_(false) {}
+  LocalVertexData(const VertexID id, bool interface)
+      : local_id_(id), is_interface_vertex_(interface) {}
+};
+
+struct VertexPayload {
+  VertexID deviate_;
+  VertexID label_;
+  PEID root_;
+
+  VertexPayload()
+      : deviate_(0),
+        label_(0),
+        root_(0) {}
+
+  VertexPayload(VertexID deviate,
+                VertexID label,
+                PEID root)
+      : deviate_(deviate),
+        label_(label),
+        root_(root) {}
+
+  bool operator==(const VertexPayload &rhs) const {
+    return std::tie(deviate_, label_, root_)
+        == std::tie(rhs.deviate_, rhs.label_, rhs.root_);
+  }
+
+  bool operator!=(const VertexPayload &rhs) const {
+    return !(*this == rhs);
+  }
 };
 
 struct GhostVertexData {
@@ -77,11 +105,12 @@ class GraphAccess {
         number_of_local_vertices_(0),
         number_of_ghost_vertices_(0),
         number_of_edges_(0),
-        vertex_counter_(0),
-        edge_counter_(0),
         local_offset_(0),
         ghost_offset_(0),
-        ghost_comm_(nullptr) {}
+        contraction_level_(0),
+        ghost_comm_(nullptr),
+        vertex_counter_(0),
+        edge_counter_(0) {}
   virtual ~GraphAccess() = default;
 
   GraphAccess(GraphAccess &&rhs) = default;
@@ -101,7 +130,7 @@ class GraphAccess {
   template<typename F>
   void ForallLocalVertices(F &&callback) {
     for (VertexID v = 0; v < GetNumberOfLocalVertices(); ++v) {
-      callback(v);
+      callback(local_vertices_data_[v].local_id_);
     }
   }
 
@@ -121,7 +150,7 @@ class GraphAccess {
   // Graph contraction
   //////////////////////////////////////////////
   inline void AllocateContractionVertices() {
-    contraction_vertices_.resize(vertices_.size());
+    contraction_vertices_.resize(GetNumberOfVertices());
   }
 
   inline void SetContractionVertex(VertexID v, VertexID cv) {
@@ -130,6 +159,43 @@ class GraphAccess {
 
   inline VertexID GetContractionVertex(VertexID v) const {
     return contraction_vertices_[v];
+  }
+
+  void DetermineActiveVertices() {
+    // Find inactive vertices
+    std::deque<VertexID> active_vertices;
+    std::deque<VertexID> inactive_vertices;
+    ForallLocalVertices([&](VertexID v) {
+      VertexID local_label = GetVertexLabel(v);
+      // Determine if node is still active
+      bool active = false;
+      ForallNeighbors(v, [&](VertexID w) {
+        if (local_label != GetVertexLabel(w)) active = true;
+      });
+      if (!active) inactive_vertices.push_front(v);
+      else active_vertices.push_front(v);
+    });
+
+    // Increase contraction level
+    active_vertices_[++contraction_level_] = active_vertices.size();
+    vertex_payload_[contraction_level_] =
+        vertex_payload_[contraction_level_ - 1];
+
+    // Swap inactive vertices
+    while (!inactive_vertices.empty() && !active_vertices.empty()) {
+      VertexID last_inactive = inactive_vertices.front();
+      inactive_vertices.pop_front();
+      VertexID last_active = active_vertices.front();
+      active_vertices.pop_front();
+      std::swap(local_vertices_data_[last_inactive],
+                local_vertices_data_[last_active]);
+      std::swap(vertex_payload_[contraction_level_][last_inactive],
+                vertex_payload_[contraction_level_][last_active]);
+    }
+  }
+
+  void MoveUpContraction() {
+    if (contraction_level_ > 0) contraction_level_--;
   }
 
   //////////////////////////////////////////////
@@ -155,7 +221,8 @@ class GraphAccess {
   }
 
   inline bool IsGhost(VertexID v) const {
-    return global_to_local_map_.find(GetGlobalID(v)) != global_to_local_map_.end();
+    return global_to_local_map_.find(GetGlobalID(v))
+        != global_to_local_map_.end();
   }
 
   inline bool IsGhostFromGlobal(VertexID v) const {
@@ -171,12 +238,13 @@ class GraphAccess {
   }
 
   inline VertexID GetLocalID(VertexID v) const {
-    return IsLocalFromGlobal(v) ? v - local_offset_
+    return IsLocalFromGlobal(v) ? local_vertices_data_[v
+        - local_offset_].local_id_
                                 : global_to_local_map_.find(v)->second;
   }
 
   inline VertexID GetGlobalID(VertexID v) const {
-    return IsLocal(v) ? v + local_offset_
+    return IsLocal(v) ? local_vertices_data_[v].local_id_ + local_offset_
                       : ghost_vertices_data_[v - ghost_offset_].global_id_;
 
   }
@@ -193,28 +261,41 @@ class GraphAccess {
   inline VertexID GetNumberOfVertices() const { return number_of_vertices_; }
 
   inline VertexID GetNumberOfLocalVertices() const {
-    return number_of_local_vertices_;
+    return active_vertices_[contraction_level_];
   }
 
   inline EdgeID GetNumberOfEdges() const { return number_of_edges_; }
 
-  void SetVertexLabel(VertexID v, VertexID label);
+  void SetVertexPayload(VertexID v, const VertexPayload &msg);
 
-  void SetVertexLabel(VertexID v, VertexID label, VertexID msg);
+  inline VertexPayload &GetVertexMessage(const VertexID v) {
+    return vertex_payload_[contraction_level_][v];
+  }
 
-  inline void SetVertexMsg(VertexID v, VertexID msg) {
-    SetVertexLabel(v, GetVertexLabel(v), msg);
+  inline std::string GetVertexString(const VertexID v) {
+    std::stringstream out;
+    out << "(" << vertex_payload_[contraction_level_][v].deviate_ << ","
+        << vertex_payload_[contraction_level_][v].label_ << ","
+        << vertex_payload_[contraction_level_][v].root_ << ")";
+    return out.str();
+  }
+
+  inline VertexID GetVertexDeviate(const VertexID v) const {
+    return vertex_payload_[contraction_level_][v].deviate_;
   }
 
   inline VertexID GetVertexLabel(const VertexID v) const {
-    return local_vertices_data_[v].label_;
+    return vertex_payload_[contraction_level_][v].label_;
   }
 
-  inline VertexID GetVertexMsg(const VertexID v) const {
-    return local_vertices_data_[v].msg_;
+  inline PEID GetVertexRoot(const VertexID v) const {
+    return vertex_payload_[contraction_level_][v].root_;
   }
 
-  inline VertexID AddVertex() { return vertex_counter_++; }
+  inline VertexID AddVertex() {
+    local_vertices_data_[vertex_counter_].local_id_ = vertex_counter_;
+    return vertex_counter_++;
+  }
 
   EdgeID AddEdge(VertexID from, VertexID to, PEID rank);
 
@@ -229,16 +310,15 @@ class GraphAccess {
   //////////////////////////////////////////////
   void UpdateGhostVertices();
 
-  void SendGhostUpdates();
-  void RecvGhostUpdates();
-
   inline VertexID NumberOfGhostVertices() const {
-    return vertices_.size() - number_of_local_vertices_ - 1;
+    return number_of_vertices_ - number_of_local_vertices_ - 1;
   }
 
-  inline void HandleGhostUpdate(const VertexID v, const VertexID label, const VertexID msg) {
-    if (label < GetVertexLabel(v)) SetVertexLabel(v, label);
-    if (msg < GetVertexMsg(v)) SetVertexMsg(v, msg);
+  inline void HandleGhostUpdate(const VertexID v,
+                                const VertexID label,
+                                const VertexID deviate,
+                                const PEID root) {
+    SetVertexPayload(v, {deviate, label, root});
   }
 
   //////////////////////////////////////////////
@@ -277,10 +357,10 @@ class GraphAccess {
   PEID rank_, size_;
 
   // Vertices and edges
-  std::vector<Vertex> vertices_;
   std::vector<std::vector<Edge>> edges_;
 
   std::vector<LocalVertexData> local_vertices_data_;
+  std::vector<std::vector<VertexPayload>> vertex_payload_;
   std::vector<GhostVertexData> ghost_vertices_data_;
 
   VertexID number_of_vertices_;
@@ -298,6 +378,8 @@ class GraphAccess {
 
   // Contraction
   std::vector<VertexID> contraction_vertices_;
+  VertexID contraction_level_;
+  std::vector<VertexID> active_vertices_;
 
   // Adjacent PEs
   std::vector<bool> adjacent_pes_;

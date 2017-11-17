@@ -62,7 +62,6 @@ class Components {
   void PerformDecomposition(GraphAccess &g) {
     // FindGhostReductions(g);
     RunExponentialBFS(g);
-    DetermineSupernodes(g);
     // GraphAccess cg = ContractDecomposition(g);
     // PerformDecomposition(cg);
     // UncontractDecomposition(g, cg);
@@ -79,14 +78,16 @@ class Components {
 
     // Set vertex labels for contraction
     g.ForallLocalVertices([&](const VertexID v) {
-      g.SetVertexLabel(v, parent[v]);
+      // g.SetVertexLabel(v, parent[v]);
+      g.SetVertexPayload(v, {0, g.GetVertexLabel(parent[v]), rank_});
     });
   }
 
   // TODO: This is an optimization
   void FindGhostReductions(GraphAccess &g) {
     // Find local vertices connected by same ghost vertex
-    std::unordered_map<VertexID, std::vector<VertexID>> vertex_buckets(g.NumberOfGhostVertices());
+    std::unordered_map<VertexID, std::vector<VertexID>>
+        vertex_buckets(g.NumberOfGhostVertices());
     g.ForallLocalVertices([&](const VertexID v) {
       ASSERT_TRUE(g.IsInterface(v))
       g.ForallNeighbors(v, [&](const VertexID w) {
@@ -99,13 +100,20 @@ class Components {
     for (auto &bucket : vertex_buckets) {
       if (bucket.second.size() >= 2) {
         VertexID min_label = g.GetNumberOfVertices();
-        for (VertexID &v : bucket.second) min_label = std::min(g.GetVertexLabel(v), min_label);
-        for (VertexID &v : bucket.second) g.SetVertexLabel(v, min_label);
+        for (VertexID &v : bucket.second)
+          min_label = std::min(g.GetVertexLabel(v),
+                               min_label);
+        for (VertexID &v : bucket.second)
+          // g.SetVertexLabel(v, min_label);
+          g.SetVertexPayload(v,
+                             {g.GetVertexDeviate(v), min_label,
+                              g.GetVertexRoot(v)});
       }
     }
 
     // Find ghost vertices connected by same local vertex
-    std::unordered_map<VertexID, std::vector<VertexID>> ghost_buckets(g.GetNumberOfLocalVertices());
+    std::unordered_map<VertexID, std::vector<VertexID>>
+        ghost_buckets(g.GetNumberOfLocalVertices());
     g.ForallLocalVertices([&](const VertexID v) {
       ASSERT_TRUE(g.IsInterface(v))
       g.ForallNeighbors(v, [&](const VertexID w) {
@@ -115,8 +123,10 @@ class Components {
     });
 
     // Group buckets by PE
-    std::unordered_map<PEID, std::unordered_map<VertexID, std::vector<VertexID>>>
-        pe_ghost_buckets(static_cast<unsigned long>(g.GetNumberOfAdjacentPEs()));
+    std::unordered_map<PEID,
+                       std::unordered_map<VertexID, std::vector<VertexID>>>
+        pe_ghost_buckets
+        (static_cast<unsigned long>(g.GetNumberOfAdjacentPEs()));
     for (auto &bucket : ghost_buckets) {
       for (VertexID &v : bucket.second) {
         PEID target_pe = g.GetPE(v);
@@ -128,8 +138,13 @@ class Components {
     for (auto &pe_bucket : pe_ghost_buckets) {
       for (auto &pe_vertex_bucket: pe_bucket.second) {
         VertexID min_label = g.GetNumberOfVertices();
-        for (VertexID &v : pe_vertex_bucket.second) min_label = std::min(g.GetVertexLabel(v), min_label);
-        for (VertexID &v : pe_vertex_bucket.second) g.SetVertexLabel(v, min_label);
+        for (VertexID &v : pe_vertex_bucket.second)
+          min_label = std::min(g.GetVertexLabel(v), min_label);
+        for (VertexID &v : pe_vertex_bucket.second)
+          // g.SetVertexLabel(v, min_label);
+          g.SetVertexPayload(v,
+                             {g.GetVertexDeviate(v), min_label,
+                              g.GetVertexRoot(v)});
       }
     }
 
@@ -140,9 +155,12 @@ class Components {
         std::vector<std::pair<VertexID, VertexID>> edges_to_remove;
         g.ForallNeighbors(v, [&](VertexID w) {
           // Remove edges to inactive neigbors (all ghosts)
-          if (g.GetVertexLabel(w) != g.GetGlobalID(w)) edges_to_remove.emplace_back(v, w);
+          if (g.GetVertexLabel(w) != g.GetGlobalID(w))
+            edges_to_remove.emplace_back(v, w);
         });
-        for (auto &edge : edges_to_remove) g.RemoveEdge(edge.first, edge.second);
+        for (auto &edge : edges_to_remove)
+          g.RemoveEdge(edge.first,
+                       edge.second);
       }
         // Inactive component
       else {
@@ -151,21 +169,28 @@ class Components {
           // Remove all edges
           edges_to_remove.emplace_back(v, w);
         });
-        for (auto &edge : edges_to_remove) g.RemoveEdge(edge.first, edge.second);
+        for (auto &edge : edges_to_remove)
+          g.RemoveEdge(edge.first,
+                       edge.second);
       }
     });
 
     MPI_Barrier(MPI_COMM_WORLD);
   }
 
-  void RunExponentialBFS(GraphAccess &g) {
+  void RunExponentialBFS(GraphAccess &g, bool stop = false) {
     // Initialize PRNG
-    std::mt19937 generator(static_cast<unsigned int>(config_.seed + config_.n + rank_));
+    std::mt19937
+        generator(static_cast<unsigned int>(config_.seed + config_.n + rank_));
     std::exponential_distribution<double> distribution(config_.beta);
 
     // Draw exponential deviate per vertex
     g.ForallLocalVertices([&](const VertexID v) {
-      g.SetVertexMsg(v, static_cast<VertexID>(distribution(generator)));
+      g.SetVertexPayload(v,
+                         {static_cast<VertexID>(distribution(generator)),
+                          g.GetVertexLabel(v), g.GetVertexRoot(v)});
+      std::cout << "[R" << rank_ << "] draw deviate " << g.GetGlobalID(v)
+                << " -> " << g.GetVertexDeviate(v) << std::endl;
     });
 
     // Send initial deviates
@@ -181,43 +206,37 @@ class Components {
       // Perform update for local vertices
       g.ForallLocalVertices([&](VertexID v) {
         g.ForallNeighbors(v, [&](VertexID w) {
-          if (g.GetVertexMsg(w) + 1 < g.GetVertexMsg(v)) {
-            g.SetVertexLabel(v, g.GetVertexLabel(w), g.GetVertexMsg(w) + 1);
+          if (g.GetVertexDeviate(w) + 1 < g.GetVertexDeviate(v)) {
+            g.SetVertexPayload(v,
+                               {g.GetVertexDeviate(w) + 1,
+                                g.GetVertexLabel(w),
+                                g.GetVertexRoot(w)});
             converged_locally = false;
           }
         });
       });
 
       // Check if all PEs are done
-      MPI_Allreduce(&converged_locally, &converged_globally, 1, MPI_INT, MPI_MAX, MPI_COMM_WORLD);
+      MPI_Allreduce(&converged_locally,
+                    &converged_globally,
+                    1,
+                    MPI_INT,
+                    MPI_MAX,
+                    MPI_COMM_WORLD);
     }
     // Output converged deviates
-    g.OutputLocal();
-  }
-
-  void DetermineSupernodes(GraphAccess &g) {
-    // Build MPI groups based on local deviates
-    std::cout << "[R" << rank_ << "] global comm " << rank_ << "/" << size_ << std::endl;
-    std::unordered_set<VertexID> groups;
-    g.ForallLocalVertices([&](VertexID v) {
-      VertexID group = g.GetVertexLabel(v);
-      if (groups.find(group) == groups.end()) {
-        groups.insert(group);
-        std::cout << "[R" << rank_ << "] label=" << group << std::endl;
-      }
-    });
-
-    // std::unordered_map<VertexID, MPI_Comm> comms;
-    // for (VertexID id : groups) {
-    //   MPI_Comm label_comm;
-    //   MPI_Comm_split(MPI_COMM_WORLD, static_cast<int>(id), rank_, &label_comm);
-    //   comms[id] = label_comm;
-    //   PEID label_rank, label_size;
-    //   MPI_Comm_rank(label_comm, &label_rank);
-    //   MPI_Comm_size(label_comm, &label_size);
-    //   std::cout << "[R" << rank_ << "] join comm for label= " << id << " with rank " << label_rank << "/" << label_size
-    //     << std::endl;
-    // }
+    g.UpdateGhostVertices();
+    MPI_Barrier(MPI_COMM_WORLD);
+    g.UpdateGhostVertices();
+    if (!stop) {
+      g.DetermineActiveVertices();
+      // g.OutputLocal();
+      RunExponentialBFS(g, true);
+    }
+    std::cout << "[R" << rank_ << "] done" << std::endl;
+    // g.OutputLocal();
+    g.MoveUpContraction();
+    MPI_Barrier(MPI_COMM_WORLD);
   }
 
 };

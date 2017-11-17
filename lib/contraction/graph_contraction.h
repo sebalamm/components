@@ -259,7 +259,8 @@ class Contraction {
 
     for (VertexID i = 0; i < num_local_components_; ++i) {
       VertexID v = cg.AddVertex();
-      cg.SetVertexLabel(v, from + v);
+      // cg.SetVertexLabel(v, from + v);
+      cg.SetVertexPayload(v, {0, from + v, rank_});
 
       for (auto &j : local_edge_lists[i]) {
         VertexID target = j.first;

@@ -33,7 +33,10 @@ using Buffer = std::vector<VertexID>;
 
 class GhostCommunicator {
  public:
-  GhostCommunicator(GraphAccess *g, const PEID rank, const PEID size, MPI_Comm communicator)
+  GhostCommunicator(GraphAccess *g,
+                    const PEID rank,
+                    const PEID size,
+                    MPI_Comm communicator)
       : communicator_(communicator), g_(g), rank_(rank), size_(size) {
     packed_pes_.resize(static_cast<unsigned long>(size_), false);
     adjacent_pes_.resize(static_cast<unsigned long>(size_), false);
@@ -59,19 +62,10 @@ class GhostCommunicator {
     return counter;
   }
 
-  void AddLabel(VertexID v, VertexID label, VertexID msg);
+  void AddMessage(VertexID v, const VertexPayload &msg);
 
   void UpdateGhostVertices() {
     if (current_send_tag_ > 100 * size_) ReceiveIncomingMessages();
-    SendMessages();
-    ClearAndSwitchBuffers();
-  }
-
-  void RecvGhostUpdates() {
-    ReceiveIncomingMessages();
-  }
-
-  void SendGhostUpdates() {
     SendMessages();
     ClearAndSwitchBuffers();
   }
@@ -107,13 +101,16 @@ class GhostCommunicator {
                 MPI_LONG, pe,
                 current_send_tag_, communicator_, request);
 
-      // if ((*current_send_buffers_)[pe].size() > 1) {
-      //   for (int i = 0; i < (*current_send_buffers_)[pe].size() - 1; i += 3) {
-      //     std::cout << "[R" << rank_ << "] send (" << (*current_send_buffers_)[pe][i] << ","
-      //               << (*current_send_buffers_)[pe][i + 1] << "," << (*current_send_buffers_)[pe][i + 2] << ") to pe "
-      //               << pe << " with tag " << current_send_tag_ << " length " << (*current_send_buffers_)[pe].size() << std::endl;
-      //   }
-      // }
+      if ((*current_send_buffers_)[pe].size() > 1) {
+        for (int i = 0; i < (*current_send_buffers_)[pe].size() - 1; i += 4) {
+          std::cout << "[R" << rank_ << "] send ("
+                    << (*current_send_buffers_)[pe][i] << ","
+                    << (*current_send_buffers_)[pe][i + 1] << ","
+                    << (*current_send_buffers_)[pe][i + 2] << ") to pe "
+                    << pe << " with tag " << current_send_tag_ << " length "
+                    << (*current_send_buffers_)[pe].size() << std::endl;
+        }
+      }
       isend_requests_.push_back(request);
     }
   }

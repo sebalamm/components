@@ -57,7 +57,10 @@ class Propagation {
       g.ForallNeighbors(v, [&](VertexID u) {
         min_label = std::min(g.GetVertexLabel(u), min_label);
       });
-      g.SetVertexLabel(v, min_label);
+      // g.SetVertexLabel(v, min_label);
+      g.SetVertexPayload(v,
+                         {g.GetVertexDeviate(v), min_label,
+                          g.GetVertexRoot(v)});
     });
   }
 

@@ -123,7 +123,8 @@ class GraphIO {
 
     for (VertexID i = 0; i < number_of_local_vertices; ++i) {
       VertexID v = G.AddVertex();
-      G.SetVertexLabel(v, from + v);
+      // G.SetVertexLabel(v, from + v);
+      G.SetVertexPayload(v, {0, from + v, rank});
 
       for (VertexID j : local_edge_lists[i]) {
         G.AddEdge(v, j - 1, size);
