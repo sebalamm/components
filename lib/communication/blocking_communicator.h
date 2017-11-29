@@ -19,8 +19,8 @@
  * this program.  If not, see <http://www.gnu.org/licenses/>.
  *****************************************************************************/
 
-#ifndef _GHOST_COMMUNICATOR_H_
-#define _GHOST_COMMUNICATOR_H_
+#ifndef _BLOCKING_COMMUNICATOR_H_
+#define _BLOCKING_COMMUNICATOR_H_
 
 #include <unordered_map>
 #include <vector>
@@ -31,25 +31,23 @@
 
 using Buffer = std::vector<VertexID>;
 
-class GhostCommunicator {
+class BlockingCommunicator {
  public:
-  GhostCommunicator(GraphAccess *g,
+  BlockingCommunicator(GraphAccess *g,
                     const PEID rank,
                     const PEID size,
                     MPI_Comm communicator)
       : communicator_(communicator), g_(g), rank_(rank), size_(size), logging_(false) {
     packed_pes_.resize(static_cast<unsigned long>(size_), false);
     adjacent_pes_.resize(static_cast<unsigned long>(size_), false);
-    send_buffers_a_.resize(static_cast<unsigned long>(size_));
-    send_buffers_b_.resize(static_cast<unsigned long>(size_));
-    current_send_buffers_ = &send_buffers_a_;
-    current_send_tag_ = static_cast<unsigned int>(100 * size_);
-    current_recv_tag_ = static_cast<unsigned int>(100 * size_);
+    send_buffers_.resize(static_cast<unsigned long>(size_));
+    send_tag_ = static_cast<unsigned int>(100 * size_);
+    recv_tag_ = static_cast<unsigned int>(100 * size_);
   }
-  virtual ~GhostCommunicator() = default;
+  virtual ~BlockingCommunicator() = default;
 
-  GhostCommunicator(const GhostCommunicator &rhs) = default;
-  GhostCommunicator(GhostCommunicator &&rhs) = default;
+  BlockingCommunicator(const BlockingCommunicator &rhs) = default;
+  BlockingCommunicator(BlockingCommunicator &&rhs) = default;
 
   inline void SetAdjacentPE(const PEID neighbor, const bool is_adj) {
     adjacent_pes_[neighbor] = is_adj;
@@ -65,9 +63,10 @@ class GhostCommunicator {
   void AddMessage(VertexID v, const VertexPayload &msg);
 
   void UpdateGhostVertices() {
-    if (current_send_tag_ > 100 * size_) ReceiveIncomingMessages();
     SendMessages();
-    ClearAndSwitchBuffers();
+    MPI_Barrier(communicator_);
+    ReceiveMessages();
+    ClearBuffers();
   }
 
   void Logging(bool active);
@@ -80,57 +79,48 @@ class GhostCommunicator {
 
   std::vector<bool> adjacent_pes_;
   std::vector<bool> packed_pes_;
-  std::vector<Buffer> *current_send_buffers_;
-  std::vector<Buffer> send_buffers_a_;
-  std::vector<Buffer> send_buffers_b_;
+  std::vector<Buffer> send_buffers_;
   std::vector<MPI_Request *> isend_requests_;
 
-  unsigned int current_send_tag_;
-  unsigned int current_recv_tag_;
+  unsigned int send_tag_;
+  unsigned int recv_tag_;
 
   bool logging_;
 
   void SendMessages() {
-    current_send_tag_++;
+    send_tag_++;
 
     for (PEID pe = 0; pe < size_; ++pe) {
       if (adjacent_pes_[pe]) {
-        if ((*current_send_buffers_)[pe].empty())
-          (*current_send_buffers_)[pe].emplace_back(0);
-      }
+        if (send_buffers_[pe].empty())
+          send_buffers_[pe].emplace_back(0);
+        auto *request = new MPI_Request();
+        MPI_Isend(&send_buffers_[pe][0],
+                  static_cast<int>(send_buffers_[pe].size()),
+                  MPI_LONG, pe,
+                  send_tag_, communicator_, request);
 
-      auto *request = new MPI_Request();
-      MPI_Isend(&(*current_send_buffers_)[pe][0],
-                static_cast<int>((*current_send_buffers_)[pe].size()),
-                MPI_LONG, pe,
-                current_send_tag_, communicator_, request);
-
-      if (logging_) {
-        if ((*current_send_buffers_)[pe].size() > 1) {
-          for (int i = 0; i < (*current_send_buffers_)[pe].size() - 1; i += 4) {
-            std::cout << "[R" << rank_ << "] send ("
-                      << (*current_send_buffers_)[pe][i + 1] << ","
-                      << (*current_send_buffers_)[pe][i] << ","
-                      << (*current_send_buffers_)[pe][i + 2] << ") to pe "
-                      << pe << " with tag " << current_send_tag_ << " length "
-                      << (*current_send_buffers_)[pe].size() << std::endl;
+        if (logging_) {
+          if (send_buffers_[pe].size() > 1) {
+            for (int i = 0; i < send_buffers_[pe].size() - 1; i += 4) {
+              std::cout << "[R" << rank_ << "] send [" << send_buffers_[pe][i] << "]("
+                        << send_buffers_[pe][i + 1] << ","
+                        << send_buffers_[pe][i + 2] << ","
+                        << send_buffers_[pe][i + 3] << ") to pe "
+                        << pe << " with tag " << send_tag_ << " length "
+                        << send_buffers_[pe].size() << std::endl;
+            }
           }
         }
+        isend_requests_.push_back(request);
       }
-      isend_requests_.push_back(request);
     }
   }
 
-  void ReceiveIncomingMessages();
+  void ReceiveMessages();
 
-  void ClearAndSwitchBuffers() {
-    if (current_send_buffers_ == &send_buffers_a_) {
-      for (int i = 0; i < size_; ++i) send_buffers_b_[i].clear();
-      current_send_buffers_ = &send_buffers_b_;
-    } else {
-      for (int i = 0; i < size_; ++i) send_buffers_a_[i].clear();
-      current_send_buffers_ = &send_buffers_a_;
-    }
+  void ClearBuffers() {
+    for (int i = 0; i < size_; ++i) send_buffers_[i].clear();
   }
 };
 

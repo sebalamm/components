@@ -1,6 +1,5 @@
 /******************************************************************************
- * components.h
- *
+ * components.h *
  * Distributed computation of connected components
  ******************************************************************************
  * Copyright (C) 2017 Sebastian Lamm <lamm@kit.edu>
@@ -40,7 +39,8 @@ class Components {
   Components(const Config &conf, const PEID rank, const PEID size)
       : rank_(rank),
         size_(size),
-        config_(conf) {}
+        config_(conf),
+        iteration_(0) {}
   virtual ~Components() = default;
 
   void FindComponents(GraphAccess &g) {
@@ -50,7 +50,10 @@ class Components {
     PerformDecomposition(cag);
   }
 
-  void Output(GraphAccess &g, const PEID rank) {}
+  void Output(GraphAccess &g) {
+    MPI_Barrier(MPI_COMM_WORLD);
+    g.OutputLabels();
+  }
 
  private:
   // Network information
@@ -59,12 +62,16 @@ class Components {
   // Configuration
   Config config_;
 
+  // Algorithm state
+  unsigned int iteration_;
+
   void PerformDecomposition(GraphAccess &g) {
     // FindGhostReductions(g);
+    // g.Logging(true);
     RunExponentialBFS(g);
-    // GraphAccess cg = ContractDecomposition(g);
-    // PerformDecomposition(cg);
-    // UncontractDecomposition(g, cg);
+    PropagateLabelsUp(g);
+    PropagateLabelsDown(g);
+    Output(g);
   }
 
   void FindLocalComponents(GraphAccess &g) {
@@ -79,7 +86,7 @@ class Components {
     // Set vertex labels for contraction
     g.ForallLocalVertices([&](const VertexID v) {
       // g.SetVertexLabel(v, parent[v]);
-      g.SetVertexPayload(v, {0, g.GetVertexLabel(parent[v]), rank_});
+      g.SetVertexPayload(v, {g.GetVertexDeviate(v), g.GetVertexLabel(parent[v]), rank_});
     });
   }
 
@@ -174,45 +181,42 @@ class Components {
                        edge.second);
       }
     });
-
-    MPI_Barrier(MPI_COMM_WORLD);
   }
 
-  void RunExponentialBFS(GraphAccess &g, bool stop = false) {
+  void RunExponentialBFS(GraphAccess &g) {
     // Initialize PRNG
-    std::mt19937
-        generator(static_cast<unsigned int>(config_.seed + config_.n + rank_));
     std::exponential_distribution<double> distribution(config_.beta);
 
     // Draw exponential deviate per vertex
     g.ForallLocalVertices([&](const VertexID v) {
+      std::mt19937
+          generator(static_cast<unsigned int>(config_.seed + g.GetVertexLabel(v) + iteration_));
+      g.SetParent(v, v);
       g.SetVertexPayload(v,
                          {static_cast<VertexID>(distribution(generator)),
                           g.GetVertexLabel(v), g.GetVertexRoot(v)});
-      std::cout << "[R" << rank_ << "] draw deviate " << g.GetGlobalID(v)
-                << " -> " << g.GetVertexDeviate(v) << std::endl;
+      // std::cout << "[R" << rank_ << ":" << iteration_ << "] draw deviate " << g.GetGlobalID(v) << " -> " << g.GetVertexDeviate(v) << std::endl;
     });
 
-    // Send initial deviates
-    g.UpdateGhostVertices();
-
-    bool converged_globally = false;
-    while (!converged_globally) {
-      bool converged_locally = true;
+    int converged_globally = 0;
+    while (converged_globally == 0) {
+      int converged_locally = 1;
       // Receive variates
       g.UpdateGhostVertices();
 
       // Perform update for local vertices
       g.ForallLocalVertices([&](VertexID v) {
+        auto smallest_payload = g.GetVertexMessage(v);
         g.ForallNeighbors(v, [&](VertexID w) {
-          if (g.GetVertexDeviate(w) + 1 < g.GetVertexDeviate(v)) {
-            g.SetVertexPayload(v,
-                               {g.GetVertexDeviate(w) + 1,
-                                g.GetVertexLabel(w),
-                                g.GetVertexRoot(w)});
-            converged_locally = false;
+          if (g.GetVertexDeviate(w) + 1 < smallest_payload.deviate_ ||
+              (g.GetVertexDeviate(w) + 1 == smallest_payload.deviate_ && 
+               g.GetVertexLabel(w) < smallest_payload.label_)) {
+            g.SetParent(v, w);
+            smallest_payload = {g.GetVertexDeviate(w) + 1, g.GetVertexLabel(w), g.GetVertexRoot(w)};
+            converged_locally = 0;
           }
         });
+        g.SetVertexPayload(v, smallest_payload);
       });
 
       // Check if all PEs are done
@@ -220,24 +224,35 @@ class Components {
                     &converged_globally,
                     1,
                     MPI_INT,
-                    MPI_MAX,
+                    MPI_MIN,
                     MPI_COMM_WORLD);
     }
     // Output converged deviates
     g.UpdateGhostVertices();
-    MPI_Barrier(MPI_COMM_WORLD);
-    g.UpdateGhostVertices();
-    if (!stop) {
-      g.DetermineActiveVertices();
-      // g.OutputLocal();
-      RunExponentialBFS(g, true);
-    }
-    std::cout << "[R" << rank_ << "] done" << std::endl;
-    g.OutputLocal();
-    g.MoveUpContraction();
-    MPI_Barrier(MPI_COMM_WORLD);
+    g.DetermineActiveVertices();
+
+    // Count remaining number of vertices
+    VertexID local_vertices = 0;
+    VertexID global_vertices = 0;
+    g.ForallLocalVertices([&](VertexID v) { local_vertices++; });
+    // Check if all PEs are done
+    MPI_Allreduce(&local_vertices,
+                  &global_vertices,
+                  1,
+                  MPI_LONG,
+                  MPI_SUM,
+                  MPI_COMM_WORLD);
+    iteration_++;
+    if (global_vertices > 0) RunExponentialBFS(g);
   }
 
+  void PropagateLabelsUp(GraphAccess &g) {
+    g.MoveUpContraction();
+  }
+
+  void PropagateLabelsDown(GraphAccess &g) {
+    g.MoveDownContraction();
+  }
 };
 
 #endif

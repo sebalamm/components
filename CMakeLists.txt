@@ -32,6 +32,7 @@ set(SOURCES
         lib
         lib/communication
         lib/communication/ghost_communicator.cpp
+        lib/communication/blocking_communicator.cpp
         lib/components
         lib/contraction
         lib/data_structures

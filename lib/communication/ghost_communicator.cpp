@@ -48,18 +48,20 @@ void GhostCommunicator::ReceiveIncomingMessages() {
     //           << "] with tag " << current_recv_tag_ << " length " << message_length << std::endl;
     if (message_length == 1) continue;
 
-    for (int i = 0; i < message_length - 1; i += 4) {
-      VertexID local_id = g_->GetLocalID(message[i]);
-      VertexID deviate = message[i + 1];
-      VertexID label = message[i + 2];
-      PEID root = static_cast<PEID>(message[i + 3]);
-      std::cout << "[R" << rank_ << "] recv (" << message[i] << "," << deviate
-                << "," << label << ") from pe "
-                << st.MPI_SOURCE << " with tag " << current_recv_tag_
-                << " length " << message_length << " ["
-                << messages_recv << "/" << GetNumberOfAdjacentPEs() << "]"
-                << std::endl;
-      g_->HandleGhostUpdate(local_id, label, deviate, root);
+    if (logging_) {
+      for (int i = 0; i < message_length - 1; i += 4) {
+        VertexID local_id = g_->GetLocalID(message[i]);
+        VertexID deviate = message[i + 1];
+        VertexID label = message[i + 2];
+        PEID root = static_cast<PEID>(message[i + 3]);
+        std::cout << "[R" << rank_ << "] recv (" << deviate << "," << label
+                  << "," << root << ") from pe "
+                  << st.MPI_SOURCE << " with tag " << current_recv_tag_
+                  << " length " << message_length << " ["
+                  << messages_recv << "/" << GetNumberOfAdjacentPEs() << "]"
+                  << std::endl;
+        g_->HandleGhostUpdate(local_id, label, deviate, root);
+      }
     }
   }
 
@@ -67,5 +69,9 @@ void GhostCommunicator::ReceiveIncomingMessages() {
   //           << st.MPI_SOURCE << " with tag " << current_recv_tag_ << " length " << message_length << " ["
   //           << messages_recv << "/" << GetNumberOfAdjacentPEs() << "]" << std::endl;
   isend_requests_.clear();
+}
+
+void GhostCommunicator::Logging(bool active) {
+  logging_ = active;
 }
 

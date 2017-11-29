@@ -56,7 +56,7 @@ struct VertexPayload {
   PEID root_;
 
   VertexPayload()
-      : deviate_(0),
+      : deviate_(std::numeric_limits<VertexID>::max() - 1),
         label_(0),
         root_(0) {}
 
@@ -94,10 +94,10 @@ struct Edge {
   explicit Edge(VertexID target) : target_(target) {}
 };
 
-class GhostCommunicator;
+class BlockingCommunicator;
 class GraphAccess {
  public:
-  GraphAccess(const PEID rank, const PEID size)
+  GraphAccess(const PEID rank, const PEID size) 
       : rank_(rank),
         size_(size),
         number_of_vertices_(0),
@@ -106,6 +106,7 @@ class GraphAccess {
         local_offset_(0),
         ghost_offset_(0),
         contraction_level_(0),
+        max_contraction_level_(0),
         ghost_comm_(nullptr),
         vertex_counter_(0),
         edge_counter_(0) {}
@@ -120,7 +121,12 @@ class GraphAccess {
   //////////////////////////////////////////////
   void StartConstruct(VertexID local_n, EdgeID local_m, VertexID local_offset);
 
-  void FinishConstruct() { number_of_edges_ = edge_counter_; }
+  void FinishConstruct() { 
+    number_of_edges_ = edge_counter_; 
+    ForallLocalVertices([&](VertexID v) {
+      active_edges_[contraction_level_][v].resize(GetVertexDegree(v), true);
+    });
+  }
 
   //////////////////////////////////////////////
   // Graph iterators
@@ -128,7 +134,7 @@ class GraphAccess {
   template<typename F>
   void ForallLocalVertices(F &&callback) {
     for (VertexID v = 0; v < GetNumberOfLocalVertices(); ++v) {
-      if (is_active_[contraction_level_][v]) callback(v);
+      if (active_vertices_[contraction_level_][v]) callback(v);
     }
   }
 
@@ -140,7 +146,7 @@ class GraphAccess {
   template<typename F>
   void ForallAdjacentEdges(const VertexID v, F &&callback) {
     for (EdgeID e = 0; e < GetVertexDegree(v); ++e) {
-      callback(e);
+      if (active_edges_[contraction_level_][v][e]) callback(e);
     }
   }
 
@@ -161,23 +167,148 @@ class GraphAccess {
 
   void DetermineActiveVertices() {
     // Find active vertices
-    is_active_[contraction_level_ + 1].resize(number_of_local_vertices_, false);
+    active_vertices_.resize(contraction_level_ + 2);
+    active_edges_.resize(contraction_level_ + 2);
+    vertex_payload_.resize(contraction_level_ + 2);
+    parent_.resize(contraction_level_ + 2);
+
+    active_vertices_[contraction_level_ + 1].resize(number_of_local_vertices_, false);
+    active_edges_[contraction_level_ + 1].resize(number_of_local_vertices_);
+    vertex_payload_[contraction_level_ + 1].resize(number_of_vertices_);
+    parent_[contraction_level_ + 1].resize(number_of_vertices_);
 
     ForallLocalVertices([&](VertexID v) {
-      VertexID local_label = GetVertexLabel(v);
+      VertexID last_label = GetVertexLabel(v);
+      active_edges_[contraction_level_ + 1][v].resize(GetVertexDegree(v), false);
+      vertex_payload_[contraction_level_ + 1][v] = {std::numeric_limits<VertexID>::max() - 1, last_label, rank_};
       bool active = false;
-      ForallNeighbors(v, [&](VertexID w) {
-        if (local_label != GetVertexLabel(w)) active = true;
+      ForallAdjacentEdges(v, [&](EdgeID e) {
+        VertexID w = edges_[v][e].target_;
+        if (last_label != GetVertexLabel(w)) {
+          active = true;
+          active_edges_[contraction_level_ + 1][v][e] = true;
+        }
       });
-      if (active) is_active_[contraction_level_ + 1][v] = true;
+      active_vertices_[contraction_level_ + 1][v] = active;
     });
 
     // Increase contraction level
     contraction_level_++;
+    max_contraction_level_++;
   }
 
   void MoveUpContraction() {
-    if (contraction_level_ > 0) contraction_level_--;
+    while (contraction_level_ > 0) {
+      contraction_level_--;
+      // Send current label to root
+      ForallLocalVertices([&](VertexID v) {
+        VertexID current_label = vertex_payload_[contraction_level_ + 1][v].label_;
+        VertexID prev_label = vertex_payload_[contraction_level_][v].label_;
+        PEID current_root = vertex_payload_[contraction_level_ + 1][v].root_;
+        PEID prev_root = vertex_payload_[contraction_level_][v].root_;
+        // Check if the label changed during the current phase
+        if (current_label != prev_label) {
+          // Update local label
+          // std::cout << "[R"  << rank_ << ":" << contraction_level_ 
+          //           << "] [Up] update label " << prev_label << " to "
+          //           << current_label << std::endl;
+          if (prev_root != rank_) {
+            // Send updates to root if divergent
+            // std::cout << "[R"  << rank_ << ":" << contraction_level_ 
+            //           << "] [Up Comm] send label " << current_label << " to prev root "
+            //           << prev_root << std::endl;
+            auto *request = new MPI_Request();
+            std::vector<VertexID> root_update = {current_label, prev_label};
+            MPI_Isend(&root_update[0], root_update.size(), MPI_LONG, prev_root, 0, MPI_COMM_WORLD, request);
+          }
+          // vertex_payload_[contraction_level_][v].label_ = current_label;
+          // SetVertexPayload(v, {0, vertex_payload_[contraction_level_][v].label_, rank_});
+          SetVertexPayload(v, {0, current_label, rank_});
+        }
+      });
+      MPI_Barrier(MPI_COMM_WORLD);
+
+      // Receive updates send to roots
+      MPI_Status st{};
+      int flag = 1;
+      do {
+        MPI_Iprobe(MPI_ANY_SOURCE, 0, MPI_COMM_WORLD, &flag, &st);
+        if (flag) {
+          int message_length;
+          MPI_Get_count(&st, MPI_LONG, &message_length);
+
+          std::vector<VertexID> update(message_length);
+          MPI_Status rst{};
+          MPI_Recv(&update[0], message_length, MPI_LONG, st.MPI_SOURCE, 0, MPI_COMM_WORLD, &rst);
+          // std::cout << "[R"  << rank_ << ":" << contraction_level_ 
+          //           << "] [Up Comm] recv label " << update[0] << " from "
+          //           << st.MPI_SOURCE << " on vertex " << update[1] << std::endl;
+          VertexID local_id = GetLocalID(update[1]);
+          SetVertexPayload(local_id, {0, update[0], rank_});
+        }
+      } while (flag);
+    }
+    UpdateGhostVertices();
+  }
+
+  void MoveDownContraction() {
+    while (contraction_level_ < max_contraction_level_) {
+      // Update labels from previous level
+      if (contraction_level_ > 0) {
+        ForallLocalVertices([&](VertexID v) {
+          VertexID current_label = vertex_payload_[contraction_level_][v].label_;
+          VertexID prev_label = vertex_payload_[contraction_level_ - 1][v].label_;
+          PEID current_root = vertex_payload_[contraction_level_][v].root_;
+          PEID prev_root = vertex_payload_[contraction_level_ - 1][v].root_;
+          // Check if the label changed during the current phase
+          if (current_label != prev_label) {
+            // Update local label
+            // std::cout << "[R"  << rank_ << ":" << contraction_level_ 
+            //           << "] [Down] update label " << current_label << " to "
+            //           << prev_label << " for " << GetGlobalID(v) << std::endl;
+          }
+          // vertex_payload_[contraction_level_][v].label_ = current_label;
+          // SetVertexPayload(v, {0, vertex_payload_[contraction_level_][v].label_, rank_});
+          SetVertexPayload(v, {0, prev_label, rank_});
+        });
+      }
+      MPI_Barrier(MPI_COMM_WORLD);
+      
+      int converged_globally = 0;
+      while (converged_globally == 0) {
+        int converged_locally = 1;
+        // Receive variates
+        UpdateGhostVertices();
+
+        // Send current label from root
+        ForallLocalVertices([&](VertexID v) {
+          if (GetVertexLabel(GetParent(v)) != GetVertexLabel(v)) {
+            // std::cout << "[R"  << rank_ << ":" << contraction_level_ 
+            //           << "] [Down Comm] update label " << GetVertexLabel(v) << " to "
+            //           << GetVertexLabel(GetParent(v)) << " for " << GetGlobalID(v) << std::endl;
+            SetVertexPayload(v, {0, GetVertexLabel(GetParent(v)), rank_});
+            converged_locally = false;
+          }
+        });
+
+        // Check if all PEs are done
+        MPI_Allreduce(&converged_locally, &converged_globally, 1, MPI_INT, MPI_MIN, MPI_COMM_WORLD);
+      }
+      UpdateGhostVertices();
+      contraction_level_++;
+    }
+
+    // Reduce to skip empty graph
+    contraction_level_--;
+    while (contraction_level_ > 0) {
+      contraction_level_--;
+      // Send current label to root
+      ForallLocalVertices([&](VertexID v) {
+        VertexID current_label = vertex_payload_[contraction_level_ + 1][v].label_;
+        if (active_vertices_[contraction_level_ + 1][v]) SetVertexPayload(v, {0, current_label, rank_});
+      });
+      MPI_Barrier(MPI_COMM_WORLD);
+    } 
   }
 
   //////////////////////////////////////////////
@@ -250,27 +381,39 @@ class GraphAccess {
   void SetVertexPayload(VertexID v, const VertexPayload &msg);
 
   inline VertexPayload &GetVertexMessage(const VertexID v) {
-    return vertex_payload_[v];
+    return vertex_payload_[contraction_level_][v];
+  }
+
+  void SetVertexMessage(const VertexID v, const VertexPayload &msg) {
+    vertex_payload_[contraction_level_][v] = msg;
+  }
+
+  void SetParent(const VertexID v, const VertexID parent) {
+    parent_[contraction_level_][v] = parent;
   }
 
   inline std::string GetVertexString(const VertexID v) {
     std::stringstream out;
-    out << "(" << vertex_payload_[v].deviate_ << ","
-        << vertex_payload_[v].label_ << ","
-        << vertex_payload_[v].root_ << ")";
+    out << "(" << GetVertexDeviate(v) << ","
+        << GetVertexLabel(v) << ","
+        << GetVertexRoot(v) << ")";
     return out.str();
   }
 
   inline VertexID GetVertexDeviate(const VertexID v) const {
-    return vertex_payload_[v].deviate_;
+    return vertex_payload_[contraction_level_][v].deviate_;
   }
 
   inline VertexID GetVertexLabel(const VertexID v) const {
-    return vertex_payload_[v].label_;
+    return vertex_payload_[contraction_level_][v].label_;
   }
 
   inline PEID GetVertexRoot(const VertexID v) const {
-    return vertex_payload_[v].root_;
+    return vertex_payload_[contraction_level_][v].root_;
+  }
+
+  inline PEID GetParent(const VertexID v) const {
+    return parent_[contraction_level_][v];
   }
 
   inline VertexID AddVertex() {
@@ -332,6 +475,10 @@ class GraphAccess {
   //////////////////////////////////////////////
   void OutputLocal();
 
+  void OutputLabels();
+
+  void Logging(bool active);
+
  private:
   // Network information
   PEID rank_, size_;
@@ -340,8 +487,9 @@ class GraphAccess {
   std::vector<std::vector<Edge>> edges_;
 
   std::vector<LocalVertexData> local_vertices_data_;
-  std::vector<VertexPayload> vertex_payload_;
   std::vector<GhostVertexData> ghost_vertices_data_;
+  std::vector<std::vector<VertexPayload>> vertex_payload_;
+  std::vector<std::vector<VertexID>> parent_;
 
   VertexID number_of_vertices_;
   VertexID number_of_local_vertices_;
@@ -356,15 +504,16 @@ class GraphAccess {
   std::unordered_map<VertexID, VertexID> global_to_local_map_;
 
   // Contraction
-  VertexID contraction_level_;
+  VertexID contraction_level_, max_contraction_level_;
   std::vector<VertexID> contraction_vertices_;
-  std::vector<std::vector<bool>> is_active_;
+  std::vector<std::vector<bool>> active_vertices_;
+  std::vector<std::vector<std::vector<bool>>> active_edges_;
 
   // Adjacent PEs
   std::vector<bool> adjacent_pes_;
 
   // Communication interface
-  GhostCommunicator *ghost_comm_;
+  BlockingCommunicator *ghost_comm_;
 
   // Temporary counters
   VertexID vertex_counter_;
