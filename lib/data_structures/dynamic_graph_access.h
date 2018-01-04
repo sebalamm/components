@@ -1,5 +1,5 @@
 /******************************************************************************
- * graph_access.h
+ * dynamic_graph_access.h
  *
  * Data structure for maintaining the (undirected) graph
  ******************************************************************************
@@ -19,8 +19,8 @@
  * this program.  If not, see <http://www.gnu.org/licenses/>.
  *****************************************************************************/
 
-#ifndef _GRAPH_ACCESS_H_
-#define _GRAPH_ACCESS_H_
+#ifndef _DYNAMIC_GRAPH_ACCESS_H_
+#define _DYNAMIC_GRAPH_ACCESS_H_
 
 #include <mpi.h>
 
@@ -31,7 +31,6 @@
 #include <limits>
 #include <sstream>
 #include <deque>
-#include <tuple>
 
 #include "config.h"
 
@@ -135,7 +134,7 @@ class GraphAccess {
   template<typename F>
   void ForallLocalVertices(F &&callback) {
     for (VertexID v = 0; v < GetNumberOfLocalVertices(); ++v) {
-      callback(v);
+      if (active_vertices_[contraction_level_][v]) callback(v);
     }
   }
 
@@ -147,7 +146,7 @@ class GraphAccess {
   template<typename F>
   void ForallAdjacentEdges(const VertexID v, F &&callback) {
     for (EdgeID e = 0; e < GetVertexDegree(v); ++e) {
-      callback(e);
+      if (active_edges_[contraction_level_][v][e]) callback(e);
     }
   }
 
@@ -167,57 +166,34 @@ class GraphAccess {
   }
 
   void DetermineActiveVertices() {
-    // active_vertices_.resize(contraction_level_ + 2);
-    // active_edges_.resize(contraction_level_ + 2);
-    // vertex_payload_.resize(contraction_level_ + 2);
-    // parent_.resize(contraction_level_ + 2);
+    // Find active vertices
+    active_vertices_.resize(contraction_level_ + 2);
+    active_edges_.resize(contraction_level_ + 2);
+    vertex_payload_.resize(contraction_level_ + 2);
+    parent_.resize(contraction_level_ + 2);
 
-    // active_vertices_[contraction_level_ + 1].resize(number_of_local_vertices_, false);
-    // active_edges_[contraction_level_ + 1].resize(number_of_local_vertices_);
-    // vertex_payload_[contraction_level_ + 1].resize(number_of_vertices_);
-    // parent_[contraction_level_ + 1].resize(number_of_vertices_);
+    active_vertices_[contraction_level_ + 1].resize(number_of_local_vertices_, false);
+    active_edges_[contraction_level_ + 1].resize(number_of_local_vertices_);
+    vertex_payload_[contraction_level_ + 1].resize(number_of_vertices_);
+    parent_[contraction_level_ + 1].resize(number_of_vertices_);
 
-    // Determine remaining active vertices
     ForallLocalVertices([&](VertexID v) {
-      std::vector<std::tuple<VertexID, VertexID, VertexID>> root_update;
-      VertexID vlabel = GetVertexLabel(v);
+      VertexID last_label = GetVertexLabel(v);
+      active_edges_[contraction_level_ + 1][v].resize(GetVertexDegree(v), false);
+      vertex_payload_[contraction_level_ + 1][v] = {std::numeric_limits<VertexID>::max() - 1, last_label, rank_};
+      bool active = false;
       ForallAdjacentEdges(v, [&](EdgeID e) {
         VertexID w = edges_[v][e].target_;
-        VertexID wlabel = GetVertexLabel(w);
-        // Edge needs to be linked to root 
-        if (vlabel != wlabel) {
-          // send (w_g, w_p)
-          root_update.emplace_back(vlabel, wlabel, GetVertexRoot(w));
-        }
-        // Edge can be removed 
-        // Store removed edges for resolution
-        else {
-          RemoveEdge(v, w);
-          // removed_edges[contraction_level].emplace_back(v, w);
+        if (last_label != GetVertexLabel(w)) {
+          active = true;
+          active_edges_[contraction_level_ + 1][v][e] = true;
         }
       });
-      // Send bundled remaining edges to root
-      auto *request = new MPI_Request();
-      MPI_Isend(&root_update, root_update.size(), MPI_LONG, GetVertexRoot(v), 0, MPI_COMM_WORLD, request);
+      // TODO: Send update to root 
+      active_vertices_[contraction_level_ + 1][v] = active;
     });
 
-    // Gather edge updates
-    MPI_Status st{};
-    int flag = 1;
-    do {
-      MPI_Iprobe(MPI_ANY_SOURCE, 0, MPI_COMM_WORLD, &flag, &st);
-      if (flag) {
-        int message_length;
-        MPI_Get_count(&st, MPI_LONG, &message_length);
-
-        std::vector<VertexID> update(message_length);
-        MPI_Status rst{};
-        MPI_Recv(&update[0], message_length, MPI_LONG, st.MPI_SOURCE, 0, MPI_COMM_WORLD, &rst);
-        std::cout << "[R"  << rank_ << ":" << contraction_level_
-                  << "] [Link] recv edge (" << update[0] << "," << update[1] <<") from "
-                  << st.MPI_SOURCE << " on vertex " << update[1] << std::endl;
-      }
-    } while (flag);
+    // TODO: Gather boundary vertices for each root 
 
     // Increase contraction level
     contraction_level_++;
@@ -454,11 +430,11 @@ class GraphAccess {
 
   EdgeID AddEdge(VertexID from, VertexID to, PEID rank);
 
-  void RemoveEdge(VertexID from, VertexID to);
-
   inline VertexID GetVertexDegree(const VertexID v) const {
     return edges_[v].size();
   }
+
+  void RemoveEdge(VertexID from, VertexID to);
 
   //////////////////////////////////////////////
   // Manage ghost vertices

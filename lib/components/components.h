@@ -68,9 +68,10 @@ class Components {
   void PerformDecomposition(GraphAccess &g) {
     // FindGhostReductions(g);
     // g.Logging(true);
+    // g.OutputLocal();
     RunExponentialBFS(g);
     PropagateLabelsUp(g);
-    PropagateLabelsDown(g);
+    // PropagateLabelsDown(g);
     Output(g);
   }
 
@@ -216,6 +217,7 @@ class Components {
             converged_locally = 0;
           }
         });
+        // TODO: Check if vertex is on boundary and update root
         g.SetVertexPayload(v, smallest_payload);
       });
 
@@ -229,7 +231,10 @@ class Components {
     }
     // Output converged deviates
     g.UpdateGhostVertices();
+    g.OutputLocal();
+    exit(1);
     g.DetermineActiveVertices();
+    exit(1);
 
     // Count remaining number of vertices
     VertexID local_vertices = 0;
