@@ -85,7 +85,9 @@ class Components {
     // Set vertex labels for contraction
     g.ForallLocalVertices([&](const VertexID v) {
       // g.SetVertexLabel(v, parent[v]);
-      g.SetVertexPayload(v, {g.GetVertexDeviate(v), g.GetVertexLabel(parent[v]), rank_});
+      g.SetVertexPayload(v,
+                         {g.GetVertexDeviate(v), g.GetVertexLabel(parent[v]),
+                          rank_});
     });
   }
 
@@ -168,7 +170,7 @@ class Components {
           g.RemoveEdge(edge.first,
                        edge.second);
       }
-      // Inactive component
+        // Inactive component
       else {
         std::vector<std::pair<VertexID, VertexID>> edges_to_remove;
         g.ForallNeighbors(v, [&](VertexID w) {
@@ -188,10 +190,15 @@ class Components {
     // Draw exponential deviate per vertex
     g.ForallLocalVertices([&](const VertexID v) {
       std::mt19937
-          generator(static_cast<unsigned int>(config_.seed + g.GetVertexLabel(v) + iteration_ * g.GetNumberOfVertices() * size_));
+          generator(static_cast<unsigned int>(config_.seed + g.GetVertexLabel(v)
+          + iteration_ * g.GetNumberOfVertices() * size_));
       g.SetParent(v, v);
-      g.SetVertexPayload(v, {static_cast<VertexID>(distribution(generator)), g.GetVertexLabel(v), g.GetVertexRoot(v)});
-      std::cout << "[R" << rank_ << ":" << iteration_ << "] draw deviate " << g.GetGlobalID(v) << " -> " << g.GetVertexDeviate(v) << std::endl;
+      g.SetVertexPayload(v,
+                         {static_cast<VertexID>(distribution(generator)),
+                          g.GetVertexLabel(v), g.GetVertexRoot(v)});
+      std::cout << "[R" << rank_ << ":" << iteration_ << "] draw deviate "
+                << g.GetGlobalID(v) << " -> " << g.GetVertexDeviate(v)
+                << std::endl;
     });
 
     int converged_globally = 0;
@@ -205,10 +212,11 @@ class Components {
         auto smallest_payload = g.GetVertexMessage(v);
         g.ForallNeighbors(v, [&](VertexID w) {
           if (g.GetVertexDeviate(w) + 1 < smallest_payload.deviate_ ||
-              (g.GetVertexDeviate(w) + 1 == smallest_payload.deviate_ && 
-               g.GetVertexLabel(w) < smallest_payload.label_)) {
+              (g.GetVertexDeviate(w) + 1 == smallest_payload.deviate_ &&
+                  g.GetVertexLabel(w) < smallest_payload.label_)) {
             g.SetParent(v, w);
-            smallest_payload = {g.GetVertexDeviate(w) + 1, g.GetVertexLabel(w), g.GetVertexRoot(w)};
+            smallest_payload = {g.GetVertexDeviate(w) + 1, g.GetVertexLabel(w),
+                                g.GetVertexRoot(w)};
             converged_locally = 0;
           }
         });

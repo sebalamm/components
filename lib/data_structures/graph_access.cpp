@@ -59,7 +59,8 @@ EdgeID GraphAccess::AddEdge(VertexID from, VertexID to, PEID rank) {
       PEID neighbor = (rank == size_) ? GetPEFromOffset(to) : rank;
       local_vertices_data_.emplace_back(to, false);
       // TODO: Might be problematic
-      vertex_payload_[contraction_level_].emplace_back(std::numeric_limits<VertexID>::max() - 1, to, rank);
+      vertex_payload_[contraction_level_].emplace_back(
+          std::numeric_limits<VertexID>::max() - 1, to, rank);
       ghost_vertices_data_.emplace_back(neighbor, to);
       SetAdjacentPE(neighbor, true);
       ghost_comm_->SetAdjacentPE(neighbor, true);
@@ -114,7 +115,8 @@ void GraphAccess::OutputLabels() {
   ForallLocalVertices([&](const VertexID v) {
     std::stringstream out;
     out << "[R" << rank << "] [V] "
-        << GetGlobalID(v) << " label=" << vertex_payload_[contraction_level_][v].label_;
+        << GetGlobalID(v) << " label="
+        << vertex_payload_[contraction_level_][v].label_;
     std::cout << out.str() << std::endl;
   });
 }

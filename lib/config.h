@@ -39,8 +39,8 @@ struct Config {
   // Debug output
   std::string debug_output_file;
   // Number of vertices/edges
-  VertexID n;
-  EdgeID m;
+  VertexID n{};
+  EdgeID m{};
   // Benchmarks
   unsigned int iterations{};
   // Label propagation

@@ -98,7 +98,7 @@ struct Edge {
 class BlockingCommunicator;
 class GraphAccess {
  public:
-  GraphAccess(const PEID rank, const PEID size) 
+  GraphAccess(const PEID rank, const PEID size)
       : rank_(rank),
         size_(size),
         number_of_vertices_(0),
@@ -163,7 +163,8 @@ class GraphAccess {
 
   void DetermineActiveVertices() {
     active_vertices_.resize(contraction_level_ + 2);
-    active_vertices_[contraction_level_ + 1].resize(number_of_local_vertices_, false);
+    active_vertices_[contraction_level_ + 1].resize(number_of_local_vertices_,
+                                                    false);
     vertex_payload_.resize(contraction_level_ + 2);
     vertex_payload_[contraction_level_ + 1].resize(number_of_vertices_);
 
@@ -191,18 +192,26 @@ class GraphAccess {
         if (vlabel != wlabel) {
           std::vector<VertexID> update = {vlabel, wlabel, GetVertexRoot(w)};
           if (logging_) {
-            std::cout << "[R"  << rank_ << ":" << contraction_level_
-                      << "] [Link] send edge (" << vlabel << "," << wlabel << ") to "
+            std::cout << "[R" << rank_ << ":" << contraction_level_
+                      << "] [Link] send edge (" << vlabel << "," << wlabel
+                      << ") to "
                       << GetVertexRoot(v) << std::endl;
           }
           auto *request = new MPI_Request();
-          MPI_Isend(&update[0], 1, MPI_UPDATE, GetVertexRoot(v), 0, MPI_COMM_WORLD, request);
+          MPI_Isend(&update[0],
+                    1,
+                    MPI_UPDATE,
+                    GetVertexRoot(v),
+                    0,
+                    MPI_COMM_WORLD,
+                    request);
         }
         // Edge can be removed 
         // Store removed edges for resolution
         edges_to_remove.emplace_back(v, w);
       });
-      vertex_payload_[contraction_level_ + 1][v] = {std::numeric_limits<VertexID>::max() - 1, GetVertexLabel(v), rank_};
+      vertex_payload_[contraction_level_ + 1][v] =
+          {std::numeric_limits<VertexID>::max() - 1, GetVertexLabel(v), rank_};
     });
 
     // Increase contraction level
@@ -212,7 +221,8 @@ class GraphAccess {
     // Remove inactive edges
     for (auto &e : edges_to_remove) {
       RemoveEdge(std::get<0>(e), std::get<1>(e));
-      removed_edges_[contraction_level_].emplace_back(GetGlobalID(std::get<0>(e)), GetGlobalID(std::get<1>(e)));
+      removed_edges_[contraction_level_].emplace_back(GetGlobalID(std::get<0>(e)),
+                                                      GetGlobalID(std::get<1>(e)));
     }
 
     // Gather edge updates
@@ -226,11 +236,18 @@ class GraphAccess {
         MPI_Get_count(&st, MPI_UPDATE, &message_length);
         std::vector<VertexID> update(3);
         MPI_Status rst{};
-        MPI_Recv(&update[0], message_length, MPI_UPDATE, st.MPI_SOURCE, 0, MPI_COMM_WORLD, &rst);
+        MPI_Recv(&update[0],
+                 message_length,
+                 MPI_UPDATE,
+                 st.MPI_SOURCE,
+                 0,
+                 MPI_COMM_WORLD,
+                 &rst);
         if (logging_) {
-          std::cout << "[R"  << rank_ << ":" << contraction_level_
-                    << "] [Link] recv edge (" << update[0] << "," << update[1] 
-                    << "(R" << update[2] << ")) from " << st.MPI_SOURCE << std::endl;
+          std::cout << "[R" << rank_ << ":" << contraction_level_
+                    << "] [Link] recv edge (" << update[0] << "," << update[1]
+                    << "(R" << update[2] << ")) from " << st.MPI_SOURCE
+                    << std::endl;
         }
         // Insert actual edge
         AddEdge(GetLocalID(update[0]), update[1], update[2]);
@@ -245,16 +262,21 @@ class GraphAccess {
     while (contraction_level_ > 0) {
       contraction_level_--;
 
-      for (auto &e : added_edges_[contraction_level_ + 1]) 
+      for (auto &e : added_edges_[contraction_level_ + 1])
         RemoveEdge(GetLocalID(std::get<0>(e)), GetLocalID(std::get<1>(e)));
-      for (auto &e : removed_edges_[contraction_level_ + 1]) 
-        AddEdge(GetLocalID(std::get<0>(e)), std::get<1>(e), GetPE(GetLocalID(std::get<1>(e))));
+      for (auto &e : removed_edges_[contraction_level_ + 1])
+        AddEdge(GetLocalID(std::get<0>(e)),
+                std::get<1>(e),
+                GetPE(GetLocalID(std::get<1>(e))));
 
       // Update local labels
       ForallLocalVertices([&](VertexID v) {
-        if (vertex_payload_[contraction_level_][v].label_ != 
-              vertex_payload_[contraction_level_ + 1][v].label_) 
-          SetVertexPayload(v, {0, vertex_payload_[contraction_level_ + 1][v].label_, rank_});
+        if (vertex_payload_[contraction_level_][v].label_ !=
+            vertex_payload_[contraction_level_ + 1][v].label_)
+          SetVertexPayload(v,
+                           {0,
+                            vertex_payload_[contraction_level_ + 1][v].label_,
+                            rank_});
       });
 
       // Propagate labels
@@ -273,7 +295,12 @@ class GraphAccess {
         });
 
         // Check if all PEs are done
-        MPI_Allreduce(&converged_locally, &converged_globally, 1, MPI_INT, MPI_MIN, MPI_COMM_WORLD);
+        MPI_Allreduce(&converged_locally,
+                      &converged_globally,
+                      1,
+                      MPI_INT,
+                      MPI_MIN,
+                      MPI_COMM_WORLD);
       }
     }
     UpdateGhostVertices();
@@ -317,7 +344,6 @@ class GraphAccess {
   inline bool IsInterfaceFromGlobal(VertexID v) const {
     return local_vertices_data_[GetLocalID(v)].is_interface_vertex_;
   }
-
 
   inline VertexID GetLocalID(VertexID v) const {
     return IsLocalFromGlobal(v) ? v - local_offset_
@@ -381,7 +407,7 @@ class GraphAccess {
     return vertex_payload_[contraction_level_][v].root_;
   }
 
-  inline PEID GetParent(const VertexID v) const {
+  inline VertexID GetParent(const VertexID v) const {
     return parent_[contraction_level_][v];
   }
 
@@ -493,7 +519,7 @@ class GraphAccess {
   EdgeID edge_counter_;
 
   // Logging
-  bool logging_;
+  bool logging_{};
 };
 
 #endif

@@ -37,7 +37,11 @@ class GhostCommunicator {
                     const PEID rank,
                     const PEID size,
                     MPI_Comm communicator)
-      : communicator_(communicator), g_(g), rank_(rank), size_(size), logging_(false) {
+      : communicator_(communicator),
+        g_(g),
+        rank_(rank),
+        size_(size),
+        logging_(false) {
     packed_pes_.resize(static_cast<unsigned long>(size_), false);
     adjacent_pes_.resize(static_cast<unsigned long>(size_), false);
     send_buffers_a_.resize(static_cast<unsigned long>(size_));

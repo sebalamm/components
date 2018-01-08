@@ -53,7 +53,7 @@ void GhostCommunicator::ReceiveIncomingMessages() {
         VertexID local_id = g_->GetLocalID(message[i]);
         VertexID deviate = message[i + 1];
         VertexID label = message[i + 2];
-        PEID root = static_cast<PEID>(message[i + 3]);
+        auto root = static_cast<PEID>(message[i + 3]);
         std::cout << "[R" << rank_ << "] recv (" << deviate << "," << label
                   << "," << root << ") from pe "
                   << st.MPI_SOURCE << " with tag " << current_recv_tag_

@@ -2,7 +2,8 @@
 
 #include "blocking_communicator.h"
 
-void BlockingCommunicator::AddMessage(const VertexID v, const VertexPayload &msg) {
+void BlockingCommunicator::AddMessage(const VertexID v,
+                                      const VertexPayload &msg) {
   g_->ForallNeighbors(v, [&](const VertexID u) {
     if (!g_->IsLocal(u)) {
       PEID neighbor = g_->GetPE(u);
@@ -44,9 +45,10 @@ void BlockingCommunicator::ReceiveMessages() {
       VertexID local_id = g_->GetLocalID(message[i]);
       VertexID deviate = message[i + 1];
       VertexID label = message[i + 2];
-      PEID root = static_cast<PEID>(message[i + 3]);
+      auto root = static_cast<PEID>(message[i + 3]);
       if (logging_) {
-        std::cout << "[R" << rank_ << "] recv [" << message[i] << "](" << deviate << "," << label
+        std::cout << "[R" << rank_ << "] recv [" << message[i] << "]("
+                  << deviate << "," << label
                   << "," << root << ") from pe "
                   << st.MPI_SOURCE << " with tag " << recv_tag_
                   << " length " << message_length << " ["

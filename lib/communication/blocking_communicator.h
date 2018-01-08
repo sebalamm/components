@@ -34,10 +34,14 @@ using Buffer = std::vector<VertexID>;
 class BlockingCommunicator {
  public:
   BlockingCommunicator(GraphAccess *g,
-                    const PEID rank,
-                    const PEID size,
-                    MPI_Comm communicator)
-      : communicator_(communicator), g_(g), rank_(rank), size_(size), logging_(false) {
+                       const PEID rank,
+                       const PEID size,
+                       MPI_Comm communicator)
+      : communicator_(communicator),
+        g_(g),
+        rank_(rank),
+        size_(size),
+        logging_(false) {
     packed_pes_.resize(static_cast<unsigned long>(size_), false);
     adjacent_pes_.resize(static_cast<unsigned long>(size_), false);
     send_buffers_.resize(static_cast<unsigned long>(size_));
@@ -103,7 +107,8 @@ class BlockingCommunicator {
         if (logging_) {
           if (send_buffers_[pe].size() > 1) {
             for (int i = 0; i < send_buffers_[pe].size() - 1; i += 4) {
-              std::cout << "[R" << rank_ << "] send [" << send_buffers_[pe][i] << "]("
+              std::cout << "[R" << rank_ << "] send [" << send_buffers_[pe][i]
+                        << "]("
                         << send_buffers_[pe][i + 1] << ","
                         << send_buffers_[pe][i + 2] << ","
                         << send_buffers_[pe][i + 3] << ") to pe "

@@ -39,10 +39,12 @@ int main(int argn, char **argv) {
   // Read command-line args
   Config conf;
   ParseParameters(argn, argv, conf);
-  GraphAccess G = GraphIO::ReadDistributedGraph(conf, rank, size, MPI_COMM_WORLD);
+  GraphAccess
+      G = GraphIO::ReadDistributedGraph(conf, rank, size, MPI_COMM_WORLD);
 
   if (rank == ROOT) {
-    std::cout << "compute ccs (s=" << conf.seed << ", p=" << size << ")" << std::endl;
+    std::cout << "compute ccs (s=" << conf.seed << ", p=" << size << ")"
+              << std::endl;
   }
 
   // Timers

@@ -65,8 +65,11 @@ class GraphIO {
 
     // Read the lines i*ceil(n/size) to (i+1)*floor(n/size) lines of that file
     VertexID leftover_vertices = number_of_vertices % size;
-    VertexID num_vertices = (number_of_vertices / size) + static_cast<VertexID>(rank < leftover_vertices);
-    VertexID from = (rank * num_vertices) + static_cast<VertexID>(rank >= leftover_vertices ? leftover_vertices : 0);
+    VertexID num_vertices = (number_of_vertices / size)
+        + static_cast<VertexID>(rank < leftover_vertices);
+    VertexID from = (rank * num_vertices)
+        + static_cast<VertexID>(rank >= leftover_vertices ? leftover_vertices
+                                                          : 0);
     VertexID to = from + num_vertices - 1;
 
     VertexID number_of_local_vertices = to - from + 1;
@@ -115,9 +118,11 @@ class GraphIO {
 
     std::vector<VertexID> vertex_dist(static_cast<unsigned long>(size + 1), 0);
     for (PEID pe_id = 1; pe_id <= size; pe_id++) {
-      VertexID num_vertices_for_pe = (number_of_vertices / size) + static_cast<VertexID>(pe_id < leftover_vertices);
+      VertexID num_vertices_for_pe = (number_of_vertices / size)
+          + static_cast<VertexID>(pe_id < leftover_vertices);
       vertex_dist[pe_id] = static_cast<VertexID>((pe_id * num_vertices_for_pe)
-          + static_cast<VertexID>(num_vertices_for_pe >= leftover_vertices ? leftover_vertices : 0));
+          + static_cast<VertexID>(num_vertices_for_pe >= leftover_vertices
+                                  ? leftover_vertices : 0));
     }
     G.SetOffsetArray(std::move(vertex_dist));
 

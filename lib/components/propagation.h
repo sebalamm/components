@@ -73,7 +73,9 @@ class Propagation {
 
     // Eliminate duplicates
     sort(local_components.begin(), local_components.end());
-    local_components.erase(unique(local_components.begin(), local_components.end()), local_components.end());
+    local_components.erase(unique(local_components.begin(),
+                                  local_components.end()),
+                           local_components.end());
     unsigned long num_local_components = local_components.size();
 
     // Gather number of components for each PE
@@ -114,7 +116,9 @@ class Propagation {
                 ROOT,
                 MPI_COMM_WORLD);
     sort(global_components.begin(), global_components.end());
-    global_components.erase(unique(global_components.begin(), global_components.end()), global_components.end());
+    global_components.erase(unique(global_components.begin(),
+                                   global_components.end()),
+                            global_components.end());
 
     // Output
     if (rank == ROOT) {
@@ -122,7 +126,8 @@ class Propagation {
       std::cout << "ccs (";
       for (VertexID i = 0; i < global_components.size() - 1; ++i)
         std::cout << global_components[i] << " ";
-      std::cout << global_components[global_components.size() - 1] << ")" << std::endl;
+      std::cout << global_components[global_components.size() - 1] << ")"
+                << std::endl;
     }
 
   }

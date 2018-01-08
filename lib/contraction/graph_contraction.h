@@ -57,7 +57,8 @@ class Contraction {
   PEID rank_, size_;
 
   // Component information
-  VertexID num_smaller_components_, num_local_components_, num_global_components_;
+  VertexID num_smaller_components_, num_local_components_,
+      num_global_components_;
   std::unordered_set<VertexID> local_components_{};
 
   // Local edges
@@ -76,10 +77,19 @@ class Contraction {
 
     // Build prefix sum over local components O(log P)
     VertexID component_prefix_sum;
-    MPI_Scan(&num_local_components_, &component_prefix_sum, 1, MPI_UNSIGNED_LONG_LONG, MPI_SUM, MPI_COMM_WORLD);
+    MPI_Scan(&num_local_components_,
+             &component_prefix_sum,
+             1,
+             MPI_UNSIGNED_LONG_LONG,
+             MPI_SUM,
+             MPI_COMM_WORLD);
 
     num_global_components_ = component_prefix_sum;
-    MPI_Bcast(&num_global_components_, 1, MPI_UNSIGNED_LONG_LONG, size_ - 1, MPI_COMM_WORLD);
+    MPI_Bcast(&num_global_components_,
+              1,
+              MPI_UNSIGNED_LONG_LONG,
+              size_ - 1,
+              MPI_COMM_WORLD);
 
     num_smaller_components_ = component_prefix_sum - num_local_components_;
 
@@ -104,7 +114,8 @@ class Contraction {
   }
 
   void ExchangeGhostContractionMapping() {
-    std::vector<std::vector<VertexID>> send_buffers(static_cast<unsigned long>(size_));
+    std::vector<std::vector<VertexID>>
+        send_buffers(static_cast<unsigned long>(size_));
     std::vector<bool> packed_pes(static_cast<unsigned long>(size_), false);
 
     // Collect ghost vertex updates O(n/P)
@@ -180,7 +191,9 @@ class Contraction {
       VertexID cv = g_.GetContractionVertex(v);
       g_.ForallNeighbors(v, [&](const VertexID w) {
         VertexID cw = g_.GetContractionVertex(w);
-        if (cv != cw) local_edges_.emplace(HashedEdge{num_global_components_, cv, cw, g_.GetPE(w)});
+        if (cv != cw)
+          local_edges_.emplace(HashedEdge{num_global_components_, cv, cw,
+                                          g_.GetPE(w)});
       });
     });
 
@@ -190,7 +203,8 @@ class Contraction {
 
   void ExchangeGhostContractionEdges() {
     // Determine edge targets O(cut size)
-    std::vector<std::vector<VertexID>> messages(static_cast<unsigned long>(size_));
+    std::vector<std::vector<VertexID>>
+        messages(static_cast<unsigned long>(size_));
     for (const auto &e : local_edges_) {
       messages[e.rank].push_back(e.target);
       messages[e.rank].push_back(e.source);
@@ -202,7 +216,12 @@ class Contraction {
         if (messages[i].empty()) messages[i].push_back(0);
         MPI_Request req;
         MPI_Isend(&messages[i][0],
-                  static_cast<int>(messages[i].size()), MPI_UNSIGNED_LONG_LONG, i, i + 6 * size_, MPI_COMM_WORLD, &req);
+                  static_cast<int>(messages[i].size()),
+                  MPI_UNSIGNED_LONG_LONG,
+                  i,
+                  i + 6 * size_,
+                  MPI_COMM_WORLD,
+                  &req);
       }
     }
 
@@ -231,7 +250,8 @@ class Contraction {
       for (int i = 0; i < message_length - 1; i += 2) {
         VertexID source = message[i];
         VertexID target = message[i + 1];
-        local_edges_.emplace(HashedEdge{num_global_components_, source, target, st.MPI_SOURCE});
+        local_edges_.emplace(HashedEdge{num_global_components_, source, target,
+                                        st.MPI_SOURCE});
       }
     }
   }
@@ -241,7 +261,8 @@ class Contraction {
     VertexID to = num_smaller_components_ + num_local_components_ - 1;
 
     EdgeID edge_counter = 0;
-    std::vector<std::vector<std::pair<VertexID, VertexID>>> local_edge_lists(num_local_components_);
+    std::vector<std::vector<std::pair<VertexID, VertexID>>>
+        local_edge_lists(num_local_components_);
     for (const auto &e : local_edges_) {
       if (from <= e.target && e.target < to) {
         local_edge_lists[e.source - from].emplace_back(e.target - from, rank_);
@@ -255,7 +276,9 @@ class Contraction {
 
     // TODO: We need to fill range array. Alternatively send pe with edges.
     GraphAccess cg(rank_, size_);
-    cg.StartConstruct(num_local_components_, edge_counter, num_smaller_components_);
+    cg.StartConstruct(num_local_components_,
+                      edge_counter,
+                      num_smaller_components_);
 
     for (VertexID i = 0; i < num_local_components_; ++i) {
       VertexID v = cg.AddVertex();
