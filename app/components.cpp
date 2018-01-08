@@ -61,7 +61,6 @@ int main(int argn, char **argv) {
     conf.seed = user_seed + i;
     Components comp(conf, rank, size);
     comp.FindComponents(G);
-    // comp.Output(G);
 
     // Output
     local_time = t.Elapsed();

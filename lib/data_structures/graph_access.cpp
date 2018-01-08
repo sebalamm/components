@@ -14,17 +14,19 @@ void GraphAccess::StartConstruct(const VertexID local_n,
   edges_.resize(local_n);
   local_vertices_data_.resize(local_n);
   vertex_payload_.resize(local_n);
-  vertex_payload_[contraction_level_].resize(local_n);
-  parent_.resize(local_n);
-  parent_[contraction_level_].resize(local_n);
+  vertex_payload_[0].resize(local_n);
 
   local_offset_ = local_offset;
   ghost_offset_ = local_n;
 
   active_vertices_.resize(local_n);
-  active_vertices_[contraction_level_].resize(local_n, true);
-  active_edges_.resize(local_n);
-  active_edges_[contraction_level_].resize(local_n);
+  active_vertices_[0].resize(local_n, true);
+
+  parent_.resize(local_n);
+  parent_[0].resize(local_n);
+
+  added_edges_.resize(local_n);
+  removed_edges_.resize(local_n);
 
   adjacent_pes_.resize(static_cast<unsigned long>(size_), false);
   ghost_comm_ = new BlockingCommunicator(this, rank_, size_, MPI_COMM_WORLD);
@@ -42,6 +44,7 @@ void GraphAccess::SetVertexPayload(const VertexID v,
   SetVertexMessage(v, msg);
 }
 
+// Local ID, Global ID, target rank
 EdgeID GraphAccess::AddEdge(VertexID from, VertexID to, PEID rank) {
   if (IsLocalFromGlobal(to)) {
     edges_[from].emplace_back(to - local_offset_);
@@ -53,10 +56,9 @@ EdgeID GraphAccess::AddEdge(VertexID from, VertexID to, PEID rank) {
       global_to_local_map_[to] = number_of_vertices_++;
       edges_[from].emplace_back(global_to_local_map_[to]);
 
-      if (rank_ == ROOT && rank == size_)
-        std::cout << "get PE from offset for " << to << std::endl;
       PEID neighbor = (rank == size_) ? GetPEFromOffset(to) : rank;
       local_vertices_data_.emplace_back(to, false);
+      // TODO: Might be problematic
       vertex_payload_[contraction_level_].emplace_back(std::numeric_limits<VertexID>::max() - 1, to, rank);
       ghost_vertices_data_.emplace_back(neighbor, to);
       SetAdjacentPE(neighbor, true);
@@ -67,6 +69,7 @@ EdgeID GraphAccess::AddEdge(VertexID from, VertexID to, PEID rank) {
   return edge_counter_++;
 }
 
+// Local IDs
 void GraphAccess::RemoveEdge(const VertexID from, const VertexID to) {
   for (EdgeID i = 0; i < edges_[from].size() - 1; ++i) {
     if (edges_[from][i].target_ == to)
@@ -118,5 +121,6 @@ void GraphAccess::OutputLabels() {
 
 void GraphAccess::Logging(bool active) {
   ghost_comm_->Logging(active);
+  logging_ = active;
 }
 

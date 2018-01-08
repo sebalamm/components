@@ -67,11 +67,9 @@ class Components {
 
   void PerformDecomposition(GraphAccess &g) {
     // FindGhostReductions(g);
-    // g.Logging(true);
-    // g.OutputLocal();
+    g.Logging(false);
     RunExponentialBFS(g);
     PropagateLabelsUp(g);
-    // PropagateLabelsDown(g);
     Output(g);
   }
 
@@ -170,7 +168,7 @@ class Components {
           g.RemoveEdge(edge.first,
                        edge.second);
       }
-        // Inactive component
+      // Inactive component
       else {
         std::vector<std::pair<VertexID, VertexID>> edges_to_remove;
         g.ForallNeighbors(v, [&](VertexID w) {
@@ -178,8 +176,7 @@ class Components {
           edges_to_remove.emplace_back(v, w);
         });
         for (auto &edge : edges_to_remove)
-          g.RemoveEdge(edge.first,
-                       edge.second);
+          g.RemoveEdge(edge.first, edge.second);
       }
     });
   }
@@ -191,12 +188,10 @@ class Components {
     // Draw exponential deviate per vertex
     g.ForallLocalVertices([&](const VertexID v) {
       std::mt19937
-          generator(static_cast<unsigned int>(config_.seed + g.GetVertexLabel(v) + iteration_));
+          generator(static_cast<unsigned int>(config_.seed + g.GetVertexLabel(v) + iteration_ * g.GetNumberOfVertices() * size_));
       g.SetParent(v, v);
-      g.SetVertexPayload(v,
-                         {static_cast<VertexID>(distribution(generator)),
-                          g.GetVertexLabel(v), g.GetVertexRoot(v)});
-      // std::cout << "[R" << rank_ << ":" << iteration_ << "] draw deviate " << g.GetGlobalID(v) << " -> " << g.GetVertexDeviate(v) << std::endl;
+      g.SetVertexPayload(v, {static_cast<VertexID>(distribution(generator)), g.GetVertexLabel(v), g.GetVertexRoot(v)});
+      std::cout << "[R" << rank_ << ":" << iteration_ << "] draw deviate " << g.GetGlobalID(v) << " -> " << g.GetVertexDeviate(v) << std::endl;
     });
 
     int converged_globally = 0;
@@ -217,7 +212,6 @@ class Components {
             converged_locally = 0;
           }
         });
-        // TODO: Check if vertex is on boundary and update root
         g.SetVertexPayload(v, smallest_payload);
       });
 
@@ -232,9 +226,7 @@ class Components {
     // Output converged deviates
     g.UpdateGhostVertices();
     g.OutputLocal();
-    exit(1);
     g.DetermineActiveVertices();
-    exit(1);
 
     // Count remaining number of vertices
     VertexID local_vertices = 0;
@@ -253,10 +245,6 @@ class Components {
 
   void PropagateLabelsUp(GraphAccess &g) {
     g.MoveUpContraction();
-  }
-
-  void PropagateLabelsDown(GraphAccess &g) {
-    g.MoveDownContraction();
   }
 };
 
