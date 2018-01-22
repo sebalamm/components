@@ -39,19 +39,26 @@ class Contraction {
   virtual ~Contraction() = default;
 
   GraphAccess BuildComponentAdjacencyGraph() {
+
+    if (rank_ == ROOT) std::cout << "[STATUS] |- Compute component prefix sum" << std::endl;
     ComputeComponentPrefixSum();
+    if (rank_ == ROOT) std::cout << "[STATUS] |- Compute local contraction mapping" << std::endl;
     ComputeLocalContractionMapping();
+    if (rank_ == ROOT) std::cout << "[STATUS] |- Exchange ghost contraction mapping" << std::endl;
     ExchangeGhostContractionMapping();
 
+    if (rank_ == ROOT) std::cout << "[STATUS] |- Generate local contraction edges" << std::endl;
     GenerateLocalContractionEdges();
+    if (rank_ == ROOT) std::cout << "[STATUS] |- Exchange ghost contraction edges" << std::endl;
     ExchangeGhostContractionEdges();
 
+    if (rank_ == ROOT) std::cout << "[STATUS] |- Build local contration graph" << std::endl;
     return BuildLocalContractionGraph();
   }
 
  private:
   // Original graph instance
-  GraphAccess g_;
+  GraphAccess &g_;
 
   // Network information
   PEID rank_, size_;
@@ -80,22 +87,19 @@ class Contraction {
     MPI_Scan(&num_local_components_,
              &component_prefix_sum,
              1,
-             MPI_UNSIGNED_LONG_LONG,
+             MPI_LONG,
              MPI_SUM,
              MPI_COMM_WORLD);
 
+    MPI_Barrier(MPI_COMM_WORLD);
     num_global_components_ = component_prefix_sum;
     MPI_Bcast(&num_global_components_,
               1,
-              MPI_UNSIGNED_LONG_LONG,
+              MPI_LONG,
               size_ - 1,
               MPI_COMM_WORLD);
 
     num_smaller_components_ = component_prefix_sum - num_local_components_;
-
-    // std::cout << "rank " << rank_ << " local components " << num_local_components_ << std::endl;
-    // std::cout << "rank " << rank_ << " global components " << num_global_components_ << std::endl;
-    // std::cout << "rank " << rank_ << " smaller components " << num_smaller_components_ << std::endl;
   }
 
   void ComputeLocalContractionMapping() {
@@ -148,13 +152,15 @@ class Contraction {
         MPI_Request req;
         MPI_Isend(&send_buffers[i][0],
                   static_cast<int>(send_buffers[i].size()),
-                  MPI_UNSIGNED_LONG_LONG,
+                  MPI_LONG,
                   i,
                   i + 6 * size_,
                   MPI_COMM_WORLD,
                   &req);
       };
     }
+
+    MPI_Barrier(MPI_COMM_WORLD);
 
     // Receive updates O(cut size)
     PEID num_adjacent_pes = g_.GetNumberOfAdjacentPEs();
@@ -164,13 +170,13 @@ class Contraction {
       MPI_Probe(MPI_ANY_SOURCE, rank_ + 6 * size_, MPI_COMM_WORLD, &st);
 
       int message_length;
-      MPI_Get_count(&st, MPI_UNSIGNED_LONG_LONG, &message_length);
+      MPI_Get_count(&st, MPI_LONG, &message_length);
       std::vector<VertexID> message(static_cast<unsigned long>(message_length));
 
       MPI_Status rst{};
       MPI_Recv(&message[0],
                message_length,
-               MPI_UNSIGNED_LONG_LONG,
+               MPI_LONG,
                st.MPI_SOURCE,
                rank_ + 6 * size_,
                MPI_COMM_WORLD,
@@ -183,6 +189,8 @@ class Contraction {
         g_.SetContractionVertex(g_.GetLocalID(global_id), contraction_id);
       }
     }
+
+    MPI_Barrier(MPI_COMM_WORLD);
   }
 
   void GenerateLocalContractionEdges() {
@@ -212,18 +220,20 @@ class Contraction {
 
     // Send edges O(cut size) (communication)
     for (PEID i = 0; i < size_; ++i) {
-      if (i != rank_) {
+      if (g_.IsAdjacentPE(i)) {
         if (messages[i].empty()) messages[i].push_back(0);
         MPI_Request req;
         MPI_Isend(&messages[i][0],
                   static_cast<int>(messages[i].size()),
-                  MPI_UNSIGNED_LONG_LONG,
+                  MPI_LONG,
                   i,
                   i + 6 * size_,
                   MPI_COMM_WORLD,
                   &req);
       }
     }
+
+    MPI_Barrier(MPI_COMM_WORLD);
 
     // Receive updates O(cut size)
     PEID num_adjacent_pes = g_.GetNumberOfAdjacentPEs();
@@ -233,18 +243,20 @@ class Contraction {
       MPI_Probe(MPI_ANY_SOURCE, rank_ + 6 * size_, MPI_COMM_WORLD, &st);
 
       int message_length;
-      MPI_Get_count(&st, MPI_UNSIGNED_LONG_LONG, &message_length);
+      MPI_Get_count(&st, MPI_LONG, &message_length);
       std::vector<VertexID> message(static_cast<unsigned long>(message_length));
 
       MPI_Status rst{};
       MPI_Recv(&message[0],
                message_length,
-               MPI_UNSIGNED_LONG_LONG,
+               MPI_LONG,
                st.MPI_SOURCE,
                rank_ + 6 * size_,
                MPI_COMM_WORLD,
                &rst);
       recv_messages++;
+
+      // std::cout << "[R" << rank_ << "] recv msg " << recv_messages << "/" << num_adjacent_pes << " from " << st.MPI_SOURCE << " with length " << message_length << std::endl;
 
       if (message_length == 1) continue;
       for (int i = 0; i < message_length - 1; i += 2) {
@@ -254,6 +266,8 @@ class Contraction {
                                         st.MPI_SOURCE});
       }
     }
+
+    MPI_Barrier(MPI_COMM_WORLD);
   }
 
   GraphAccess BuildLocalContractionGraph() {

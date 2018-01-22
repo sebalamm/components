@@ -35,14 +35,16 @@ class Utility {
     // Standard BFS
     std::queue<VertexID> q;
     q.push(start);
+    marked[start] = true;
+    parent[start] = start;
     while (!q.empty()) {
       VertexID v = q.front();
       q.pop();
-      parent[v] = start;
-      marked[v] = true;
       g.ForallNeighbors(v, [&](VertexID w) {
         if (g.IsLocal(w) && !marked[w]) {
           q.push(w);
+          marked[w] = true;
+          parent[w] = start;
         }
       });
     }

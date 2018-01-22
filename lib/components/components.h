@@ -44,14 +44,18 @@ class Components {
   virtual ~Components() = default;
 
   void FindComponents(GraphAccess &g) {
+    if (rank_ == ROOT) std::cout << "[STATUS] Find local components" << std::endl;
     FindLocalComponents(g);
+    if (rank_ == ROOT) std::cout << "[STATUS] Contract local components" << std::endl;
     Contraction cont(g, rank_, size_);
     GraphAccess cag = cont.BuildComponentAdjacencyGraph();
+    if (rank_ == ROOT) std::cout << "[STATUS] Perform main algorithm" << std::endl;
     PerformDecomposition(cag);
+    ApplyToLocalComponents(cag, g);
   }
 
   void Output(GraphAccess &g) {
-    MPI_Barrier(MPI_COMM_WORLD);
+    if (rank_ == ROOT) std::cout << "Component labels" << std::endl;
     g.OutputLabels();
   }
 
@@ -65,17 +69,20 @@ class Components {
   // Algorithm state
   unsigned int iteration_;
 
+  // Local components
+  std::vector<VertexID> parent;
+
   void PerformDecomposition(GraphAccess &g) {
     // FindGhostReductions(g);
-    g.Logging(false);
+    if (rank_ == ROOT) std::cout << "[STATUS] |- Start exponential BFS" << std::endl;
     RunExponentialBFS(g);
+    if (rank_ == ROOT) std::cout << "[STATUS] |- Propagate labels upward" << std::endl;
     PropagateLabelsUp(g);
-    Output(g);
   }
 
   void FindLocalComponents(GraphAccess &g) {
     std::vector<bool> marked(g.GetNumberOfLocalVertices(), false);
-    std::vector<VertexID> parent(g.GetNumberOfLocalVertices());
+    parent.resize(g.GetNumberOfLocalVertices());
 
     // Compute components
     g.ForallLocalVertices([&](const VertexID v) {
@@ -91,7 +98,7 @@ class Components {
     });
   }
 
-  // TODO: This is an optimization
+  // TODO: Implement local reductions
   void FindGhostReductions(GraphAccess &g) {
     // Find local vertices connected by same ghost vertex
     std::unordered_map<VertexID, std::vector<VertexID>>
@@ -166,9 +173,7 @@ class Components {
           if (g.GetVertexLabel(w) != g.GetGlobalID(w))
             edges_to_remove.emplace_back(v, w);
         });
-        for (auto &edge : edges_to_remove)
-          g.RemoveEdge(edge.first,
-                       edge.second);
+        for (auto &edge : edges_to_remove) {}
       }
         // Inactive component
       else {
@@ -177,28 +182,51 @@ class Components {
           // Remove all edges
           edges_to_remove.emplace_back(v, w);
         });
-        for (auto &edge : edges_to_remove)
-          g.RemoveEdge(edge.first, edge.second);
+        for (auto &edge : edges_to_remove) {}
       }
     });
   }
 
   void RunExponentialBFS(GraphAccess &g) {
-    // Initialize PRNG
+    if (rank_ == ROOT) std::cout << "[STATUS] |-- Iteration " << iteration_ << std::endl;
     std::exponential_distribution<double> distribution(config_.beta);
 
-    // Draw exponential deviate per vertex
+    // TODO: Prioritize high degree vertices
+    // Draw exponential deviate per ghost vertex
+    // g.ForallGhostVertices([&](const VertexID v) {
+    //   std::mt19937
+    //       generator(static_cast<unsigned int>(config_.seed + g.GetVertexLabel(v)
+    //       + iteration_ * g.GetNumberOfVertices() * size_));
+    //   g.SetVertexPayload(v,
+    //                      {static_cast<VertexID>(distribution(generator)),
+    //                       g.GetVertexLabel(v), g.GetVertexRoot(v)});
+    // });
+
+    // Draw exponential deviate per local vertex
     g.ForallLocalVertices([&](const VertexID v) {
+      // Set preliminary deviate
       std::mt19937
           generator(static_cast<unsigned int>(config_.seed + g.GetVertexLabel(v)
           + iteration_ * g.GetNumberOfVertices() * size_));
       g.SetParent(v, v);
-      g.SetVertexPayload(v,
-                         {static_cast<VertexID>(distribution(generator)),
-                          g.GetVertexLabel(v), g.GetVertexRoot(v)});
-      std::cout << "[R" << rank_ << ":" << iteration_ << "] draw deviate "
+      VertexPayload smallest_payload = {static_cast<VertexID>(distribution(generator)),
+                                        g.GetVertexLabel(v), g.GetVertexRoot(v)};
+      // Find smallest local deviate
+      // g.ForallNeighbors(v, [&](VertexID w) {
+      //   if (g.GetVertexDeviate(w) + 1 < smallest_payload.deviate_ ||
+      //       (g.GetVertexDeviate(w) + 1 == smallest_payload.deviate_ &&
+      //           g.GetVertexLabel(w) < smallest_payload.label_)) {
+      //     g.SetParent(v, w);
+      //     smallest_payload = {g.GetVertexDeviate(w) + 1, g.GetVertexLabel(w),
+      //                         g.GetVertexRoot(w)};
+      //   }
+      // });
+      g.SetVertexPayload(v, std::move(smallest_payload));
+#ifndef NDEBUG
+      std::cout << "[R" << rank_ << ":" << iteration_ << "] update deviate "
                 << g.GetGlobalID(v) << " -> " << g.GetVertexDeviate(v)
                 << std::endl;
+#endif
     });
 
     int converged_globally = 0;
@@ -220,8 +248,9 @@ class Components {
             converged_locally = 0;
           }
         });
-        g.SetVertexPayload(v, smallest_payload);
+        g.SetVertexPayload(v, std::move(smallest_payload));
       });
+
 
       // Check if all PEs are done
       MPI_Allreduce(&converged_locally,
@@ -232,28 +261,31 @@ class Components {
                     MPI_COMM_WORLD);
     }
     // Output converged deviates
-    g.UpdateGhostVertices();
-    g.OutputLocal();
+    VertexID global_vertices = g.GatherNumberOfGlobalVertices();
     g.DetermineActiveVertices();
 
     // Count remaining number of vertices
-    VertexID local_vertices = 0;
-    VertexID global_vertices = 0;
-    g.ForallLocalVertices([&](VertexID v) { local_vertices++; });
-    // Check if all PEs are done
-    MPI_Allreduce(&local_vertices,
-                  &global_vertices,
-                  1,
-                  MPI_LONG,
-                  MPI_SUM,
-                  MPI_COMM_WORLD);
-    iteration_++;
-    if (global_vertices > 0) RunExponentialBFS(g);
+    VertexID remaining_global_vertices = g.GatherNumberOfGlobalVertices();
+    if (global_vertices > 0) {
+      // TODO: Add sequential computation once graph is small enough
+      // if (global_vertices < g.GetNumberOfLocalVertices()) RunSequentialCC(g);
+      // else RunExponentialBFS(g);
+      iteration_++;
+      RunExponentialBFS(g);
+    }
   }
 
   void PropagateLabelsUp(GraphAccess &g) {
     g.MoveUpContraction();
   }
+
+  void ApplyToLocalComponents(GraphAccess &cag, GraphAccess &g) {
+    g.ForallLocalVertices([&](const VertexID v) {
+      VertexID cv = g.GetContractionVertex(v);
+      g.SetVertexPayload(v, {0, cag.GetVertexLabel(cag.GetLocalID(cv)), rank_});
+    });
+  }
+
 };
 
 #endif

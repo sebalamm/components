@@ -33,7 +33,7 @@ typedef long long LONG;
 typedef unsigned long long ULONG;
 
 // Graph access
-typedef unsigned long long VertexID;
-typedef unsigned long long EdgeID;
+typedef unsigned long VertexID;
+typedef unsigned long EdgeID;
 
 #endif

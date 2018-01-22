@@ -45,23 +45,19 @@ void BlockingCommunicator::ReceiveMessages() {
       VertexID local_id = g_->GetLocalID(message[i]);
       VertexID deviate = message[i + 1];
       VertexID label = message[i + 2];
-      auto root = static_cast<PEID>(message[i + 3]);
-      if (logging_) {
-        std::cout << "[R" << rank_ << "] recv [" << message[i] << "]("
-                  << deviate << "," << label
-                  << "," << root << ") from pe "
-                  << st.MPI_SOURCE << " with tag " << recv_tag_
-                  << " length " << message_length << " ["
-                  << messages_recv << "/" << GetNumberOfAdjacentPEs() << "]"
-                  << std::endl;
-      }
+      PEID root = static_cast<PEID>(message[i + 3]);
+#ifndef NDEBUG
+      std::cout << "[R" << rank_ << "] recv [" << local_id << "]("
+                << deviate << "," << label
+                << "," << root << ") from pe "
+                << st.MPI_SOURCE << " with tag " << recv_tag_
+                << " length " << message_length << " ["
+                << messages_recv << "/" << GetNumberOfAdjacentPEs() << "]"
+                << std::endl;
+#endif
       g_->HandleGhostUpdate(local_id, label, deviate, root);
     }
   }
   isend_requests_.clear();
-}
-
-void BlockingCommunicator::Logging(bool active) {
-  logging_ = active;
 }
 

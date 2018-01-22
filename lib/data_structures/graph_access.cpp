@@ -37,11 +37,13 @@ void GraphAccess::UpdateGhostVertices() {
 }
 
 void GraphAccess::SetVertexPayload(const VertexID v,
-                                   const VertexPayload &msg) {
+                                   VertexPayload &&msg,
+                                   bool propagate) {
   if (GetVertexMessage(v) != msg
-      && local_vertices_data_[v].is_interface_vertex_)
+      && local_vertices_data_[v].is_interface_vertex_
+      && propagate)
     ghost_comm_->AddMessage(v, msg);
-  SetVertexMessage(v, msg);
+  SetVertexMessage(v, std::move(msg));
 }
 
 // Local ID, Global ID, target rank
@@ -52,32 +54,28 @@ EdgeID GraphAccess::AddEdge(VertexID from, VertexID to, PEID rank) {
     local_vertices_data_[from].is_interface_vertex_ = true;
     if (IsGhostFromGlobal(to)) { // true if ghost already in map, otherwise false
       edges_[from].emplace_back(global_to_local_map_[to]);
+      // active_vertices_[contraction_level_][global_to_local_map_[to]] = true;
     } else {
       global_to_local_map_[to] = number_of_vertices_++;
       edges_[from].emplace_back(global_to_local_map_[to]);
 
       PEID neighbor = (rank == size_) ? GetPEFromOffset(to) : rank;
       local_vertices_data_.emplace_back(to, false);
-      // TODO: Might be problematic
-      vertex_payload_[contraction_level_].emplace_back(
-          std::numeric_limits<VertexID>::max() - 1, to, rank);
       ghost_vertices_data_.emplace_back(neighbor, to);
       SetAdjacentPE(neighbor, true);
       ghost_comm_->SetAdjacentPE(neighbor, true);
+      // Contraction additions
+      vertex_payload_[contraction_level_].emplace_back(
+          std::numeric_limits<VertexID>::max() - 1, to, neighbor);
+      // active_vertices_[contraction_level_].push_back(true);
     }
   }
 
   return edge_counter_++;
 }
 
-// Local IDs
-void GraphAccess::RemoveEdge(const VertexID from, const VertexID to) {
-  for (EdgeID i = 0; i < edges_[from].size() - 1; ++i) {
-    if (edges_[from][i].target_ == to)
-      iter_swap(edges_[from].begin() + i,
-                edges_[from].end() - 1);
-  }
-  edges_[from].pop_back();
+void GraphAccess::RemoveAllEdges(const VertexID from) {
+  edges_[from].clear();
 }
 
 void GraphAccess::OutputLocal() {
@@ -114,15 +112,22 @@ void GraphAccess::OutputLabels() {
 
   ForallLocalVertices([&](const VertexID v) {
     std::stringstream out;
-    out << "[R" << rank << "] [V] "
+    out << "[R" << rank << ":" << contraction_level_ << "] [V] "
         << GetGlobalID(v) << " label="
         << vertex_payload_[contraction_level_][v].label_;
     std::cout << out.str() << std::endl;
   });
 }
 
-void GraphAccess::Logging(bool active) {
-  ghost_comm_->Logging(active);
-  logging_ = active;
+void GraphAccess::OutputGhosts() {
+  PEID rank, size;
+  MPI_Comm_rank(MPI_COMM_WORLD, &rank);
+  MPI_Comm_size(MPI_COMM_WORLD, &size);
+
+  std::cout << "[R" << rank << "] [G] [ ";
+  for (auto &e : global_to_local_map_) {
+    std::cout << e.first << " ";
+  }
+  std::cout << "]" << std::endl;
 }
 

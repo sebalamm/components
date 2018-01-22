@@ -40,8 +40,7 @@ class GhostCommunicator {
       : communicator_(communicator),
         g_(g),
         rank_(rank),
-        size_(size),
-        logging_(false) {
+        size_(size) {
     packed_pes_.resize(static_cast<unsigned long>(size_), false);
     adjacent_pes_.resize(static_cast<unsigned long>(size_), false);
     send_buffers_a_.resize(static_cast<unsigned long>(size_));
@@ -74,8 +73,6 @@ class GhostCommunicator {
     ClearAndSwitchBuffers();
   }
 
-  void Logging(bool active);
-
  private:
   MPI_Comm communicator_;
   GraphAccess *g_;
@@ -92,8 +89,6 @@ class GhostCommunicator {
   unsigned int current_send_tag_;
   unsigned int current_recv_tag_;
 
-  bool logging_;
-
   void SendMessages() {
     current_send_tag_++;
 
@@ -108,19 +103,18 @@ class GhostCommunicator {
                 static_cast<int>((*current_send_buffers_)[pe].size()),
                 MPI_LONG, pe,
                 current_send_tag_, communicator_, request);
-
-      if (logging_) {
-        if ((*current_send_buffers_)[pe].size() > 1) {
-          for (int i = 0; i < (*current_send_buffers_)[pe].size() - 1; i += 4) {
-            std::cout << "[R" << rank_ << "] send ("
-                      << (*current_send_buffers_)[pe][i + 1] << ","
-                      << (*current_send_buffers_)[pe][i] << ","
-                      << (*current_send_buffers_)[pe][i + 2] << ") to pe "
-                      << pe << " with tag " << current_send_tag_ << " length "
-                      << (*current_send_buffers_)[pe].size() << std::endl;
-          }
+#ifndef NDEBUG
+      if ((*current_send_buffers_)[pe].size() > 1) {
+        for (int i = 0; i < (*current_send_buffers_)[pe].size() - 1; i += 4) {
+          std::cout << "[R" << rank_ << "] send ("
+                    << (*current_send_buffers_)[pe][i + 1] << ","
+                    << (*current_send_buffers_)[pe][i] << ","
+                    << (*current_send_buffers_)[pe][i + 2] << ") to pe "
+                    << pe << " with tag " << current_send_tag_ << " length "
+                    << (*current_send_buffers_)[pe].size() << std::endl;
         }
       }
+#endif
       isend_requests_.push_back(request);
     }
   }

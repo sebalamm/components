@@ -40,8 +40,7 @@ class BlockingCommunicator {
       : communicator_(communicator),
         g_(g),
         rank_(rank),
-        size_(size),
-        logging_(false) {
+        size_(size) {
     packed_pes_.resize(static_cast<unsigned long>(size_), false);
     adjacent_pes_.resize(static_cast<unsigned long>(size_), false);
     send_buffers_.resize(static_cast<unsigned long>(size_));
@@ -70,10 +69,9 @@ class BlockingCommunicator {
     SendMessages();
     MPI_Barrier(communicator_);
     ReceiveMessages();
+    MPI_Barrier(communicator_);
     ClearBuffers();
   }
-
-  void Logging(bool active);
 
  private:
   MPI_Comm communicator_;
@@ -89,11 +87,8 @@ class BlockingCommunicator {
   unsigned int send_tag_;
   unsigned int recv_tag_;
 
-  bool logging_;
-
   void SendMessages() {
     send_tag_++;
-
     for (PEID pe = 0; pe < size_; ++pe) {
       if (adjacent_pes_[pe]) {
         if (send_buffers_[pe].empty())
@@ -104,19 +99,22 @@ class BlockingCommunicator {
                   MPI_LONG, pe,
                   send_tag_, communicator_, request);
 
-        if (logging_) {
-          if (send_buffers_[pe].size() > 1) {
-            for (int i = 0; i < send_buffers_[pe].size() - 1; i += 4) {
-              std::cout << "[R" << rank_ << "] send [" << send_buffers_[pe][i]
-                        << "]("
-                        << send_buffers_[pe][i + 1] << ","
-                        << send_buffers_[pe][i + 2] << ","
-                        << send_buffers_[pe][i + 3] << ") to pe "
-                        << pe << " with tag " << send_tag_ << " length "
-                        << send_buffers_[pe].size() << std::endl;
-            }
+#ifndef NDEBUG
+        if (send_buffers_[pe].size() > 1) {
+          std::cout << "[INFO] [R" << rank_ 
+                    << "] send " << send_buffers_[pe].size()/4 << " messages to " << pe 
+                    << " with tag " << send_tag_ << std::endl;
+          for (int i = 0; i < send_buffers_[pe].size() - 1; i += 4) {
+            std::cout << "[R" << rank_ << "] send [" << send_buffers_[pe][i]
+                      << "]("
+                      << send_buffers_[pe][i + 1] << ","
+                      << send_buffers_[pe][i + 2] << ","
+                      << send_buffers_[pe][i + 3] << ") to pe "
+                      << pe << " with tag " << send_tag_ << " length "
+                      << send_buffers_[pe].size() << std::endl;
           }
         }
+#endif
         isend_requests_.push_back(request);
       }
     }

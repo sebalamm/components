@@ -73,8 +73,8 @@ class GraphIO {
     VertexID to = from + num_vertices - 1;
 
     VertexID number_of_local_vertices = to - from + 1;
-    std::cout << "rank " << rank << " from " << from << " to " << to
-              << " amount " << number_of_local_vertices << std::endl;
+    // std::cout << "rank " << rank << " from " << from << " to " << to
+    //           << " amount " << number_of_local_vertices << std::endl;
 
     std::vector<std::vector<VertexID>> local_edge_lists;
     local_edge_lists.resize(number_of_local_vertices);
@@ -137,7 +137,6 @@ class GraphIO {
     }
     G.FinishConstruct();
     MPI_Barrier(comm);
-    std::cout << "done construction" << std::endl;
 
     return G;
   }

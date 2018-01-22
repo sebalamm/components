@@ -59,16 +59,21 @@ int main(int argn, char **argv) {
     MPI_Barrier(MPI_COMM_WORLD);
     t.Restart();
 
-    // Generator
+    // Determine labels
     conf.seed = user_seed + i;
     Components comp(conf, rank, size);
     comp.FindComponents(G);
 
-    // Output
+    // Gather total time
     local_time = t.Elapsed();
     MPI_Reduce(&local_time, &total_time, 1, MPI_DOUBLE, MPI_MAX, ROOT,
                MPI_COMM_WORLD);
     if (rank == ROOT) stats.Push(total_time);
+    
+    // Print labels
+#ifndef NDEBUG
+    comp.Output(G);
+#endif
   }
 
   if (rank == ROOT) {
