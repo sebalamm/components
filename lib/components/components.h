@@ -32,6 +32,7 @@
 #include "graph_access.h"
 #include "graph_contraction.h"
 #include "utils.h"
+#include "union_find.h"
 #include "propagation.h"
 
 class Components {
@@ -284,6 +285,14 @@ class Components {
       VertexID cv = g.GetContractionVertex(v);
       g.SetVertexPayload(v, {0, cag.GetVertexLabel(cag.GetLocalID(cv)), rank_});
     });
+  }
+
+  void RunSequentialCC(GraphAccess &g) {
+    // Perform gather of graph on root process
+    // Gather vertices and edges individually
+    std::vector<VertexID> local_vertices(g.GetNumberOfLocalVertices());
+    // Root process computes labels
+    // Send labels using scatter
   }
 
 };

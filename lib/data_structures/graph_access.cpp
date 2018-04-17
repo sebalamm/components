@@ -54,10 +54,17 @@ EdgeID GraphAccess::AddEdge(VertexID from, VertexID to, PEID rank) {
     local_vertices_data_[from].is_interface_vertex_ = true;
     if (IsGhostFromGlobal(to)) { // true if ghost already in map, otherwise false
       edges_[from].emplace_back(global_to_local_map_[to]);
+      // Insert reverse edge?
+      // TODO: Does this break anything?
+      edges_[global_to_local_map_[to]].emplace_back(from);
       // active_vertices_[contraction_level_][global_to_local_map_[to]] = true;
     } else {
       global_to_local_map_[to] = number_of_vertices_++;
       edges_[from].emplace_back(global_to_local_map_[to]);
+      // Insert reverse edge?
+      // TODO: Does this break anything?
+      edges_.resize(number_of_vertices_);
+      edges_[global_to_local_map_[to]].emplace_back(from);
 
       PEID neighbor = (rank == size_) ? GetPEFromOffset(to) : rank;
       local_vertices_data_.emplace_back(to, false);

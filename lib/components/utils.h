@@ -41,7 +41,8 @@ class Utility {
       VertexID v = q.front();
       q.pop();
       g.ForallNeighbors(v, [&](VertexID w) {
-        if (g.IsLocal(w) && !marked[w]) {
+        // if (g.IsLocal(w) && !marked[w]) {
+        if (!marked[w]) {
           q.push(w);
           marked[w] = true;
           parent[w] = start;
