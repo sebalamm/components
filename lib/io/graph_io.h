@@ -73,8 +73,8 @@ class GraphIO {
     VertexID to = from + num_vertices - 1;
 
     VertexID number_of_local_vertices = to - from + 1;
-    // std::cout << "rank " << rank << " from " << from << " to " << to
-    //           << " amount " << number_of_local_vertices << std::endl;
+    std::cout << "rank " << rank << " from " << from << " to " << to
+              << " amount " << number_of_local_vertices << std::endl;
 
     std::vector<std::vector<VertexID>> local_edge_lists;
     local_edge_lists.resize(number_of_local_vertices);
@@ -131,9 +131,8 @@ class GraphIO {
       // G.SetVertexLabel(v, from + v);
       G.SetVertexPayload(v, {G.GetVertexDeviate(v), from + v, rank});
 
-      for (VertexID j : local_edge_lists[i]) {
+      for (VertexID j : local_edge_lists[i])
         G.AddEdge(v, j - 1, size);
-      }
     }
     G.FinishConstruct();
     MPI_Barrier(comm);

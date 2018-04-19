@@ -51,6 +51,7 @@ class Components {
     Contraction cont(g, rank_, size_);
     GraphAccess cag = cont.BuildComponentAdjacencyGraph();
     if (rank_ == ROOT) std::cout << "[STATUS] Perform main algorithm" << std::endl;
+    // FindHighDegreeVertices(cag);
     PerformDecomposition(cag);
     ApplyToLocalComponents(cag, g);
   }
@@ -74,7 +75,6 @@ class Components {
   std::vector<VertexID> parent;
 
   void PerformDecomposition(GraphAccess &g) {
-    // FindGhostReductions(g);
     if (rank_ == ROOT) std::cout << "[STATUS] |- Start exponential BFS" << std::endl;
     RunExponentialBFS(g);
     if (rank_ == ROOT) std::cout << "[STATUS] |- Propagate labels upward" << std::endl;
@@ -82,8 +82,8 @@ class Components {
   }
 
   void FindLocalComponents(GraphAccess &g) {
-    std::vector<bool> marked(g.GetNumberOfLocalVertices(), false);
-    parent.resize(g.GetNumberOfLocalVertices());
+    std::vector<bool> marked(g.GetNumberOfVertices(), false);
+    parent.resize(g.GetNumberOfVertices());
 
     // Compute components
     g.ForallLocalVertices([&](const VertexID v) {
@@ -99,100 +99,49 @@ class Components {
     });
   }
 
-  // TODO: Implement local reductions
-  void FindGhostReductions(GraphAccess &g) {
-    // Find local vertices connected by same ghost vertex
-    std::unordered_map<VertexID, std::vector<VertexID>>
-        vertex_buckets(g.NumberOfGhostVertices());
+  void FindHighDegreeVertices(GraphAccess &g) {
+    std::vector<VertexID> local_high_degree;
+    int num_local_high_degree = 0;
+
+    // Gather local high degree vertices
     g.ForallLocalVertices([&](const VertexID v) {
-      ASSERT_TRUE(g.IsInterface(v))
-      g.ForallNeighbors(v, [&](const VertexID w) {
-        ASSERT_TRUE(g.IsGhost(w))
-        vertex_buckets[w].push_back(v);
-      });
+      VertexID degree = g.GetVertexDegree(v);
+      if (degree >= config_.degree_limit) {
+        local_high_degree.push_back(g.GetGlobalID(v));
+        num_local_high_degree++;
+      }
     });
 
-    // Update labels for local vertices
-    for (auto &bucket : vertex_buckets) {
-      if (bucket.second.size() >= 2) {
-        VertexID min_label = g.GetNumberOfVertices();
-        for (VertexID &v : bucket.second)
-          min_label = std::min(g.GetVertexLabel(v),
-                               min_label);
-        for (VertexID &v : bucket.second)
-          // g.SetVertexLabel(v, min_label);
-          g.SetVertexPayload(v,
-                             {g.GetVertexDeviate(v), min_label,
-                              g.GetVertexRoot(v)});
-      }
+    // Gather number of high degrees via all-gather
+    std::vector<int> num_high_degree(size_);
+    MPI_Allgather(&num_local_high_degree, 1, MPI_INT,
+                  &num_high_degree[0], 1, MPI_INT,
+                  MPI_COMM_WORLD);
+
+    // Compute displacements
+    std::vector<int> displ(size_);
+    int num_global_high_degree = 0;
+    for (PEID i = 0; i < size_; ++i) {
+      displ[i] = num_global_high_degree;
+      num_global_high_degree += num_high_degree[i];
     }
 
-    // Find ghost vertices connected by same local vertex
-    std::unordered_map<VertexID, std::vector<VertexID>>
-        ghost_buckets(g.GetNumberOfLocalVertices());
-    g.ForallLocalVertices([&](const VertexID v) {
-      ASSERT_TRUE(g.IsInterface(v))
-      g.ForallNeighbors(v, [&](const VertexID w) {
-        ASSERT_TRUE(g.IsGhost(w))
-        ghost_buckets[v].push_back(w);
-      });
-    });
+    // Distribte vertices using all-to-all
+    std::vector<VertexID> global_high_degree(num_global_high_degree);
+    MPI_Allgatherv(&local_high_degree[0], num_local_high_degree, MPI_LONG,
+                   &global_high_degree[0], &num_high_degree[0], &displ[0], MPI_LONG,
+                   MPI_COMM_WORLD);
 
-    // Group buckets by PE
-    std::unordered_map<PEID,
-                       std::unordered_map<VertexID, std::vector<VertexID>>>
-        pe_ghost_buckets
-        (static_cast<unsigned long>(g.GetNumberOfAdjacentPEs()));
-    for (auto &bucket : ghost_buckets) {
-      for (VertexID &v : bucket.second) {
-        PEID target_pe = g.GetPE(v);
-        pe_ghost_buckets[target_pe][bucket.first].push_back(v);
-      }
+    for (VertexID i = 0; i < num_global_high_degree; ++i) {
+      std::cout << "r " << rank_ << " v " << global_high_degree[i] << std::endl;
     }
-
-    // Update labels for ghost vertices
-    for (auto &pe_bucket : pe_ghost_buckets) {
-      for (auto &pe_vertex_bucket: pe_bucket.second) {
-        VertexID min_label = g.GetNumberOfVertices();
-        for (VertexID &v : pe_vertex_bucket.second)
-          min_label = std::min(g.GetVertexLabel(v), min_label);
-        for (VertexID &v : pe_vertex_bucket.second)
-          // g.SetVertexLabel(v, min_label);
-          g.SetVertexPayload(v,
-                             {g.GetVertexDeviate(v), min_label,
-                              g.GetVertexRoot(v)});
-      }
-    }
-
-    // Merge local vertices and remove excess edges
-    g.ForallLocalVertices([&](const VertexID v) {
-      // Active component
-      if (g.GetVertexLabel(v) == g.GetGlobalID(v)) {
-        std::vector<std::pair<VertexID, VertexID>> edges_to_remove;
-        g.ForallNeighbors(v, [&](VertexID w) {
-          // Remove edges to inactive neigbors (all ghosts)
-          if (g.GetVertexLabel(w) != g.GetGlobalID(w))
-            edges_to_remove.emplace_back(v, w);
-        });
-        for (auto &edge : edges_to_remove) {}
-      }
-        // Inactive component
-      else {
-        std::vector<std::pair<VertexID, VertexID>> edges_to_remove;
-        g.ForallNeighbors(v, [&](VertexID w) {
-          // Remove all edges
-          edges_to_remove.emplace_back(v, w);
-        });
-        for (auto &edge : edges_to_remove) {}
-      }
-    });
   }
 
   void RunExponentialBFS(GraphAccess &g) {
     if (rank_ == ROOT) std::cout << "[STATUS] |-- Iteration " << iteration_ << std::endl;
     std::exponential_distribution<double> distribution(config_.beta);
 
-    // TODO: Prioritize high degree vertices
+    // TODO: Prioritize high degree vertices to limit reduce number of messages
     // Draw exponential deviate per ghost vertex
     // g.ForallGhostVertices([&](const VertexID v) {
     //   std::mt19937
@@ -204,25 +153,18 @@ class Components {
     // });
 
     // Draw exponential deviate per local vertex
-    g.ForallLocalVertices([&](const VertexID v) {
+    g.ForallVertices([&](const VertexID v) {
       // Set preliminary deviate
       std::mt19937
           generator(static_cast<unsigned int>(config_.seed + g.GetVertexLabel(v)
           + iteration_ * g.GetNumberOfVertices() * size_));
-      g.SetParent(v, v);
-      VertexPayload smallest_payload = {static_cast<VertexID>(distribution(generator)),
-                                        g.GetVertexLabel(v), g.GetVertexRoot(v)};
-      // Find smallest local deviate
-      // g.ForallNeighbors(v, [&](VertexID w) {
-      //   if (g.GetVertexDeviate(w) + 1 < smallest_payload.deviate_ ||
-      //       (g.GetVertexDeviate(w) + 1 == smallest_payload.deviate_ &&
-      //           g.GetVertexLabel(w) < smallest_payload.label_)) {
-      //     g.SetParent(v, w);
-      //     smallest_payload = {g.GetVertexDeviate(w) + 1, g.GetVertexLabel(w),
-      //                         g.GetVertexRoot(w)};
-      //   }
-      // });
-      g.SetVertexPayload(v, std::move(smallest_payload));
+      // TODO: Also initialize ghost and don't send deviates during init
+      if (g.IsLocal(v)) {
+        g.SetParent(v, v);
+        VertexPayload smallest_payload = {static_cast<VertexID>(distribution(generator)),
+                                          g.GetVertexLabel(v), g.GetVertexRoot(v)};
+        g.SetVertexPayload(v, std::move(smallest_payload));
+      }
 #ifndef NDEBUG
       std::cout << "[R" << rank_ << ":" << iteration_ << "] update deviate "
                 << g.GetGlobalID(v) << " -> " << g.GetVertexDeviate(v)
@@ -263,16 +205,19 @@ class Components {
     }
     // Output converged deviates
     VertexID global_vertices = g.GatherNumberOfGlobalVertices();
-    g.DetermineActiveVertices();
+    // g.DetermineActiveVertices();
 
     // Count remaining number of vertices
     VertexID remaining_global_vertices = g.GatherNumberOfGlobalVertices();
-    if (global_vertices > 0) {
-      // TODO: Add sequential computation once graph is small enough
-      // if (global_vertices < g.GetNumberOfLocalVertices()) RunSequentialCC(g);
-      // else RunExponentialBFS(g);
+    if (remaining_global_vertices > 0) {
       iteration_++;
-      RunExponentialBFS(g);
+      if (remaining_global_vertices < config_.sequential_limit) {
+        if (rank_ == ROOT) 
+          std::cout << "[STATUS] Perform sequential computation (n=" 
+                    << remaining_global_vertices << ")" << std::endl;
+        RunSequentialCC(g);
+      }
+      else RunExponentialBFS(g);
     }
   }
 
@@ -288,11 +233,55 @@ class Components {
   }
 
   void RunSequentialCC(GraphAccess &g) {
-    // Perform gather of graph on root process
-    // Gather vertices and edges individually
-    std::vector<VertexID> local_vertices(g.GetNumberOfLocalVertices());
-    // Root process computes labels
-    // Send labels using scatter
+    // Perform gather of graph on root 
+    std::vector<VertexID> vertices;
+    std::vector<int> num_vertices_per_pe(size_);
+    std::vector<VertexID> labels;
+    std::vector<std::pair<VertexID, VertexID>> edges;
+    if (rank_ == ROOT) 
+      std::cout << "[STATUS] Gather vertices on root" << std::endl;
+    g.GatherGraphOnRoot(vertices, num_vertices_per_pe, labels, edges);
+
+    // Root computes labels
+    if (rank_ == ROOT) {
+      std::cout << "[STATUS] Compute labels on root" << std::endl;
+      // Build vertex mapping 
+      std::unordered_map<VertexID, int> vertex_map;
+      std::unordered_map<int, VertexID> reverse_vertex_map;
+      int current_vertex = 0;
+      for (const VertexID &v : vertices) {
+        vertex_map[v] = current_vertex;
+        reverse_vertex_map[current_vertex++] = v;
+      }
+
+      // Build edge lists
+      std::vector<std::vector<int>> edge_lists(vertices.size());
+      for (const auto &e : edges) 
+        edge_lists[vertex_map[e.first]].push_back(vertex_map[e.second]);
+
+      // Construct temporary graph
+      GraphAccess sg(ROOT, 1);
+      sg.StartConstruct(vertices.size(), edges.size(), ROOT);
+      for (int i = 0; i < vertices.size(); ++i) {
+        VertexID v = sg.AddVertex();
+        sg.SetVertexPayload(v, {sg.GetVertexDeviate(v), labels[v], ROOT});
+
+        for (const int &e : edge_lists[v]) 
+          sg.AddEdge(v, e, 1);
+      }
+      sg.FinishConstruct();
+      FindLocalComponents(sg);
+
+      // Gather labels
+      sg.ForallLocalVertices([&](const VertexID &v) {
+        labels[v] = sg.GetVertexLabel(v);
+      });
+    }
+
+    // Distribute labels to other PEs
+    if (rank_ == ROOT) 
+      std::cout << "[STATUS] Distribute labels from root" << std::endl;
+    g.DistributeLabelsFromRoot(labels, num_vertices_per_pe);
   }
 
 };

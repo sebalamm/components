@@ -47,6 +47,9 @@ void ParseParameters(int argn, char **argv,
 
   // Decomposition
   conf.beta = args.Get<double>("beta", 0.2);
+
+  // Sequential computation
+  conf.sequential_limit = args.Get<unsigned int>("seq", 1000);
 }
 
 #endif

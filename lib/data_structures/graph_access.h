@@ -147,7 +147,7 @@ class GraphAccess {
   template<typename F>
   void ForallVertices(F &&callback) {
     for (VertexID v = 0; v < GetNumberOfVertices(); ++v) {
-      callback(v);
+      if (active_vertices_[contraction_level_][v]) callback(v);
     }
   }
 
@@ -231,7 +231,7 @@ class GraphAccess {
     for (auto &target : send_ids) {
       PEID pe = target.first;
       if (pe == rank_) continue;
-      if (!send_edges[pe].size() > 0) continue;
+      if (!(send_edges[pe].size() > 0)) continue;
       MPI_Request request;
       MPI_Isend(&send_edges[pe][0],
                 send_edges[pe].size(),
@@ -556,6 +556,98 @@ class GraphAccess {
 
   inline void SetAdjacentPE(const PEID pe, const bool is_adj) {
     adjacent_pes_[pe] = is_adj;
+  }
+
+  //////////////////////////////////////////////
+  // Communication
+  //////////////////////////////////////////////
+  void GatherGraphOnRoot(std::vector<VertexID> &global_vertices,
+                         std::vector<int> &num_vertices,
+                         std::vector<VertexID> &global_labels,
+                         std::vector<std::pair<VertexID, VertexID>> &global_edges) {
+    // Gather components of local graph
+    std::vector<VertexID> local_vertices;
+    std::vector<VertexID> local_labels;
+    std::vector<std::pair<VertexID, VertexID>> local_edges;
+    int num_local_vertices = 0;
+    int num_local_edges = 0;
+    ForallLocalVertices([&](const VertexID &v) {
+      local_vertices.push_back(GetGlobalID(v));
+      local_labels.push_back(GetVertexLabel(v));
+      num_local_vertices++;
+      ForallNeighbors(v, [&](const VertexID &w) {
+        local_edges.emplace_back(GetGlobalID(v), GetGlobalID(w));
+        num_local_edges++;
+      });
+    });
+
+    // Gather number of vertices/edges for each PE
+    std::vector<int> num_edges(size_);
+    MPI_Gather(&num_local_vertices, 1, MPI_INT, &num_vertices[0], 1, MPI_INT, ROOT, MPI_COMM_WORLD);
+    MPI_Gather(&num_local_edges, 1, MPI_INT, &num_edges[0], 1, MPI_INT, ROOT, MPI_COMM_WORLD);
+
+    // Compute displacements
+    std::vector<int> displ_vertices(size_);
+    std::vector<int> displ_edges(size_);
+    int num_global_vertices = 0;
+    int num_global_edges = 0;
+    for (PEID i = 0; i < size_; ++i) {
+      displ_vertices[i] = num_global_vertices;
+      displ_edges[i] = num_global_edges;
+      num_global_vertices += num_vertices[i];
+      num_global_edges += num_edges[i];
+    }
+
+    // Build datatype for edge
+    MPI_Datatype MPI_EDGE;
+    MPI_Type_vector(1, 2, 0, MPI_LONG, &MPI_EDGE);
+    MPI_Type_commit(&MPI_EDGE);
+    
+    // Gather vertices/edges and labels for each PE
+    global_vertices.resize(num_global_vertices);
+    global_labels.resize(num_global_vertices);
+    global_edges.resize(num_global_edges);
+    MPI_Gatherv(&local_vertices[0], num_local_vertices, MPI_LONG,
+                &global_vertices[0], &num_vertices[0], &displ_vertices[0], MPI_LONG,
+                ROOT, MPI_COMM_WORLD);
+    MPI_Gatherv(&local_labels[0], num_local_vertices, MPI_LONG,
+                &global_labels[0], &num_vertices[0], &displ_vertices[0], MPI_LONG,
+                ROOT, MPI_COMM_WORLD);
+    MPI_Gatherv(&local_edges[0], num_local_edges, MPI_EDGE,
+                &global_edges[0], &num_edges[0], &displ_edges[0], MPI_EDGE,
+                ROOT, MPI_COMM_WORLD);
+  } 
+
+  void DistributeLabelsFromRoot(std::vector<VertexID> &global_labels, 
+                                std::vector<int> &num_labels) {
+    // Compute displacements
+    std::vector<int> displ_labels(size_);
+    int num_global_labels = 0;
+    for (PEID i = 0; i < size_; ++i) {
+      displ_labels[i] = num_global_labels;
+      num_global_labels += num_labels[i];
+    }
+
+    // Gather local vertices
+    std::vector<VertexID> local_vertices;
+    int num_local_vertices = 0;
+    ForallLocalVertices([&](const VertexID &v) {
+      local_vertices.push_back(v);
+      num_local_vertices++;
+    });
+
+    // Scatter to other PEs
+    std::vector<VertexID> local_labels(num_local_vertices);
+    MPI_Scatterv(&global_labels[0], &num_labels[0], &displ_labels[0], MPI_LONG, 
+                 &local_labels[0], num_local_vertices, MPI_LONG, 
+                 ROOT, MPI_COMM_WORLD);
+
+    for (int i = 0; i < num_local_vertices; ++i) {
+      VertexID v = local_vertices[i];
+      SetVertexPayload(v, {GetVertexDeviate(v), 
+                           local_labels[i], 
+                           GetVertexRoot(v)});
+    }
   }
 
   //////////////////////////////////////////////

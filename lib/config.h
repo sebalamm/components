@@ -41,6 +41,10 @@ struct Config {
   // Number of vertices/edges
   VertexID n{};
   EdgeID m{};
+  // High degree vertices
+  VertexID degree_limit{};
+  // Sequential computations
+  VertexID sequential_limit{};
   // Benchmarks
   unsigned int iterations{};
   // Label propagation

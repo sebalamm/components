@@ -71,9 +71,7 @@ int main(int argn, char **argv) {
     if (rank == ROOT) stats.Push(total_time);
     
     // Print labels
-#ifndef NDEBUG
     comp.Output(G);
-#endif
   }
 
   if (rank == ROOT) {

@@ -57,7 +57,7 @@ EdgeID GraphAccess::AddEdge(VertexID from, VertexID to, PEID rank) {
       // Insert reverse edge?
       // TODO: Does this break anything?
       edges_[global_to_local_map_[to]].emplace_back(from);
-      // active_vertices_[contraction_level_][global_to_local_map_[to]] = true;
+      active_vertices_[contraction_level_][global_to_local_map_[to]] = true;
     } else {
       global_to_local_map_[to] = number_of_vertices_++;
       edges_[from].emplace_back(global_to_local_map_[to]);
@@ -65,6 +65,8 @@ EdgeID GraphAccess::AddEdge(VertexID from, VertexID to, PEID rank) {
       // TODO: Does this break anything?
       edges_.resize(number_of_vertices_);
       edges_[global_to_local_map_[to]].emplace_back(from);
+      active_vertices_[contraction_level_].resize(number_of_vertices_);
+      active_vertices_[contraction_level_][global_to_local_map_[to]] = true;
 
       PEID neighbor = (rank == size_) ? GetPEFromOffset(to) : rank;
       local_vertices_data_.emplace_back(to, false);
@@ -74,7 +76,6 @@ EdgeID GraphAccess::AddEdge(VertexID from, VertexID to, PEID rank) {
       // Contraction additions
       vertex_payload_[contraction_level_].emplace_back(
           std::numeric_limits<VertexID>::max() - 1, to, neighbor);
-      // active_vertices_[contraction_level_].push_back(true);
     }
   }
 
