@@ -193,8 +193,8 @@ class GraphAccess {
     removed_edges_.resize(contraction_level_ + 2);
 
     // Determine edges to communicate
-    std::unordered_map<VertexID, std::unordered_set<VertexID>> send_ids;
-    std::unordered_map<VertexID, std::vector<VertexID>> send_edges;
+    std::vector<std::unordered_set<VertexID>> send_ids(size_);
+    std::vector<std::vector<VertexID>> send_edges(size_);
 
     // Gather remaining edges and reset vertex payloads
     ForallLocalVertices([&](VertexID v) {
@@ -228,18 +228,12 @@ class GraphAccess {
     });
 
     // Send gathered edges
-    for (auto &target : send_ids) {
-      PEID pe = target.first;
-      if (pe == rank_) continue;
-      if (!(send_edges[pe].size() > 0)) continue;
+    for (PEID i = 0; i < size_; ++i) {
+      if (!IsAdjacentPE(i) || i == rank_) continue;
+      if (!(send_edges[i].size() > 0)) continue;
       MPI_Request request;
-      MPI_Isend(&send_edges[pe][0],
-                send_edges[pe].size(),
-                MPI_LONG,
-                pe,
-                0,
-                MPI_COMM_WORLD,
-                &request);
+      MPI_Isend(&send_edges[i][0], send_edges[i].size(), MPI_LONG, i, 0,
+                MPI_COMM_WORLD, &request);
       MPI_Request_free(&request);
     }
 

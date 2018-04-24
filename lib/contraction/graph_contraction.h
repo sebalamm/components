@@ -23,6 +23,7 @@
 #define _CONTRACTION_H_
 
 #include <iostream>
+#include <google/dense_hash_map>
 
 #include "config.h"
 #include "definitions.h"
@@ -35,24 +36,27 @@ class Contraction {
       : g_(g), rank_(rank), size_(size),
         num_smaller_components_(0),
         num_local_components_(0),
-        num_global_components_(0) {}
+        num_global_components_(0) {
+    // local_edges_.set_empty_key(HashedEdge{0, 0, 0, 0});
+  }
   virtual ~Contraction() = default;
 
   GraphAccess BuildComponentAdjacencyGraph() {
-
-    if (rank_ == ROOT) std::cout << "[STATUS] |- Compute component prefix sum" << std::endl;
+    Timer t;
+    t.Restart();
+    if (rank_ == ROOT) std::cout << "[STATUS] |- Compute component prefix sum (" << t.Elapsed() << ")" << std::endl;
     ComputeComponentPrefixSum();
-    if (rank_ == ROOT) std::cout << "[STATUS] |- Compute local contraction mapping" << std::endl;
+    if (rank_ == ROOT) std::cout << "[STATUS] |- Compute local contraction mapping (" << t.Elapsed() << ")" << std::endl;
     ComputeLocalContractionMapping();
-    if (rank_ == ROOT) std::cout << "[STATUS] |- Exchange ghost contraction mapping" << std::endl;
+    if (rank_ == ROOT) std::cout << "[STATUS] |- Exchange ghost contraction mapping (" << t.Elapsed() << ")" << std::endl;
     ExchangeGhostContractionMapping();
 
-    if (rank_ == ROOT) std::cout << "[STATUS] |- Generate local contraction edges" << std::endl;
+    if (rank_ == ROOT) std::cout << "[STATUS] |- Generate local contraction edges (" << t.Elapsed() << ")" << std::endl;
     GenerateLocalContractionEdges();
-    if (rank_ == ROOT) std::cout << "[STATUS] |- Exchange ghost contraction edges" << std::endl;
+    if (rank_ == ROOT) std::cout << "[STATUS] |- Exchange ghost contraction edges (" << t.Elapsed() << ")" << std::endl;
     ExchangeGhostContractionEdges();
 
-    if (rank_ == ROOT) std::cout << "[STATUS] |- Build local contration graph" << std::endl;
+    if (rank_ == ROOT) std::cout << "[STATUS] |- Build local contration graph (" << t.Elapsed() << ")" << std::endl;
     return BuildLocalContractionGraph();
   }
 
@@ -91,7 +95,6 @@ class Contraction {
              MPI_SUM,
              MPI_COMM_WORLD);
 
-    MPI_Barrier(MPI_COMM_WORLD);
     num_global_components_ = component_prefix_sum;
     MPI_Bcast(&num_global_components_,
               1,
@@ -121,17 +124,57 @@ class Contraction {
     std::vector<std::vector<VertexID>>
         send_buffers(static_cast<unsigned long>(size_));
     std::vector<bool> packed_pes(static_cast<unsigned long>(size_), false);
+    std::vector<bool> largest_pes(static_cast<unsigned long>(size_), false);
 
-    // Collect ghost vertex updates O(n/P)
+    // Optimization: Don't send largest component between pairs of PEs
+    // std::unordered_map<VertexID, VertexID> component_sizes;
+    // std::unordered_map<PEID, VertexID> largest_component_sizes;
+    // std::unordered_map<PEID, VertexID> largest_component_ids;
+    // for (const auto &pe : g_.GetAdjacentPEs()) {
+    //   largest_component_sizes[pe] = 0;
+    //   largest_component_ids[pe] = 0;
+    // }
+
+    google::dense_hash_map<VertexID, VertexID> component_sizes;
+    component_sizes.set_empty_key(std::numeric_limits<VertexID>::max());
+    std::vector<VertexID> largest_component_sizes(size_, 0);
+    std::vector<VertexID> largest_component_ids(size_, 0);
+
+    g_.ForallLocalVertices([&](const VertexID v) {
+      if (g_.IsInterface(v)) {
+        VertexID cv = g_.GetContractionVertex(v);
+        if (component_sizes.find(cv) == component_sizes.end()) 
+          component_sizes[cv] = 0;
+        component_sizes[cv]++;
+        g_.ForallNeighbors(v, [&](const VertexID w) {
+          if (g_.IsGhost(w)) {
+            PEID target_pe = g_.GetPE(w);
+            if (component_sizes[cv] > largest_component_sizes[target_pe]) {
+              largest_component_sizes[target_pe] = component_sizes[cv];
+              largest_component_ids[target_pe] = cv;
+            } 
+          }
+        });
+      }
+    });
+
+    for (const auto &pe : g_.GetAdjacentPEs()) {
+      send_buffers[pe].push_back(std::numeric_limits<VertexID>::max()); 
+      send_buffers[pe].push_back(largest_component_ids[pe]); 
+    }
+
+    // Collect remaining ghost vertex updates O(n/P)
     g_.ForallLocalVertices([&](const VertexID v) {
       if (g_.IsInterface(v)) {
         g_.ForallNeighbors(v, [&](const VertexID w) {
           if (g_.IsGhost(w)) {
             PEID target_pe = g_.GetPE(w);
             if (!packed_pes[target_pe]) {
-              send_buffers[target_pe].push_back(g_.GetGlobalID(v));
-              send_buffers[target_pe].push_back(g_.GetContractionVertex(v));
-              packed_pes[target_pe] = true;
+              if (g_.GetContractionVertex(v) != largest_component_ids[target_pe]) {
+                send_buffers[target_pe].push_back(g_.GetGlobalID(v));
+                send_buffers[target_pe].push_back(g_.GetContractionVertex(v));
+                packed_pes[target_pe] = true;
+              }
             }
           }
         });
@@ -160,11 +203,12 @@ class Contraction {
       };
     }
 
-    MPI_Barrier(MPI_COMM_WORLD);
-
     // Receive updates O(cut size)
+    // Optimization for receiving largest component
     PEID num_adjacent_pes = g_.GetNumberOfAdjacentPEs();
     PEID recv_messages = 0;
+    std::vector<bool> relabled(g_.GetNumberOfVertices(), false);
+    std::vector<VertexID> largest_components(size_, 0);
     while (recv_messages < num_adjacent_pes) {
       MPI_Status st{};
       MPI_Probe(MPI_ANY_SOURCE, rank_ + 6 * size_, MPI_COMM_WORLD, &st);
@@ -186,11 +230,20 @@ class Contraction {
       for (int i = 0; i < message_length - 1; i += 2) {
         VertexID global_id = message[i];
         VertexID contraction_id = message[i + 1];
-        g_.SetContractionVertex(g_.GetLocalID(global_id), contraction_id);
+        if (global_id == std::numeric_limits<VertexID>::max())
+          largest_components[st.MPI_SOURCE] = contraction_id;
+        else  {
+          g_.SetContractionVertex(g_.GetLocalID(global_id), contraction_id);
+          relabled[g_.GetLocalID(global_id)] = true;
+        }
       }
     }
-
-    MPI_Barrier(MPI_COMM_WORLD);
+    
+    // Apply largest component to all unlabeled vertices
+    g_.ForallGhostVertices([&](const VertexID v) {
+      if (!relabled[v])
+        g_.SetContractionVertex(v, largest_components[g_.GetPE(v)]);
+    });
   }
 
   void GenerateLocalContractionEdges() {
@@ -200,13 +253,9 @@ class Contraction {
       g_.ForallNeighbors(v, [&](const VertexID w) {
         VertexID cw = g_.GetContractionVertex(w);
         if (cv != cw)
-          local_edges_.emplace(HashedEdge{num_global_components_, cv, cw,
-                                          g_.GetPE(w)});
+          local_edges_.insert(HashedEdge{num_global_components_, cv, cw, g_.GetPE(w)});
       });
     });
-
-    // Wait for PEs to finish
-    MPI_Barrier(MPI_COMM_WORLD);
   }
 
   void ExchangeGhostContractionEdges() {
@@ -217,6 +266,8 @@ class Contraction {
       messages[e.rank].push_back(e.target);
       messages[e.rank].push_back(e.source);
     }
+
+    MPI_Barrier(MPI_COMM_WORLD);
 
     // Send edges O(cut size) (communication)
     for (PEID i = 0; i < size_; ++i) {
@@ -232,8 +283,6 @@ class Contraction {
                   &req);
       }
     }
-
-    MPI_Barrier(MPI_COMM_WORLD);
 
     // Receive updates O(cut size)
     PEID num_adjacent_pes = g_.GetNumberOfAdjacentPEs();
@@ -262,12 +311,10 @@ class Contraction {
       for (int i = 0; i < message_length - 1; i += 2) {
         VertexID source = message[i];
         VertexID target = message[i + 1];
-        local_edges_.emplace(HashedEdge{num_global_components_, source, target,
+        local_edges_.insert(HashedEdge{num_global_components_, source, target,
                                         st.MPI_SOURCE});
       }
     }
-
-    MPI_Barrier(MPI_COMM_WORLD);
   }
 
   GraphAccess BuildLocalContractionGraph() {
@@ -305,8 +352,6 @@ class Contraction {
       }
     }
     cg.FinishConstruct();
-    MPI_Barrier(MPI_COMM_WORLD);
-
     return cg;
   }
 };

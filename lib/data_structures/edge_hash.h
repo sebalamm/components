@@ -22,6 +22,7 @@
 #define _EDGE_HASH_H_
 
 #include <unordered_map>
+#include <google/dense_hash_set>
 
 #include "definitions.h"
 #include <climits>
@@ -36,7 +37,7 @@ struct HashedEdge {
 struct HashFunction {
   EdgeID operator()(const HashedEdge e) const {
     if (e.source < e.target) return e.source * e.k + e.target;
-    else return e.target * e.k + e.source;
+    return e.target * e.k + e.source;
   }
 };
 
@@ -47,6 +48,7 @@ struct EdgeComparator {
   }
 };
 
+// typedef google::dense_hash_set<HashedEdge, HashFunction, EdgeComparator> EdgeHash;
 typedef std::unordered_set<HashedEdge, HashFunction, EdgeComparator> EdgeHash;
 
 #endif 

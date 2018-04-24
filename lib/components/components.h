@@ -45,14 +45,43 @@ class Components {
   virtual ~Components() = default;
 
   void FindComponents(GraphAccess &g) {
-    if (rank_ == ROOT) std::cout << "[STATUS] Find local components" << std::endl;
+    Timer t;
+    t.Restart();
+    if (rank_ == ROOT) std::cout << "[STATUS] Find local components (" << t.Elapsed() << ")" << std::endl;
     FindLocalComponents(g);
-    if (rank_ == ROOT) std::cout << "[STATUS] Contract local components" << std::endl;
+    if (rank_ == ROOT) std::cout << "[STATUS] Contract local components (" << t.Elapsed() << ")" << std::endl;
     Contraction cont(g, rank_, size_);
     GraphAccess cag = cont.BuildComponentAdjacencyGraph();
-    if (rank_ == ROOT) std::cout << "[STATUS] Perform main algorithm" << std::endl;
-    // FindHighDegreeVertices(cag);
-    PerformDecomposition(cag);
+    // TODO: Do this more efficiently
+    if (rank_ == ROOT) std::cout << "[STATUS] Contract local components again? (" << t.Elapsed() << ")" << std::endl;
+    FindLocalComponents(cag);
+    Contraction ccont(cag, rank_, size_);
+    GraphAccess ccag = ccont.BuildComponentAdjacencyGraph();
+
+    VertexID g_md = 0;
+    VertexID cg_md = 0;
+    VertexID ccg_md = 0;
+    g.ForallLocalVertices([&](const VertexID &v) {
+      if (g.GetVertexDegree(v) > g_md) g_md = g.GetVertexDegree(v);
+    });
+    cag.ForallLocalVertices([&](const VertexID &v) {
+      if (cag.GetVertexDegree(v) > cg_md) cg_md = cag.GetVertexDegree(v);
+    });
+    ccag.ForallLocalVertices([&](const VertexID &v) {
+      if (ccag.GetVertexDegree(v) > ccg_md) ccg_md = ccag.GetVertexDegree(v);
+    });
+    // std::cout << "r " << rank_ 
+    //           << " nv(g) [" << g.GetNumberOfVertices() << "," << g_md << "]"
+    //           << " nv(cg) [" << cag.GetNumberOfVertices() << "," << cg_md << "]"
+    //           << " nv(ccg) [" << ccag.GetNumberOfVertices() << "," << ccg_md << "]"
+    //           << std::endl;
+
+    if (rank_ == ROOT) std::cout << "[STATUS] Find high degree (" << t.Elapsed() << ")" << std::endl;
+    FindHighDegreeVertices(ccag);
+    if (rank_ == ROOT) std::cout << "[STATUS] Perform main algorithm (" << t.Elapsed() << ")" << std::endl;
+    PerformDecomposition(ccag);
+    if (rank_ == ROOT) std::cout << "[STATUS] Apply labels (" << t.Elapsed() << ")" << std::endl;
+    ApplyToLocalComponents(ccag, cag);
     ApplyToLocalComponents(cag, g);
   }
 
@@ -100,40 +129,49 @@ class Components {
   }
 
   void FindHighDegreeVertices(GraphAccess &g) {
-    std::vector<VertexID> local_high_degree;
-    int num_local_high_degree = 0;
+    std::vector<VertexID> local_vertices;
+    std::vector<VertexID> local_degrees;
+    int num_local_vertices = 0;
 
     // Gather local high degree vertices
     g.ForallLocalVertices([&](const VertexID v) {
       VertexID degree = g.GetVertexDegree(v);
       if (degree >= config_.degree_limit) {
-        local_high_degree.push_back(g.GetGlobalID(v));
-        num_local_high_degree++;
+        local_vertices.push_back(g.GetGlobalID(v));
+        local_degrees.push_back(g.GetVertexDegree(v));
+        num_local_vertices++;
       }
     });
 
     // Gather number of high degrees via all-gather
-    std::vector<int> num_high_degree(size_);
-    MPI_Allgather(&num_local_high_degree, 1, MPI_INT,
-                  &num_high_degree[0], 1, MPI_INT,
+    std::vector<int> num_vertices(size_);
+    MPI_Allgather(&num_local_vertices, 1, MPI_INT,
+                  &num_vertices[0], 1, MPI_INT,
                   MPI_COMM_WORLD);
 
     // Compute displacements
     std::vector<int> displ(size_);
-    int num_global_high_degree = 0;
+    int num_global_vertices = 0;
     for (PEID i = 0; i < size_; ++i) {
-      displ[i] = num_global_high_degree;
-      num_global_high_degree += num_high_degree[i];
+      displ[i] = num_global_vertices;
+      num_global_vertices += num_vertices[i];
     }
 
-    // Distribte vertices using all-to-all
-    std::vector<VertexID> global_high_degree(num_global_high_degree);
-    MPI_Allgatherv(&local_high_degree[0], num_local_high_degree, MPI_LONG,
-                   &global_high_degree[0], &num_high_degree[0], &displ[0], MPI_LONG,
+    // Distribte vertices/degrees using all-gather
+    std::vector<VertexID> global_vertices(num_global_vertices);
+    std::vector<VertexID> global_degrees(num_global_vertices);
+    MPI_Allgatherv(&local_vertices[0], num_local_vertices, MPI_LONG,
+                   &global_vertices[0], &num_vertices[0], &displ[0], MPI_LONG,
+                   MPI_COMM_WORLD);
+    MPI_Allgatherv(&local_degrees[0], num_local_vertices, MPI_LONG,
+                   &global_degrees[0], &num_vertices[0], &displ[0], MPI_LONG,
                    MPI_COMM_WORLD);
 
-    for (VertexID i = 0; i < num_global_high_degree; ++i) {
-      std::cout << "r " << rank_ << " v " << global_high_degree[i] << std::endl;
+    if (rank_ == ROOT) {
+      for (VertexID i = 0; i < num_global_vertices; ++i) {
+        std::cout << "r " << rank_ << " v " << global_vertices[i] 
+                  << " d " << global_degrees[i] << std::endl;
+      }
     }
   }
 
@@ -141,30 +179,20 @@ class Components {
     if (rank_ == ROOT) std::cout << "[STATUS] |-- Iteration " << iteration_ << std::endl;
     std::exponential_distribution<double> distribution(config_.beta);
 
-    // TODO: Prioritize high degree vertices to limit reduce number of messages
-    // Draw exponential deviate per ghost vertex
-    // g.ForallGhostVertices([&](const VertexID v) {
-    //   std::mt19937
-    //       generator(static_cast<unsigned int>(config_.seed + g.GetVertexLabel(v)
-    //       + iteration_ * g.GetNumberOfVertices() * size_));
-    //   g.SetVertexPayload(v,
-    //                      {static_cast<VertexID>(distribution(generator)),
-    //                       g.GetVertexLabel(v), g.GetVertexRoot(v)});
-    // });
-
     // Draw exponential deviate per local vertex
     g.ForallVertices([&](const VertexID v) {
       // Set preliminary deviate
       std::mt19937
           generator(static_cast<unsigned int>(config_.seed + g.GetVertexLabel(v)
           + iteration_ * g.GetNumberOfVertices() * size_));
-      // TODO: Also initialize ghost and don't send deviates during init
-      if (g.IsLocal(v)) {
-        g.SetParent(v, v);
-        VertexPayload smallest_payload = {static_cast<VertexID>(distribution(generator)),
-                                          g.GetVertexLabel(v), g.GetVertexRoot(v)};
-        g.SetVertexPayload(v, std::move(smallest_payload));
-      }
+      if (g.IsLocal(v)) g.SetParent(v, v);
+
+      float weight = 1.;
+      // TODO: Weigh distribution towards high degree vertices also find useful heuristic
+      // weight /= static_cast<float>(g.GetVertexDegree(v));
+      g.SetVertexPayload(v, {static_cast<VertexID>(weight * distribution(generator)),
+                             g.GetVertexLabel(v), g.GetVertexRoot(v)}, 
+                         false);
 #ifndef NDEBUG
       std::cout << "[R" << rank_ << ":" << iteration_ << "] update deviate "
                 << g.GetGlobalID(v) << " -> " << g.GetVertexDeviate(v)
@@ -172,16 +200,19 @@ class Components {
 #endif
     });
 
+    // Map for neighbor labels
+    std::unordered_map<VertexID, std::vector<VertexID>> label_map;
+
     int converged_globally = 0;
     while (converged_globally == 0) {
       int converged_locally = 1;
-      // Receive variates
-      g.UpdateGhostVertices();
 
       // Perform update for local vertices
       g.ForallLocalVertices([&](VertexID v) {
         auto smallest_payload = g.GetVertexMessage(v);
         g.ForallNeighbors(v, [&](VertexID w) {
+          // Store neighbor label
+          label_map[g.GetVertexLabel(w)].push_back(v);
           if (g.GetVertexDeviate(w) + 1 < smallest_payload.deviate_ ||
               (g.GetVertexDeviate(w) + 1 == smallest_payload.deviate_ &&
                   g.GetVertexLabel(w) < smallest_payload.label_)) {
@@ -194,6 +225,12 @@ class Components {
         g.SetVertexPayload(v, std::move(smallest_payload));
       });
 
+      // TODO: Implement merging of vertices
+      for (const auto &label_bucket : label_map) {
+        if (label_bucket.second.size() > 1) 
+          std::cout << "r " << rank_ << " merge " << label_bucket.second.size() 
+                    << " vertices" << std::endl;
+      }
 
       // Check if all PEs are done
       MPI_Allreduce(&converged_locally,
@@ -202,6 +239,9 @@ class Components {
                     MPI_INT,
                     MPI_MIN,
                     MPI_COMM_WORLD);
+
+      // Receive variates
+      g.UpdateGhostVertices();
     }
     // Output converged deviates
     VertexID global_vertices = g.GatherNumberOfGlobalVertices();

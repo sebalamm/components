@@ -50,6 +50,9 @@ void ParseParameters(int argn, char **argv,
 
   // Sequential computation
   conf.sequential_limit = args.Get<unsigned int>("seq", 1000);
+
+  // High-degree vertices
+  conf.degree_limit = args.Get<unsigned int>("deg", 100);
 }
 
 #endif
