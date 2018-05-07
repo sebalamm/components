@@ -76,8 +76,6 @@ class Components {
     //           << " nv(ccg) [" << ccag.GetNumberOfVertices() << "," << ccg_md << "]"
     //           << std::endl;
 
-    if (rank_ == ROOT) std::cout << "[STATUS] Find high degree (" << t.Elapsed() << ")" << std::endl;
-    FindHighDegreeVertices(ccag);
     if (rank_ == ROOT) std::cout << "[STATUS] Perform main algorithm (" << t.Elapsed() << ")" << std::endl;
     PerformDecomposition(ccag);
     if (rank_ == ROOT) std::cout << "[STATUS] Apply labels (" << t.Elapsed() << ")" << std::endl;
@@ -105,12 +103,24 @@ class Components {
 
   void PerformDecomposition(GraphAccess &g) {
     if (rank_ == ROOT) std::cout << "[STATUS] |- Start exponential BFS" << std::endl;
-    RunExponentialBFS(g);
+    VertexID global_vertices = g.GatherNumberOfGlobalVertices();
+    if (global_vertices > 0) {
+      iteration_++;
+      if (global_vertices < config_.sequential_limit) {
+        if (rank_ == ROOT) 
+          std::cout << "[STATUS] |-- Perform sequential computation (n=" 
+                    << global_vertices << ")" << std::endl;
+        RunSequentialCC(g);
+      }
+      else RunExponentialBFS(g);
+    }
     if (rank_ == ROOT) std::cout << "[STATUS] |- Propagate labels upward" << std::endl;
     PropagateLabelsUp(g);
   }
 
   void FindLocalComponents(GraphAccess &g) {
+    Timer t;
+    t.Restart();
     std::vector<bool> marked(g.GetNumberOfVertices(), false);
     parent.resize(g.GetNumberOfVertices());
 
@@ -122,9 +132,7 @@ class Components {
     // Set vertex labels for contraction
     g.ForallLocalVertices([&](const VertexID v) {
       // g.SetVertexLabel(v, parent[v]);
-      g.SetVertexPayload(v,
-                         {g.GetVertexDeviate(v), g.GetVertexLabel(parent[v]),
-                          rank_});
+      g.SetVertexPayload(v, {g.GetVertexDeviate(v), g.GetVertexLabel(parent[v]), rank_});
     });
   }
 
@@ -177,9 +185,11 @@ class Components {
 
   void RunExponentialBFS(GraphAccess &g) {
     if (rank_ == ROOT) std::cout << "[STATUS] |-- Iteration " << iteration_ << std::endl;
-    std::exponential_distribution<double> distribution(config_.beta);
+    if (rank_ == ROOT) std::cout << "[STATUS] Find high degree" << std::endl;
+    FindHighDegreeVertices(g);
 
     // Draw exponential deviate per local vertex
+    std::exponential_distribution<double> distribution(config_.beta);
     g.ForallVertices([&](const VertexID v) {
       // Set preliminary deviate
       std::mt19937
@@ -243,18 +253,17 @@ class Components {
       // Receive variates
       g.UpdateGhostVertices();
     }
-    // Output converged deviates
-    VertexID global_vertices = g.GatherNumberOfGlobalVertices();
-    // g.DetermineActiveVertices();
+    // Dtermine remaining active vertices
+    g.DetermineActiveVertices();
 
     // Count remaining number of vertices
-    VertexID remaining_global_vertices = g.GatherNumberOfGlobalVertices();
-    if (remaining_global_vertices > 0) {
+    VertexID global_vertices = g.GatherNumberOfGlobalVertices();
+    if (global_vertices > 0) {
       iteration_++;
-      if (remaining_global_vertices < config_.sequential_limit) {
+      if (global_vertices < config_.sequential_limit) {
         if (rank_ == ROOT) 
-          std::cout << "[STATUS] Perform sequential computation (n=" 
-                    << remaining_global_vertices << ")" << std::endl;
+          std::cout << "[STATUS] |-- Perform sequential computation (n=" 
+                    << global_vertices << ")" << std::endl;
         RunSequentialCC(g);
       }
       else RunExponentialBFS(g);
@@ -278,13 +287,10 @@ class Components {
     std::vector<int> num_vertices_per_pe(size_);
     std::vector<VertexID> labels;
     std::vector<std::pair<VertexID, VertexID>> edges;
-    if (rank_ == ROOT) 
-      std::cout << "[STATUS] Gather vertices on root" << std::endl;
     g.GatherGraphOnRoot(vertices, num_vertices_per_pe, labels, edges);
 
     // Root computes labels
     if (rank_ == ROOT) {
-      std::cout << "[STATUS] Compute labels on root" << std::endl;
       // Build vertex mapping 
       std::unordered_map<VertexID, int> vertex_map;
       std::unordered_map<int, VertexID> reverse_vertex_map;
@@ -319,8 +325,6 @@ class Components {
     }
 
     // Distribute labels to other PEs
-    if (rank_ == ROOT) 
-      std::cout << "[STATUS] Distribute labels from root" << std::endl;
     g.DistributeLabelsFromRoot(labels, num_vertices_per_pe);
   }
 

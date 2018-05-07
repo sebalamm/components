@@ -19,8 +19,8 @@
  * this program.  If not, see <http://www.gnu.org/licenses/>.
  *****************************************************************************/
 
-#ifndef _BLOCKING_COMMUNICATOR_H_
-#define _BLOCKING_COMMUNICATOR_H_
+#ifndef _NODE_COMMUNICATOR_H_
+#define _NODE_COMMUNICATOR_H_
 
 #include <unordered_map>
 #include <vector>
@@ -31,26 +31,28 @@
 
 using Buffer = std::vector<VertexID>;
 
-class BlockingCommunicator {
+class NodeCommunicator {
  public:
-  BlockingCommunicator(GraphAccess *g,
-                       const PEID rank,
-                       const PEID size,
-                       MPI_Comm communicator)
+  NodeCommunicator(GraphAccess *g,
+                   const PEID rank,
+                   const PEID size,
+                   MPI_Comm communicator)
       : communicator_(communicator),
         g_(g),
         rank_(rank),
         size_(size) {
     packed_pes_.resize(static_cast<unsigned long>(size_), false);
     adjacent_pes_.resize(static_cast<unsigned long>(size_), false);
-    send_buffers_.resize(static_cast<unsigned long>(size_));
+    send_buffers_a_.resize(static_cast<unsigned long>(size_));
+    send_buffers_b_.resize(static_cast<unsigned long>(size_));
+    current_send_buffers_ = &send_buffers_a_;
     send_tag_ = static_cast<unsigned int>(100 * size_);
     recv_tag_ = static_cast<unsigned int>(100 * size_);
   }
-  virtual ~BlockingCommunicator() = default;
+  virtual ~NodeCommunicator() = default;
 
-  BlockingCommunicator(const BlockingCommunicator &rhs) = default;
-  BlockingCommunicator(BlockingCommunicator &&rhs) = default;
+  NodeCommunicator(const NodeCommunicator &rhs) = default;
+  NodeCommunicator(NodeCommunicator &&rhs) = default;
 
   inline void SetAdjacentPE(const PEID neighbor, const bool is_adj) {
     adjacent_pes_[neighbor] = is_adj;
@@ -66,11 +68,9 @@ class BlockingCommunicator {
   void AddMessage(VertexID v, const VertexPayload &msg);
 
   void UpdateGhostVertices() {
+    if (send_tag_ > 100 * size_) ReceiveMessages();
     SendMessages();
-    MPI_Barrier(communicator_);
-    ReceiveMessages();
-    MPI_Barrier(communicator_);
-    ClearBuffers();
+    ClearAndSwitchBuffers();
   }
 
  private:
@@ -81,7 +81,9 @@ class BlockingCommunicator {
 
   std::vector<bool> adjacent_pes_;
   std::vector<bool> packed_pes_;
-  std::vector<Buffer> send_buffers_;
+  std::vector<Buffer> *current_send_buffers_;
+  std::vector<Buffer> send_buffers_a_;
+  std::vector<Buffer> send_buffers_b_;
   std::vector<MPI_Request *> isend_requests_;
 
   unsigned int send_tag_;
@@ -91,27 +93,28 @@ class BlockingCommunicator {
     send_tag_++;
     for (PEID pe = 0; pe < size_; ++pe) {
       if (adjacent_pes_[pe]) {
-        if (send_buffers_[pe].empty())
-          send_buffers_[pe].emplace_back(0);
+        if ((*current_send_buffers_)[pe].empty())
+          (*current_send_buffers_)[pe].emplace_back(0);
         auto *request = new MPI_Request();
-        MPI_Isend(&send_buffers_[pe][0],
-                  static_cast<int>(send_buffers_[pe].size()),
+        MPI_Isend(&(*current_send_buffers_)[pe][0],
+                  static_cast<int>((*current_send_buffers_)[pe].size()),
                   MPI_LONG, pe,
                   send_tag_, communicator_, request);
 
 #ifndef NDEBUG
-        if (send_buffers_[pe].size() > 1) {
+        if ((*current_send_buffers_)[pe].size() > 1) {
           std::cout << "[INFO] [R" << rank_ 
-                    << "] send " << send_buffers_[pe].size()/4 << " messages to " << pe 
+                    << "] send " << (*current_send_buffers_)[pe].size()/4 
+                    << " messages to " << pe 
                     << " with tag " << send_tag_ << std::endl;
-          for (int i = 0; i < send_buffers_[pe].size() - 1; i += 4) {
-            std::cout << "[R" << rank_ << "] send [" << send_buffers_[pe][i]
+          for (int i = 0; i < (*current_send_buffers_)[pe].size() - 1; i += 4) {
+            std::cout << "[R" << rank_ << "] send [" << (*current_send_buffers_)[pe][i]
                       << "]("
-                      << send_buffers_[pe][i + 1] << ","
-                      << send_buffers_[pe][i + 2] << ","
-                      << send_buffers_[pe][i + 3] << ") to pe "
+                      << (*current_send_buffers_)[pe][i + 1] << ","
+                      << (*current_send_buffers_)[pe][i + 2] << ","
+                      << (*current_send_buffers_)[pe][i + 3] << ") to pe "
                       << pe << " with tag " << send_tag_ << " length "
-                      << send_buffers_[pe].size() << std::endl;
+                      << (*current_send_buffers_)[pe].size() << std::endl;
           }
         }
 #endif
@@ -122,8 +125,14 @@ class BlockingCommunicator {
 
   void ReceiveMessages();
 
-  void ClearBuffers() {
-    for (int i = 0; i < size_; ++i) send_buffers_[i].clear();
+  void ClearAndSwitchBuffers() {
+    if (current_send_buffers_ == &send_buffers_a_) {
+      for (int i = 0; i < size_; ++i) send_buffers_b_[i].clear();
+      current_send_buffers_ = &send_buffers_b_;
+    } else {
+      for (int i = 0; i < size_; ++i) send_buffers_a_[i].clear();
+      current_send_buffers_ = &send_buffers_a_;
+    }
   }
 };
 

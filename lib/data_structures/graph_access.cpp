@@ -2,7 +2,7 @@
 #include <sstream>
 
 #include "graph_access.h"
-#include "blocking_communicator.h"
+#include "node_communicator.h"
 
 void GraphAccess::StartConstruct(const VertexID local_n,
                                  const EdgeID local_m,
@@ -29,7 +29,7 @@ void GraphAccess::StartConstruct(const VertexID local_n,
   removed_edges_.resize(local_n);
 
   adjacent_pes_.resize(static_cast<unsigned long>(size_), false);
-  ghost_comm_ = new BlockingCommunicator(this, rank_, size_, MPI_COMM_WORLD);
+  ghost_comm_ = new NodeCommunicator(this, rank_, size_, MPI_COMM_WORLD);
 }
 
 void GraphAccess::UpdateGhostVertices() {

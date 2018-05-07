@@ -121,10 +121,9 @@ class Contraction {
   }
 
   void ExchangeGhostContractionMapping() {
-    std::vector<std::vector<VertexID>>
-        send_buffers(static_cast<unsigned long>(size_));
-    std::vector<bool> packed_pes(static_cast<unsigned long>(size_), false);
-    std::vector<bool> largest_pes(static_cast<unsigned long>(size_), false);
+    std::vector<std::vector<VertexID>> send_buffers(size_);
+    std::vector<bool> packed_pes(size_, false);
+    std::vector<bool> largest_pes(size_, false);
 
     // Optimization: Don't send largest component between pairs of PEs
     // std::unordered_map<VertexID, VertexID> component_sizes;
@@ -158,9 +157,12 @@ class Contraction {
       }
     });
 
-    for (const auto &pe : g_.GetAdjacentPEs()) {
-      send_buffers[pe].push_back(std::numeric_limits<VertexID>::max()); 
-      send_buffers[pe].push_back(largest_component_ids[pe]); 
+    // for (const auto &pe : g_.GetAdjacentPEs()) {
+    for (PEID i = 0; i < size_; ++i) {
+      if (largest_component_sizes[i] > 0) {
+        send_buffers[i].push_back(std::numeric_limits<VertexID>::max()); 
+        send_buffers[i].push_back(largest_component_ids[i]); 
+      }
     }
 
     // Collect remaining ghost vertex updates O(n/P)
@@ -189,7 +191,7 @@ class Contraction {
     });
 
     // Send ghost vertex updates O(cut size) (communication)
-    for (PEID i = 0; i < (PEID) send_buffers.size(); ++i) {
+    for (PEID i = 0; i < size_; ++i) {
       if (g_.IsAdjacentPE(i)) {
         if (send_buffers[i].empty()) send_buffers[i].push_back(0);
         MPI_Request req;

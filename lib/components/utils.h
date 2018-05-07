@@ -40,8 +40,7 @@ class Utility {
     while (!q.empty()) {
       VertexID v = q.front();
       q.pop();
-      g.ForallNeighbors(v, [&](VertexID w) {
-        // if (g.IsLocal(w) && !marked[w]) {
+      g.ForallNeighbors(v, [&](const VertexID &w) {
         if (!marked[w]) {
           q.push(w);
           marked[w] = true;

@@ -97,7 +97,7 @@ struct Edge {
   explicit Edge(VertexID target) : target_(target) {}
 };
 
-class BlockingCommunicator;
+class NodeCommunicator;
 class GraphAccess {
  public:
   GraphAccess(const PEID rank, const PEID size)
@@ -691,7 +691,7 @@ class GraphAccess {
   std::vector<bool> adjacent_pes_;
 
   // Communication interface
-  BlockingCommunicator *ghost_comm_;
+  NodeCommunicator *ghost_comm_;
 
   // Temporary counters
   VertexID vertex_counter_;
