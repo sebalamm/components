@@ -281,7 +281,7 @@ class Contraction {
                   static_cast<int>(edge_buffers_[i].size()),
                   MPI_UNSIGNED_LONG,
                   i,
-                  i + 6 * size_,
+                  i + 7 * size_,
                   MPI_COMM_WORLD,
                   &req);
       }
@@ -292,7 +292,7 @@ class Contraction {
     PEID recv_messages = 0;
     while (recv_messages < num_adjacent_pes) {
       MPI_Status st{};
-      MPI_Probe(MPI_ANY_SOURCE, rank_ + 6 * size_, MPI_COMM_WORLD, &st);
+      MPI_Probe(MPI_ANY_SOURCE, rank_ + 7 * size_, MPI_COMM_WORLD, &st);
 
       int message_length;
       MPI_Get_count(&st, MPI_UNSIGNED_LONG, &message_length);
@@ -303,7 +303,7 @@ class Contraction {
                message_length,
                MPI_UNSIGNED_LONG,
                st.MPI_SOURCE,
-               rank_ + 6 * size_,
+               rank_ + 7 * size_,
                MPI_COMM_WORLD,
                &rst);
       recv_messages++;
