@@ -111,6 +111,7 @@ class GraphAccess {
         ghost_offset_(0),
         contraction_level_(0),
         max_contraction_level_(0),
+        edge_buffers_(size),
         ghost_comm_(nullptr),
         vertex_counter_(0),
         edge_counter_(0) {}
@@ -194,7 +195,7 @@ class GraphAccess {
 
     // Determine edges to communicate
     std::vector<std::unordered_set<VertexID>> send_ids(size_);
-    std::vector<std::vector<VertexID>> send_edges(size_);
+    for (PEID i = 0; i < size_; ++i) edge_buffers_[i].clear();
 
     // Gather remaining edges and reset vertex payloads
     ForallLocalVertices([&](VertexID v) {
@@ -209,9 +210,9 @@ class GraphAccess {
           if (send_ids[pe].find(update_id) == send_ids[pe].end()) {
             send_ids[pe].insert(update_id);
             // TODO: Encode edges to reduce volume
-            send_edges[pe].push_back(vlabel);
-            send_edges[pe].push_back(wlabel);
-            send_edges[pe].push_back(GetVertexRoot(w));
+            edge_buffers_[pe].push_back(vlabel);
+            edge_buffers_[pe].push_back(wlabel);
+            edge_buffers_[pe].push_back(GetVertexRoot(w));
 #ifndef NDEBUG
             std::cout << "[LOG] [R" << rank_ << ":" << contraction_level_
                       << "] [Link] send edge (" << vlabel << "," << wlabel
@@ -230,9 +231,9 @@ class GraphAccess {
     // Send gathered edges
     for (PEID i = 0; i < size_; ++i) {
       if (!IsAdjacentPE(i) || i == rank_) continue;
-      if (!(send_edges[i].size() > 0)) continue;
+      if (!(edge_buffers_[i].size() > 0)) continue;
       MPI_Request request;
-      MPI_Isend(&send_edges[i][0], send_edges[i].size(), MPI_LONG, i, 0,
+      MPI_Isend(&edge_buffers_[i][0], edge_buffers_[i].size(), MPI_LONG, i, 0,
                 MPI_COMM_WORLD, &request);
       MPI_Request_free(&request);
     }
@@ -245,11 +246,11 @@ class GraphAccess {
     std::unordered_set<VertexID> inserted_edges;
 
     // Local updates
-    if (send_edges[rank_].size() > 0) {
-      for (int i = 0; i < send_edges[rank_].size() - 1; i += 3) {
-        VertexID source = GetLocalID(send_edges[rank_][i]);
-        VertexID target = send_edges[rank_][i+1];
-        PEID target_pe = static_cast<PEID>(send_edges[rank_][i+2]);
+    if (edge_buffers_[rank_].size() > 0) {
+      for (int i = 0; i < edge_buffers_[rank_].size() - 1; i += 3) {
+        VertexID source = GetLocalID(edge_buffers_[rank_][i]);
+        VertexID target = edge_buffers_[rank_][i+1];
+        PEID target_pe = static_cast<PEID>(edge_buffers_[rank_][i+2]);
         VertexID edge_id = source + target * GetNumberOfLocalVertices();
         if (inserted_edges.find(edge_id) == inserted_edges.end()) {
           inserted_edges.insert(edge_id);
@@ -694,6 +695,9 @@ class GraphAccess {
   std::vector<std::vector<bool>> active_vertices_;
   std::vector<std::vector<std::pair<VertexID, VertexID>>> added_edges_;
   std::vector<std::vector<std::pair<VertexID, VertexID>>> removed_edges_;
+
+  // Buffers
+  std::vector<std::vector<VertexID>> edge_buffers_;
 
   // Adjacent PEs
   std::vector<bool> adjacent_pes_;

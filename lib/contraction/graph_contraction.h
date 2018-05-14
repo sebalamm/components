@@ -36,7 +36,9 @@ class Contraction {
       : g_(g), rank_(rank), size_(size),
         num_smaller_components_(0),
         num_local_components_(0),
-        num_global_components_(0) {
+        num_global_components_(0),
+        node_buffers_(size),
+        edge_buffers_(size) {
     // local_edges_.set_empty_key(HashedEdge{0, 0, 0, 0});
   }
   virtual ~Contraction() = default;
@@ -75,6 +77,10 @@ class Contraction {
   // Local edges
   EdgeHash local_edges_{};
 
+  // Send buffers
+  std::vector<std::vector<VertexID>> node_buffers_;
+  std::vector<std::vector<VertexID>> edge_buffers_;
+
   void ComputeComponentPrefixSum() {
     // Gather local components O(max(#component))
     num_local_components_ = 0;
@@ -91,14 +97,14 @@ class Contraction {
     MPI_Scan(&num_local_components_,
              &component_prefix_sum,
              1,
-             MPI_LONG,
+             MPI_UNSIGNED_LONG,
              MPI_SUM,
              MPI_COMM_WORLD);
 
     num_global_components_ = component_prefix_sum;
     MPI_Bcast(&num_global_components_,
               1,
-              MPI_LONG,
+              MPI_UNSIGNED_LONG,
               size_ - 1,
               MPI_COMM_WORLD);
 
@@ -121,7 +127,6 @@ class Contraction {
   }
 
   void ExchangeGhostContractionMapping() {
-    std::vector<std::vector<VertexID>> send_buffers(size_);
     std::vector<bool> packed_pes(size_, false);
     std::vector<bool> largest_pes(size_, false);
 
@@ -160,8 +165,8 @@ class Contraction {
     // for (const auto &pe : g_.GetAdjacentPEs()) {
     for (PEID i = 0; i < size_; ++i) {
       if (largest_component_sizes[i] > 0) {
-        send_buffers[i].push_back(std::numeric_limits<VertexID>::max()); 
-        send_buffers[i].push_back(largest_component_ids[i]); 
+        node_buffers_[i].push_back(std::numeric_limits<VertexID>::max()); 
+        node_buffers_[i].push_back(largest_component_ids[i]); 
       }
     }
 
@@ -173,8 +178,8 @@ class Contraction {
             PEID target_pe = g_.GetPE(w);
             if (!packed_pes[target_pe]) {
               if (g_.GetContractionVertex(v) != largest_component_ids[target_pe]) {
-                send_buffers[target_pe].push_back(g_.GetGlobalID(v));
-                send_buffers[target_pe].push_back(g_.GetContractionVertex(v));
+                node_buffers_[target_pe].push_back(g_.GetGlobalID(v));
+                node_buffers_[target_pe].push_back(g_.GetContractionVertex(v));
                 packed_pes[target_pe] = true;
               }
             }
@@ -193,11 +198,11 @@ class Contraction {
     // Send ghost vertex updates O(cut size) (communication)
     for (PEID i = 0; i < size_; ++i) {
       if (g_.IsAdjacentPE(i)) {
-        if (send_buffers[i].empty()) send_buffers[i].push_back(0);
+        if (node_buffers_[i].empty()) node_buffers_[i].push_back(0);
         MPI_Request req;
-        MPI_Isend(&send_buffers[i][0],
-                  static_cast<int>(send_buffers[i].size()),
-                  MPI_LONG,
+        MPI_Isend(&node_buffers_[i][0],
+                  static_cast<int>(node_buffers_[i].size()),
+                  MPI_UNSIGNED_LONG,
                   i,
                   i + 6 * size_,
                   MPI_COMM_WORLD,
@@ -216,13 +221,13 @@ class Contraction {
       MPI_Probe(MPI_ANY_SOURCE, rank_ + 6 * size_, MPI_COMM_WORLD, &st);
 
       int message_length;
-      MPI_Get_count(&st, MPI_LONG, &message_length);
+      MPI_Get_count(&st, MPI_UNSIGNED_LONG, &message_length);
       std::vector<VertexID> message(static_cast<unsigned long>(message_length));
 
       MPI_Status rst{};
       MPI_Recv(&message[0],
                message_length,
-               MPI_LONG,
+               MPI_UNSIGNED_LONG,
                st.MPI_SOURCE,
                rank_ + 6 * size_,
                MPI_COMM_WORLD,
@@ -262,25 +267,21 @@ class Contraction {
 
   void ExchangeGhostContractionEdges() {
     // Determine edge targets O(cut size)
-    std::vector<std::vector<VertexID>>
-        messages(static_cast<unsigned long>(size_));
     for (const auto &e : local_edges_) {
-      messages[e.rank].push_back(e.target);
-      messages[e.rank].push_back(e.source);
+      edge_buffers_[e.rank].push_back(e.target);
+      edge_buffers_[e.rank].push_back(e.source);
     }
-
-    MPI_Barrier(MPI_COMM_WORLD);
 
     // Send edges O(cut size) (communication)
     for (PEID i = 0; i < size_; ++i) {
       if (g_.IsAdjacentPE(i)) {
-        if (messages[i].empty()) messages[i].push_back(0);
+        if (edge_buffers_[i].empty()) edge_buffers_[i].push_back(0);
         MPI_Request req;
-        MPI_Isend(&messages[i][0],
-                  static_cast<int>(messages[i].size()),
-                  MPI_LONG,
+        MPI_Isend(&edge_buffers_[i][0],
+                  static_cast<int>(edge_buffers_[i].size()),
+                  MPI_UNSIGNED_LONG,
                   i,
-                  i + 6 * size_,
+                  i + 7 * size_,
                   MPI_COMM_WORLD,
                   &req);
       }
@@ -291,18 +292,18 @@ class Contraction {
     PEID recv_messages = 0;
     while (recv_messages < num_adjacent_pes) {
       MPI_Status st{};
-      MPI_Probe(MPI_ANY_SOURCE, rank_ + 6 * size_, MPI_COMM_WORLD, &st);
+      MPI_Probe(MPI_ANY_SOURCE, rank_ + 7 * size_, MPI_COMM_WORLD, &st);
 
       int message_length;
-      MPI_Get_count(&st, MPI_LONG, &message_length);
+      MPI_Get_count(&st, MPI_UNSIGNED_LONG, &message_length);
       std::vector<VertexID> message(static_cast<unsigned long>(message_length));
 
       MPI_Status rst{};
       MPI_Recv(&message[0],
                message_length,
-               MPI_LONG,
+               MPI_UNSIGNED_LONG,
                st.MPI_SOURCE,
-               rank_ + 6 * size_,
+               rank_ + 7 * size_,
                MPI_COMM_WORLD,
                &rst);
       recv_messages++;
