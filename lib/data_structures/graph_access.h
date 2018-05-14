@@ -338,7 +338,7 @@ class GraphAccess {
       while (converged_globally == 0) {
         int converged_locally = 1;
         // Receive variates
-        UpdateGhostVertices();
+        SendAndReceiveGhostVertices();
 
         // Send current label from root
         ForallLocalVertices([&](VertexID v) {
@@ -510,14 +510,22 @@ class GraphAccess {
     return edges_[v].size();
   }
 
+  void AddSubgraph(std::vector<VertexPayload> &vertices,
+                   std::vector<GhostVertexData> &ghosts,
+                   std::vector<Edge> &edges) {
+    // TODO: Implement subgraph merging
+    // for (const VertexPayload &vp : vertices) {
+    //   VertexID v = AddVertex();
+    //   SetVertexPayload(v, vp);
+    // }
+  }
+
   //////////////////////////////////////////////
   // Manage ghost vertices
   //////////////////////////////////////////////
-  void UpdateGhostVertices();
+  void SendAndReceiveGhostVertices();
 
-  inline VertexID NumberOfGhostVertices() const {
-    return number_of_vertices_ - number_of_local_vertices_ - 1;
-  }
+  void ReceiveAndSendGhostVertices();
 
   inline void HandleGhostUpdate(const VertexID v,
                                 const VertexID label,

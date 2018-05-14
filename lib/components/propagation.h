@@ -39,7 +39,7 @@ class Propagation {
     for (unsigned int i = 0; i < conf.prop_iterations; ++i) {
       FindLocalComponents(g);
       // Propagate ghost vertex labels
-      g.UpdateGhostVertices();
+      g.SendAndReceiveGhostVertices();
       // Sync to prevent race conditions
       MPI_Barrier(MPI_COMM_WORLD);
     }

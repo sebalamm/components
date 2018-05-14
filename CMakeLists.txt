@@ -43,6 +43,7 @@ set(SOURCES
         )
 
 add_executable(components ${SOURCES} "app/components.cpp")
+add_executable(shortcuts ${SOURCES} "app/shortcuts.cpp")
 
 set(LIBS
         gmp
@@ -50,3 +51,4 @@ set(LIBS
         )
 
 target_link_libraries(components LINK_PUBLIC ${LIBS})
+target_link_libraries(shortcuts LINK_PUBLIC ${LIBS})

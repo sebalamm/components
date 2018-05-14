@@ -32,8 +32,12 @@ void GraphAccess::StartConstruct(const VertexID local_n,
   ghost_comm_ = new NodeCommunicator(this, rank_, size_, MPI_COMM_WORLD);
 }
 
-void GraphAccess::UpdateGhostVertices() {
-  ghost_comm_->UpdateGhostVertices();
+void GraphAccess::SendAndReceiveGhostVertices() {
+  ghost_comm_->SendAndReceiveGhostVertices();
+}
+
+void GraphAccess::ReceiveAndSendGhostVertices() {
+  ghost_comm_->ReceiveAndSendGhostVertices();
 }
 
 void GraphAccess::SetVertexPayload(const VertexID v,

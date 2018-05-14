@@ -67,9 +67,15 @@ class NodeCommunicator {
 
   void AddMessage(VertexID v, const VertexPayload &msg);
 
-  void UpdateGhostVertices() {
+  void ReceiveAndSendGhostVertices() {
     if (send_tag_ > 100 * size_) ReceiveMessages();
     SendMessages();
+    ClearAndSwitchBuffers();
+  }
+
+  void SendAndReceiveGhostVertices() {
+    SendMessages();
+    ReceiveMessages();
     ClearAndSwitchBuffers();
   }
 

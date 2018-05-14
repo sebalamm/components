@@ -197,9 +197,9 @@ class Components {
           + iteration_ * g.GetNumberOfVertices() * size_));
       if (g.IsLocal(v)) g.SetParent(v, v);
 
-      float weight = 1.;
-      // TODO: Weigh distribution towards high degree vertices also find useful heuristic
-      // weight /= static_cast<float>(g.GetVertexDegree(v));
+      // Weigh distribution towards high degree vertices
+      // TODO: Test different weighing functions 
+      float weight = static_cast<float>(log2(g.GetNumberOfGlobalVertices()) / g.GetVertexDegree(v));
       g.SetVertexPayload(v, {static_cast<VertexID>(weight * distribution(generator)),
                              g.GetVertexLabel(v), g.GetVertexRoot(v)}, 
                          false);
@@ -251,7 +251,7 @@ class Components {
                     MPI_COMM_WORLD);
 
       // Receive variates
-      g.UpdateGhostVertices();
+      g.SendAndReceiveGhostVertices();
     }
     // Dtermine remaining active vertices
     g.DetermineActiveVertices();
