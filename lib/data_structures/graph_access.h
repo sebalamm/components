@@ -511,14 +511,17 @@ class GraphAccess {
     return edges_[v].size();
   }
 
-  void AddSubgraph(std::vector<VertexPayload> &vertices,
-                   std::vector<GhostVertexData> &ghosts,
-                   std::vector<Edge> &edges) {
-    // TODO: Implement subgraph merging
-    // for (const VertexPayload &vp : vertices) {
-    //   VertexID v = AddVertex();
-    //   SetVertexPayload(v, vp);
-    // }
+  void AddSubgraph(std::vector<std::tuple<VertexID, VertexID, VertexID>> &vertices,
+                   std::vector<std::tuple<VertexID, VertexID, VertexID>> &edges) {
+    // TODO: This does not work yet
+    for (const auto &vp : vertices) {
+      VertexID v = AddVertex();
+      SetVertexPayload(v, {GetVertexDeviate(v), std::get<1>(vp), std::get<1>(vp)});
+    }
+
+    for (const auto &e : edges) {
+      AddEdge(GetLocalID(std::get<0>(e)), std::get<1>(e), std::get<2>(e));
+    }     
   }
 
   //////////////////////////////////////////////

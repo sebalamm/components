@@ -102,9 +102,8 @@ class ContractionReduce {
     PEID dims = math.ceil(log2(size_));
     for (PEID d = 0; d < dims; ++d) {
       // Gather components of local graph
-      std::vector<std::pair<VertexID, VertexID>> label_buffer;
-      std::vector<std::pair<VertexID, VertexID>> send_buffer;
-      std::vector<std::pair<VertexID, VertexID>> recv_buffer;
+      std::vector<std::tuple<VertexID, VertexID, VertexID>> vertex_buffer;
+      std::vector<std::tuple<VertexID, VertexID, VertexID>> edge_buffer;
       ForallLocalVertices([&](const VertexID &v) {
         label_buffer.emplace_back(v, GetVertexLabel(v));
         ForallNeighbors(v, [&](const VertexID &w) {

@@ -51,6 +51,7 @@ class ShortcutPropagation {
       if (number_of_hitters_ > 0) 
         FindHeavyHitters(g);
       Shortcut(g);
+      iteration_++;
     } while (!CheckConvergence(g));
   }
 
@@ -81,8 +82,7 @@ class ShortcutPropagation {
     g.ForallLocalVertices([&](const VertexID v) {
       if (labels_[v] < g.GetVertexLabel(v))
         g.SetVertexPayload(v, {g.GetVertexDeviate(v), labels_[v], ranks_[v]});
-      // std::cout << "[R" << rank_ << ":" << iteration_ << "]" 
-      //           << " v " << g.GetGlobalID(v) << " l " << labels_[v] << std::endl;
+      std::cout << "[R" << rank_ << ":" << iteration_ << "]" << " v (" << g.GetGlobalID(v) << "," << labels_[v] << "," << ranks_[v] << ")" << std::endl;
     });
     g.SendAndReceiveGhostVertices();
     g.ForallLocalVertices([&](VertexID v) {
@@ -97,6 +97,7 @@ class ShortcutPropagation {
       });
       labels_[v] = min_label;
       ranks_[v] = min_rank;
+      // std::cout << "[R" << rank_ << ":" << iteration_ << "] p (" << g.GetGlobalID(v) << "," << labels_[v] << "," << ranks_[v] << ")" << std::endl;
     });
   } 
 
@@ -114,89 +115,148 @@ class ShortcutPropagation {
   }
 
   void Shortcut(GraphAccess &g) {
-    std::vector<std::vector<std::pair<VertexID, VertexID>>> update_buffers(size_);
+    std::vector<std::vector<std::tuple<VertexID, VertexID, VertexID>>> update_buffers(size_);
     std::vector<std::vector<VertexID>> request_buffers(size_);
     std::unordered_map<VertexID, std::vector<VertexID>> update_lists;
+    std::unordered_set<VertexID> request_set;
     g.ForallLocalVertices([&](const VertexID v) {
       if (labels_[v] < g.GetVertexLabel(v)) {
         // Send l'(v) to l(v)
-        update_buffers[g.GetVertexRoot(v)].emplace_back(g.GetVertexLabel(v), labels_[v]);
+        update_buffers[g.GetVertexRoot(v)].emplace_back(g.GetVertexLabel(v), labels_[v], ranks_[v]);
       }
       // Request l(l'(v)) from l'(v)
-      if ((number_of_hitters_ > 0 && heavy_hitters_.find(labels_[v]) != end(heavy_hitters_))
-          || update_lists.find(labels_[v]) == end(update_lists)) {
+      // Check for heavy hitter
+      if (number_of_hitters_ == 0 || (number_of_hitters_ > 0 && heavy_hitters_.find(labels_[v]) != end(heavy_hitters_))) {
+        // CHeck for uniqueness
+        if (request_set.find(labels_[v]) == end(request_set)) {
+          request_set.emplace(labels_[v]);
           request_buffers[ranks_[v]].emplace_back(labels_[v]);
+        }
       } 
       update_lists[labels_[v]].emplace_back(v);
     });
 
     MPI_Datatype MPI_LABEL_UPDATE;
-    MPI_Type_vector(1, 2, 0, MPI_LONG, &MPI_LABEL_UPDATE);
+    MPI_Type_vector(1, 3, 0, MPI_LONG, &MPI_LABEL_UPDATE);
     MPI_Type_commit(&MPI_LABEL_UPDATE);
 
     // Send updates and requests
     for (PEID i = 0; i < size_; ++i) {
-      MPI_Request request;
-      MPI_Isend(&update_buffers[i][0], update_buffers[i].size(), MPI_LABEL_UPDATE, i, 
-                6 * size_, MPI_COMM_WORLD, &request);
-      MPI_Request_free(&request);
+      {
+        MPI_Request req;
+        // std::cout << "[R" << rank_ << ":" << iteration_ << "] num updates for " << i << " = " << update_buffers[i].size() << std::endl;
+        MPI_Isend(&update_buffers[i][0], update_buffers[i].size(), MPI_LABEL_UPDATE, i, 
+                  6 * size_ + i, MPI_COMM_WORLD, &req);
+        MPI_Request_free(&req);
+      }
 
-      MPI_Isend(&request_buffers[i][0], request_buffers[i].size(), MPI_LONG, i, 
-                7 * size_, MPI_COMM_WORLD, &request);
-      MPI_Request_free(&request);
+      {
+        MPI_Request req;
+        // std::cout << "[R" << rank_ << ":" << iteration_ << "] num requests for " << i << " = " << request_buffers[i].size() << std::endl;
+        MPI_Isend(&request_buffers[i][0], request_buffers[i].size(), MPI_LONG, i, 
+                  7 * size_ + i, MPI_COMM_WORLD, &req);
+        MPI_Request_free(&req);
+      }
     }
+
+    // Process updates
+    // MPI_Barrier(MPI_COMM_WORLD);
+    // MPI_Status st{};
+    // int flag = 1;
+    // do {
+    //   // Probe for updates
+    //   MPI_Iprobe(MPI_ANY_SOURCE, 6 * size_ + rank_, MPI_COMM_WORLD, &flag, &st);
+    //   if (flag) {
+    //     int message_length;
+    //     MPI_Get_count(&st, MPI_LABEL_UPDATE, &message_length);
+    //     std::vector<std::tuple<VertexID, VertexID, VertexID>> message(message_length);
+    //     MPI_Status rst{};
+    //     MPI_Recv(&message[0], message_length, MPI_LABEL_UPDATE, st.MPI_SOURCE,
+    //              st.MPI_TAG, MPI_COMM_WORLD, &rst);
+    //     // Updates
+    //     if (st.MPI_TAG == 6 * size_ + rank_) {
+    //       for (const auto &update : message) {
+    //         const VertexID target = std::get<0>(update);
+    //         // const VertexID local_target = g.GetLocalID(target);
+    //         const VertexID label = std::get<1>(update);
+    //         const VertexID root = std::get<2>(update);
+    //         // std::cout << "[R" << rank_ << ":" << iteration_ << "] update " << target << " to " << label << std::endl;
+    //         for (const VertexID v : update_lists[target]) {
+    //           if (label < labels_[v]) {
+    //             labels_[v] = label;
+    //             ranks_[v] = root;
+    //           }
+    //         }
+    //       }
+    //     } else std::cout << "Unexpected tag." << std::endl;
+    //   }
+    // } while (flag);
 
     // Receive request and send shortcuts 
     MPI_Barrier(MPI_COMM_WORLD);
+    std::vector<std::vector<std::tuple<VertexID, VertexID, VertexID>>> answers(size_);
+    // flag = 1;
     MPI_Status st{};
     int flag = 1;
     do {
       // Probe for requests
-      MPI_Iprobe(MPI_ANY_SOURCE, 7 * size_, MPI_COMM_WORLD, &flag, &st);
+      MPI_Iprobe(MPI_ANY_SOURCE, 7 * size_ + rank_, MPI_COMM_WORLD, &flag, &st);
       if (flag) {
         int message_length;
         MPI_Get_count(&st, MPI_LONG, &message_length);
-        std::vector<std::pair<VertexID, VertexID>> message(message_length);
+        std::vector<VertexID> message(message_length);
         MPI_Status rst{};
         MPI_Recv(&message[0], message_length, MPI_LONG, st.MPI_SOURCE,
                  st.MPI_TAG, MPI_COMM_WORLD, &rst);
         // Request
-        if (st.MPI_TAG == 7 * size_) {
-          for (const auto &request : message) {
-            std::pair<VertexID, VertexID> answer 
-              = std::make_pair(request.second, g.GetVertexLabel(g.GetLocalID(request.second)));
-            MPI_Send(&answer, 1, MPI_LABEL_UPDATE, st.MPI_SOURCE, 6 * size_, MPI_COMM_WORLD);
+        if (st.MPI_TAG == 7 * size_ + rank_) {
+          for (const VertexID &request : message) {
+            // std::cout << "[R" << rank_ << ":" << iteration_ << "] request from " << st.MPI_SOURCE<< " get label of " << request << std::endl;
+            answers[st.MPI_SOURCE].emplace_back(request, g.GetVertexLabel(g.GetLocalID(request)), g.GetVertexRoot(g.GetLocalID(request)));
           }
         } else std::cout << "Unexpected tag." << std::endl;
       }
     } while (flag);
 
+    for (PEID i = 0; i < size_; ++i) {
+      {
+        MPI_Request req;
+        MPI_Isend(&answers[i][0], answers[i].size(), MPI_LABEL_UPDATE, i, 6 * size_ + i, MPI_COMM_WORLD, &req);
+        MPI_Request_free(&req);
+      }
+    }
+
+    // Process request answers
     MPI_Barrier(MPI_COMM_WORLD);
+    flag = 1;
     do {
       // Probe for updates
-      MPI_Iprobe(MPI_ANY_SOURCE, 6 * size_, MPI_COMM_WORLD, &flag, &st);
+      MPI_Iprobe(MPI_ANY_SOURCE, 6 * size_ + rank_, MPI_COMM_WORLD, &flag, &st);
       if (flag) {
         int message_length;
         MPI_Get_count(&st, MPI_LABEL_UPDATE, &message_length);
-        std::vector<std::pair<VertexID, VertexID>> message(message_length);
+        std::vector<std::tuple<VertexID, VertexID, VertexID>> message(message_length);
         MPI_Status rst{};
         MPI_Recv(&message[0], message_length, MPI_LABEL_UPDATE, st.MPI_SOURCE,
                  st.MPI_TAG, MPI_COMM_WORLD, &rst);
         // Updates
-        if (st.MPI_TAG == 6 * size_) {
+        if (st.MPI_TAG == 6 * size_ + rank_) {
           for (const auto &update : message) {
-            const VertexID target = update.first;
-            const VertexID label = update.second;
+            const VertexID target = std::get<0>(update);
+            const VertexID label = std::get<1>(update);
+            const VertexID root = std::get<2>(update);
+            // std::cout << "[R" << rank_ << ":" << iteration_ << "] request answer from " << st.MPI_SOURCE << " label of " << target << " is "  << label << std::endl;
             for (const VertexID v : update_lists[target]) {
               if (label < labels_[v]) {
-                labels_[v] = update.second;
-                ranks_[v] = st.MPI_SOURCE;
+                labels_[v] = label;
+                ranks_[v] = root;
               }
             }
           }
         } else std::cout << "Unexpected tag." << std::endl;
       }
     } while (flag);
+
     MPI_Barrier(MPI_COMM_WORLD);
   }
 
