@@ -121,7 +121,7 @@ class GraphIO {
       VertexID num_vertices_for_pe = (number_of_vertices / size)
           + static_cast<VertexID>(pe_id < leftover_vertices);
       vertex_dist[pe_id] = static_cast<VertexID>((pe_id * num_vertices_for_pe)
-          + static_cast<VertexID>(num_vertices_for_pe >= leftover_vertices
+          + static_cast<VertexID>(pe_id >= leftover_vertices
                                   ? leftover_vertices : 0));
     }
     G.SetOffsetArray(std::move(vertex_dist));
