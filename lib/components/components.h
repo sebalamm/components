@@ -31,6 +31,7 @@
 #include "graph_io.h"
 #include "graph_access.h"
 #include "graph_contraction.h"
+#include "hierarchy.h"
 #include "utils.h"
 #include "union_find.h"
 #include "propagation.h"
@@ -58,24 +59,6 @@ class Components {
     Contraction ccont(cag, rank_, size_);
     GraphAccess ccag = ccont.BuildComponentAdjacencyGraph();
 
-    VertexID g_md = 0;
-    VertexID cg_md = 0;
-    VertexID ccg_md = 0;
-    g.ForallLocalVertices([&](const VertexID &v) {
-      if (g.GetVertexDegree(v) > g_md) g_md = g.GetVertexDegree(v);
-    });
-    cag.ForallLocalVertices([&](const VertexID &v) {
-      if (cag.GetVertexDegree(v) > cg_md) cg_md = cag.GetVertexDegree(v);
-    });
-    ccag.ForallLocalVertices([&](const VertexID &v) {
-      if (ccag.GetVertexDegree(v) > ccg_md) ccg_md = ccag.GetVertexDegree(v);
-    });
-    // std::cout << "r " << rank_ 
-    //           << " nv(g) [" << g.GetNumberOfVertices() << "," << g_md << "]"
-    //           << " nv(cg) [" << cag.GetNumberOfVertices() << "," << cg_md << "]"
-    //           << " nv(ccg) [" << ccag.GetNumberOfVertices() << "," << ccg_md << "]"
-    //           << std::endl;
-
     if (rank_ == ROOT) std::cout << "[STATUS] Perform main algorithm (" << t.Elapsed() << ")" << std::endl;
     PerformDecomposition(ccag);
     if (rank_ == ROOT) std::cout << "[STATUS] Apply labels (" << t.Elapsed() << ")" << std::endl;
@@ -99,10 +82,11 @@ class Components {
   unsigned int iteration_;
 
   // Local components
-  std::vector<VertexID> parent;
+  std::vector<VertexID> parent_;
 
   void PerformDecomposition(GraphAccess &g) {
     if (rank_ == ROOT) std::cout << "[STATUS] |- Start exponential BFS" << std::endl;
+    Hierarchy ch(g, rank_, size_);
     VertexID global_vertices = g.GatherNumberOfGlobalVertices();
     if (global_vertices > 0) {
       iteration_++;
@@ -112,27 +96,27 @@ class Components {
                     << global_vertices << ")" << std::endl;
         RunSequentialCC(g);
       }
-      else RunExponentialBFS(g);
+      else RunExponentialBFS(g, ch);
     }
     if (rank_ == ROOT) std::cout << "[STATUS] |- Propagate labels upward" << std::endl;
-    PropagateLabelsUp(g);
+    PropagateLabels(g, ch);
   }
 
   void FindLocalComponents(GraphAccess &g) {
     Timer t;
     t.Restart();
     std::vector<bool> marked(g.GetNumberOfVertices(), false);
-    parent.resize(g.GetNumberOfVertices());
+    parent_.resize(g.GetNumberOfVertices());
 
     // Compute components
     g.ForallLocalVertices([&](const VertexID v) {
-      if (!marked[v]) Utility::BFS(g, v, marked, parent);
+      if (!marked[v]) Utility::BFS(g, v, marked, parent_);
     });
 
     // Set vertex labels for contraction
     g.ForallLocalVertices([&](const VertexID v) {
-      // g.SetVertexLabel(v, parent[v]);
-      g.SetVertexPayload(v, {g.GetVertexDeviate(v), g.GetVertexLabel(parent[v]), rank_});
+      // g.SetVertexLabel(v, parent_[v]);
+      g.SetVertexPayload(v, {g.GetVertexDeviate(v), g.GetVertexLabel(parent_[v]), rank_});
     });
   }
 
@@ -183,7 +167,7 @@ class Components {
     }
   }
 
-  void RunExponentialBFS(GraphAccess &g) {
+  void RunExponentialBFS(GraphAccess &g, Hierarchy &ch) {
     if (rank_ == ROOT) std::cout << "[STATUS] |-- Iteration " << iteration_ << std::endl;
     if (rank_ == ROOT) std::cout << "[STATUS] Find high degree" << std::endl;
     FindHighDegreeVertices(g);
@@ -219,7 +203,7 @@ class Components {
 
       // Perform update for local vertices
       g.ForallLocalVertices([&](VertexID v) {
-        auto smallest_payload = g.GetVertexMessage(v);
+        auto smallest_payload = g.GetVertexPayload(v);
         g.ForallNeighbors(v, [&](VertexID w) {
           // Store neighbor label
           label_map[g.GetVertexLabel(w)].push_back(v);
@@ -253,8 +237,8 @@ class Components {
       // Receive variates
       g.SendAndReceiveGhostVertices();
     }
-    // Dtermine remaining active vertices
-    g.DetermineActiveVertices();
+    // Determine remaining vertices
+    ch.ContractVertices(g);
 
     // Count remaining number of vertices
     VertexID global_vertices = g.GatherNumberOfGlobalVertices();
@@ -266,12 +250,12 @@ class Components {
                     << global_vertices << ")" << std::endl;
         RunSequentialCC(g);
       }
-      else RunExponentialBFS(g);
+      else RunExponentialBFS(g, ch);
     }
   }
 
-  void PropagateLabelsUp(GraphAccess &g) {
-    g.MoveUpContraction();
+  void PropagateLabels(GraphAccess &g, Hierarchy &ch) {
+    ch.UncontractVertices(g);
   }
 
   void ApplyToLocalComponents(GraphAccess &cag, GraphAccess &g) {

@@ -3,7 +3,7 @@
 #include "node_communicator.h"
 
 void NodeCommunicator::AddMessage(const VertexID v,
-                                      const VertexPayload &msg) {
+                                  const VertexPayload &msg) {
   g_->ForallNeighbors(v, [&](const VertexID u) {
     if (!g_->IsLocal(u)) {
       PEID neighbor = g_->GetPE(u);

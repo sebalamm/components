@@ -71,7 +71,7 @@ int main(int argn, char **argv) {
     if (rank == ROOT) stats.Push(total_time);
     
     // Print labels
-    // comp.Output(G);
+    comp.Output(G);
   }
 
   if (rank == ROOT) {

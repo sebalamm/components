@@ -82,7 +82,7 @@ class ShortcutPropagation {
     g.ForallLocalVertices([&](const VertexID v) {
       if (labels_[v] < g.GetVertexLabel(v))
         g.SetVertexPayload(v, {g.GetVertexDeviate(v), labels_[v], ranks_[v]});
-      std::cout << "[R" << rank_ << ":" << iteration_ << "]" << " v (" << g.GetGlobalID(v) << "," << labels_[v] << "," << ranks_[v] << ")" << std::endl;
+      // std::cout << "[R" << rank_ << ":" << iteration_ << "]" << " v (" << g.GetGlobalID(v) << "," << labels_[v] << "," << ranks_[v] << ")" << std::endl;
     });
     g.SendAndReceiveGhostVertices();
     g.ForallLocalVertices([&](VertexID v) {
