@@ -84,7 +84,7 @@ class Components {
   VertexID rng_offset_;
 
   // Local components
-  std::vector<VertexID> parent;
+  std::vector<VertexID> parent_;
 
   void PerformDecomposition(GraphAccess &g) {
     if (rank_ == ROOT) std::cout << "[STATUS] |- Start exponential BFS" << std::endl;
@@ -112,17 +112,17 @@ class Components {
     Timer t;
     t.Restart();
     std::vector<bool> marked(g.GetNumberOfVertices(), false);
-    parent.resize(g.GetNumberOfVertices());
+    parent_.resize(g.GetNumberOfVertices());
 
     // Compute components
     g.ForallLocalVertices([&](const VertexID v) {
-      if (!marked[v]) Utility::BFS(g, v, marked, parent);
+      if (!marked[v]) Utility::BFS(g, v, marked, parent_);
     });
 
     // Set vertex labels for contraction
     g.ForallLocalVertices([&](const VertexID v) {
-      // g.SetVertexLabel(v, parent[v]);
-      g.SetVertexPayload(v, {g.GetVertexDeviate(v), g.GetVertexLabel(parent[v]), rank_});
+      // g.SetVertexLabel(v, parent_[v]);
+      g.SetVertexPayload(v, {g.GetVertexDeviate(v), g.GetVertexLabel(parent_[v]), rank_});
     });
   }
 

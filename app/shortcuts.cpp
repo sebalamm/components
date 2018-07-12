@@ -80,7 +80,7 @@ int main(int argn, char **argv) {
     if (rank == ROOT) stats.Push(total_time);
     
     // Print labels
-    // comp.Output(G);
+    G.OutputComponents();
   }
 
   if (rank == ROOT) {
@@ -88,7 +88,6 @@ int main(int argn, char **argv) {
               << " time=" << stats.Avg() << " stddev=" << stats.Stddev()
               << " iterations=" << conf.iterations << std::endl;
   }
-  G.OutputComponents();
 
   // Finalize MPI
   MPI_Finalize();

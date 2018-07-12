@@ -336,9 +336,9 @@ class GraphAccess {
       // Add previously removed edges
       // TODO: Payloads get reset here!
       // HACK: Store and apply labels
-      std::vector<VertexID> prev_labels;
+      std::vector<VertexID> prev_labels(number_of_vertices_, 0);
       ForallVertices([&](VertexID v) {
-        prev_labels.emplace_back(vertex_payload_[contraction_level_][v].label_);
+        prev_labels[v] = vertex_payload_[contraction_level_][v].label_;
       });
       for (auto &e : removed_edges_[contraction_level_])
         AddEdge(std::get<0>(e), std::get<1>(e), GetPE(GetLocalID(std::get<1>(e))));
