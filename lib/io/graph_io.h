@@ -38,6 +38,55 @@ class GraphIO {
   GraphIO() = default;
   virtual ~GraphIO() = default;
 
+  static GraphAccess ReadDistributedEdgeList(Config &config, PEID rank,
+                                             PEID size, const MPI_Comm &comm,
+                                             auto &edge_list) {
+    // Gather local edge lists (transpose)
+    VertexID from = edge_list[0].first, to = edge_list[0].second;
+    VertexID number_of_local_vertices = to - from + 1;
+    edge_list.erase(begin(edge_list));
+
+    EdgeID number_of_local_edges = 0;
+    std::vector<std::vector<VertexID>> local_edge_lists(number_of_local_vertices);
+    for (auto &edge : edge_list) {
+      VertexID source = edge.first;
+      VertexID target = edge.second;
+      if (from <= source && source <= to) 
+        local_edge_lists[source - from].emplace_back(target);
+      if (from <= target && target <= to) 
+        local_edge_lists[target - from].emplace_back(source);
+      number_of_local_edges++;
+    }
+
+    // Gather vertex distribution
+    VertexID next_from = to + 1;
+    std::vector<VertexID> vertex_dist(size, 0);
+    MPI_Allgather(&next_from, 1, MPI_LONG,
+                  &vertex_dist[0], 1, MPI_LONG, comm);
+    vertex_dist.insert(begin(vertex_dist), 0);
+    std::cout << "rank " << rank << " from " << from << " to " << to
+              << " amount " << number_of_local_vertices << std::endl;
+
+    // Build graph
+    GraphAccess G(rank, size);
+    G.StartConstruct(number_of_local_vertices, 2 * number_of_local_edges, from);
+
+    G.SetOffsetArray(std::move(vertex_dist));
+
+    for (VertexID i = 0; i < number_of_local_vertices; ++i) {
+      VertexID v = G.AddVertex();
+      G.SetVertexPayload(v, {G.GetVertexDeviate(v), from + v, rank});
+
+      for (VertexID w : local_edge_lists[v]) 
+          G.AddEdge(v, w, size);
+    }
+
+    G.FinishConstruct();
+    MPI_Barrier(comm);
+
+    return G;
+  }
+
   static GraphAccess ReadDistributedGraph(Config &config, PEID rank,
                                           PEID size, const MPI_Comm &comm) {
     std::string line;

@@ -19,8 +19,8 @@
  * this program.  If not, see <http://www.gnu.org/licenses/>.
  *****************************************************************************/
 
-#ifndef _GENERATOR_CONFIG_H_
-#define _GENERATOR_CONFIG_H_
+#ifndef _COMPONENT_CONFIG_H_
+#define _COMPONENT_CONFIG_H_
 
 #include <string>
 #include "definitions.h"

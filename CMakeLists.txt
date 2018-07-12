@@ -12,10 +12,12 @@ if (NOT CMAKE_BUILD_TYPE)
 endif (NOT CMAKE_BUILD_TYPE)
 
 include_directories(SYSTEM ${MPI_CXX_INCLUDE_PATH})
-set(CMAKE_CXX_FLAGS "${CMAKE_CXX_FLAGS} ${MPI_COMPILE_FLAGS} -Wall -g3 -std=c++11")
+# set(CMAKE_CXX_FLAGS "${CMAKE_CXX_FLAGS} ${MPI_COMPILE_FLAGS} -fsanitize=address -fno-omit-frame-pointer -Wall -g3 -std=c++11")
 set(CMAKE_CXX_LINK_FLAGS "${CMAKE_CXX_LINK_FLAGS} ${MPI_LINK_FLAGS}")
 # set(CMAKE_CXX_FLAGS "${CMAKE_CXX_FLAGS} ${MPI_COMPILE_FLAGS} -Wall -g3 -std=c++11")
 # set(CMAKE_CXX_LINK_FLAGS "${CMAKE_CXX_LINK_FLAGS} ${MPI_LINK_FLAGS}")
+
+add_subdirectory(extern/kagen)
 
 include_directories(
         app
@@ -26,6 +28,19 @@ include_directories(
         lib/data_structures
         lib/io
         lib/tools
+        extern/kagen/extlib/sampling/sampling
+        extern/kagen/include
+        extern/kagen/include/generators
+        extern/kagen/include/generators/barabassi
+        extern/kagen/include/generators/geometric
+        extern/kagen/include/generators/geometric/delaunay
+        extern/kagen/include/generators/geometric/rgg
+        extern/kagen/include/generators/gnm
+        extern/kagen/include/generators/gnp
+        extern/kagen/include/generators/hyperbolic
+        extern/kagen/include/io
+        extern/kagen/include/tools
+        extern/kagen/interface/
 )
 
 
@@ -44,13 +59,13 @@ set(SOURCES
 
 add_executable(components ${SOURCES} "app/components.cpp")
 add_executable(shortcuts ${SOURCES} "app/shortcuts.cpp")
-# add_executable(debug ${SOURCES} "app/debug.cpp")
 
 set(LIBS
         gmp
+        spooky
+        sampling
         ${MPI_LIBRARIES}
         )
 
-target_link_libraries(components LINK_PUBLIC "${LIBS}")
-target_link_libraries(shortcuts LINK_PUBLIC "${LIBS}")
-# target_link_libraries(debug LINK_PUBLIC ${LIBS})
+target_link_libraries(components LINK_PUBLIC ${LIBS})
+target_link_libraries(shortcuts LINK_PUBLIC ${LIBS})

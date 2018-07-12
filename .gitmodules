@@ -1,0 +1,3 @@
+[submodule "extern/kagen"]
+	path = extern/kagen
+	url = https://github.com/sebalamm/KaGen

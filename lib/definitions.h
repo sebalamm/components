@@ -19,8 +19,9 @@
  * this program.  If not, see <http://www.gnu.org/licenses/>.
  *****************************************************************************/
 
-#ifndef _DEFINITIONS_H_
-#define _DEFINITIONS_H_
+#ifndef _GRAPH_DEFINITIONS_H_
+#define _GRAPH_DEFINITIONS_H_
+
 
 // Constants
 typedef int PEID;

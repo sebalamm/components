@@ -24,6 +24,7 @@
 
 #include <mpi.h>
 
+#include <algorithm>
 #include <unordered_map>
 #include <vector>
 #include <memory>
@@ -107,8 +108,11 @@ class GraphAccess {
         number_of_local_vertices_(0),
         number_of_global_vertices_(0),
         number_of_edges_(0),
+        number_of_global_edges_(0),
         local_offset_(0),
         ghost_offset_(0),
+        contraction_level_(0),
+        max_contraction_level_(0),
         edge_buffers_(size),
         ghost_comm_(nullptr),
         vertex_counter_(0),
@@ -132,21 +136,21 @@ class GraphAccess {
   template<typename F>
   void ForallLocalVertices(F &&callback) {
     for (VertexID v = 0; v < GetNumberOfLocalVertices(); ++v) {
-      if (is_active_[v]) callback(v);
+      if (active_vertices_[contraction_level_][v]) callback(v);
     }
   }
 
   template<typename F>
   void ForallGhostVertices(F &&callback) {
     for (VertexID v = GetNumberOfLocalVertices(); v < GetNumberOfVertices(); ++v) {
-      if (is_active_[v]) callback(v);
+      if (active_vertices_[contraction_level_][v]) callback(v);
     }
   }
 
   template<typename F>
   void ForallVertices(F &&callback) {
     for (VertexID v = 0; v < GetNumberOfVertices(); ++v) {
-      if (is_active_[v]) callback(v);
+      if (active_vertices_[contraction_level_][v]) callback(v);
     }
   }
 
@@ -162,6 +166,14 @@ class GraphAccess {
     }
   }
 
+  bool IsAdjacent(const VertexID source, const VertexID target) {
+    bool adj = false;
+    ForallNeighbors(source, [&](const VertexID w) {
+      if (w == target) adj = true;
+    });
+    return adj;
+  }
+
   //////////////////////////////////////////////
   // Graph contraction
   //////////////////////////////////////////////
@@ -175,6 +187,199 @@ class GraphAccess {
 
   inline VertexID GetContractionVertex(VertexID v) const {
     return contraction_vertices_[v];
+  }
+
+  void DetermineActiveVertices() {
+    active_vertices_.resize(contraction_level_ + 2);
+    active_vertices_[contraction_level_ + 1].resize(number_of_vertices_, false);
+    vertex_payload_.resize(contraction_level_ + 2);
+    vertex_payload_[contraction_level_ + 1].resize(number_of_vertices_);
+
+    // Parent information
+    parent_.resize(contraction_level_ + 2);
+    parent_[contraction_level_ + 1].resize(number_of_vertices_);
+
+    // Update stacks
+    added_edges_.resize(contraction_level_ + 2);
+    removed_edges_.resize(contraction_level_ + 2);
+
+    // Determine edges to communicate
+    std::vector<std::unordered_set<VertexID>> send_ids(size_);
+    for (PEID i = 0; i < size_; ++i) edge_buffers_[i].clear();
+
+    // Gather remaining edges and reset vertex payloads
+    ForallLocalVertices([&](VertexID v) {
+      VertexID vlabel = GetVertexLabel(v);
+      ForallAdjacentEdges(v, [&](EdgeID e) {
+        VertexID w = edges_[v][e].target_;
+        VertexID wlabel = GetVertexLabel(w);
+        // Edge needs to be linked to root 
+        // Make sure the edge does not exist already
+        // if (vlabel != wlabel && (vlabel != v && wlabel != w)) {
+        if (vlabel != wlabel) {
+          PEID pe = GetVertexRoot(v);
+          VertexID update_id = vlabel + GetNumberOfLocalVertices() * wlabel;
+          if (send_ids[pe].find(update_id) == send_ids[pe].end()) {
+            send_ids[pe].insert(update_id);
+            // TODO: Encode edges to reduce volume
+            edge_buffers_[pe].push_back(vlabel);
+            edge_buffers_[pe].push_back(wlabel);
+            edge_buffers_[pe].push_back(GetVertexRoot(w));
+#ifndef NDEBUG
+            std::cout << "[LOG] [R" << rank_ << ":" << contraction_level_
+                      << "] [Link] send edge (" << vlabel << "," << wlabel
+                      << "(R" << GetVertexRoot(w) << ")) to " << pe
+                      << std::endl;
+#endif
+          }
+        } 
+        removed_edges_[contraction_level_].emplace_back(v, GetGlobalID(w));
+      });
+      RemoveAllEdges(v);
+      vertex_payload_[contraction_level_ + 1][v] =
+          {std::numeric_limits<VertexID>::max() - 1, GetVertexLabel(v), rank_};
+    });
+
+    // Send gathered edges
+    for (PEID i = 0; i < size_; ++i) {
+      if (!IsAdjacentPE(i) || i == rank_) continue;
+      if (!(edge_buffers_[i].size() > 0)) continue;
+      MPI_Request request;
+      MPI_Isend(&edge_buffers_[i][0], edge_buffers_[i].size(), MPI_LONG, i, 0,
+                MPI_COMM_WORLD, &request);
+      MPI_Request_free(&request);
+    }
+
+    // Increase contraction level
+    contraction_level_++;
+    max_contraction_level_++;
+
+    // Gather edge updates
+    std::unordered_set<VertexID> inserted_edges;
+
+    // TODO: Contract connections between local vertices
+    // Local updates
+    if (edge_buffers_[rank_].size() > 0) {
+      for (int i = 0; i < edge_buffers_[rank_].size() - 1; i += 3) {
+        VertexID source = GetLocalID(edge_buffers_[rank_][i]);
+        VertexID target = edge_buffers_[rank_][i+1];
+        PEID target_pe = static_cast<PEID>(edge_buffers_[rank_][i+2]);
+        VertexID edge_id = source + target * GetNumberOfLocalVertices();
+        if (inserted_edges.find(edge_id) == inserted_edges.end()) {
+          inserted_edges.insert(edge_id);
+          active_vertices_[contraction_level_][source] = true;
+          AddEdge(source, target, target_pe);
+          added_edges_[contraction_level_ - 1].emplace_back(source, target);
+#ifndef NDEBUG
+          std::cout << "[LOG] [R" << rank_ << ":" << contraction_level_ - 1
+                    << "] [Link] recv edge (" << GetGlobalID(source) << "," << target
+                    << "(R" << target_pe << ")) from " << rank_
+                    << std::endl;
+#endif
+        }
+      }
+    }
+
+    // Non-local updates
+    MPI_Barrier(MPI_COMM_WORLD);
+    MPI_Status st{};
+    int flag = 1;
+    do {
+      MPI_Iprobe(MPI_ANY_SOURCE, 0, MPI_COMM_WORLD, &flag, &st);
+      if (flag) {
+        int message_length;
+        MPI_Get_count(&st, MPI_LONG, &message_length);
+        std::vector<VertexID> message(message_length);
+        MPI_Status rst{};
+        MPI_Recv(&message[0],
+                 message_length,
+                 MPI_LONG,
+                 st.MPI_SOURCE,
+                 0,
+                 MPI_COMM_WORLD,
+                 &rst);
+        if (message_length == 1) continue;
+
+        // Insert edges
+        for (int i = 0; i < message_length - 1; i += 3) {
+          VertexID source = GetLocalID(message[i]);
+          VertexID target = message[i+1];
+          PEID target_pe = static_cast<PEID>(message[i+2]);
+          VertexID edge_id = source + target * GetNumberOfLocalVertices();
+          if (inserted_edges.find(edge_id) == inserted_edges.end()) {
+            inserted_edges.insert(edge_id);
+            active_vertices_[contraction_level_][source] = true;
+            AddEdge(source, target, target_pe);
+            added_edges_[contraction_level_ - 1].emplace_back(source, target);
+#ifndef NDEBUG
+            std::cout << "[LOG] [R" << rank_ << ":" << contraction_level_ - 1
+                      << "] [Link] recv edge (" << GetGlobalID(source) << "," << target
+                      << "(R" << target_pe << ")) from " << st.MPI_SOURCE
+                      << std::endl;
+#endif
+          }
+        }
+      }
+    } while (flag);
+  }
+
+  void MoveUpContraction() {
+    while (contraction_level_ > 0) {
+      // Remove current edges from current level
+      ForallLocalVertices([&](VertexID v) {
+          RemoveAllEdges(v);
+      });
+
+      // Decrease level
+      contraction_level_--;
+
+      // Add previously removed edges
+      // TODO: Payloads get reset here!
+      // HACK: Store and apply labels
+      std::vector<VertexID> prev_labels;
+      ForallVertices([&](VertexID v) {
+        prev_labels.emplace_back(vertex_payload_[contraction_level_][v].label_);
+      });
+      for (auto &e : removed_edges_[contraction_level_])
+        AddEdge(std::get<0>(e), std::get<1>(e), GetPE(GetLocalID(std::get<1>(e))));
+      ForallVertices([&](VertexID v) {
+        vertex_payload_[contraction_level_][v].label_ = prev_labels[v];
+      });
+
+      // Update local labels
+      ForallLocalVertices([&](VertexID v) {
+        if (vertex_payload_[contraction_level_][v].label_ !=
+            vertex_payload_[contraction_level_ + 1][v].label_)
+          SetVertexPayload(v,
+                           {0,
+                            vertex_payload_[contraction_level_ + 1][v].label_,
+                            rank_});
+      });
+
+      // Propagate labels
+      int converged_globally = 0;
+      while (converged_globally == 0) {
+        int converged_locally = 1;
+        // Receive variates
+        SendAndReceiveGhostVertices();
+
+        // Send current label from root
+        ForallLocalVertices([&](VertexID v) {
+          if (GetVertexLabel(GetParent(v)) != GetVertexLabel(v)) {
+            SetVertexPayload(v, {0, GetVertexLabel(GetParent(v)), rank_});
+            converged_locally = 0;
+          }
+        });
+
+        // Check if all PEs are done
+        MPI_Allreduce(&converged_locally,
+                      &converged_globally,
+                      1,
+                      MPI_INT,
+                      MPI_MIN,
+                      MPI_COMM_WORLD);
+      }
+    }
   }
 
   //////////////////////////////////////////////
@@ -241,6 +446,8 @@ class GraphAccess {
 
   inline VertexID GetNumberOfGlobalVertices() const { return number_of_global_vertices_; }
 
+  inline VertexID GetNumberOfGlobalEdges() const { return number_of_global_edges_; }
+
   inline VertexID GetLocalOffset() const {
     return local_offset_;
   }
@@ -253,9 +460,9 @@ class GraphAccess {
 
   inline EdgeID GetNumberOfEdges() const { return number_of_edges_; }
 
-  inline VertexID GatherNumberOfGlobalVertices() {
+  VertexID GatherNumberOfGlobalVertices() {
     VertexID local_vertices = 0;
-    ForallLocalVertices([&](VertexID v) { local_vertices++; });
+    ForallLocalVertices([&](const VertexID v) { local_vertices++; });
     // Check if all PEs are done
     MPI_Allreduce(&local_vertices,
                   &number_of_global_vertices_,
@@ -266,27 +473,111 @@ class GraphAccess {
     return number_of_global_vertices_;
   }
 
-  void SetVertexPayload(VertexID v, VertexPayload &&msg, bool propagate = true);
-
-
-  void SetVertexPayloads(const std::vector<VertexPayload> &vertex_payload) {
-    ForallVertices([&](const VertexID &v) {
-      vertex_payload_[v] = vertex_payload[v];
+  VertexID GatherNumberOfGlobalEdges() {
+    VertexID local_edges = 0;
+    ForallLocalVertices([&](const VertexID v) { 
+        ForallNeighbors(v, [&](const VertexID w) { local_edges++; });
     });
+    // Check if all PEs are done
+    MPI_Allreduce(&local_edges,
+                  &number_of_global_edges_,
+                  1,
+                  MPI_LONG,
+                  MPI_SUM,
+                  MPI_COMM_WORLD);
+    number_of_global_edges_ /= 2;
+    return number_of_global_edges_;
   }
 
-  inline VertexPayload &GetVertexPayload(const VertexID v) {
-    return vertex_payload_[v];
+  void OutputComponents() {
+    VertexID global_num_vertices = GatherNumberOfGlobalVertices();
+    // Gather component sizes
+    std::unordered_map<VertexID, VertexID> local_component_sizes;
+    ForallLocalVertices([&](const VertexID v) {
+      VertexID c = GetVertexLabel(v);
+      if (local_component_sizes.find(c) == end(local_component_sizes))
+        local_component_sizes[c] = 0;
+      local_component_sizes[c]++;
+    });
+
+    // Gather component message
+    std::vector<std::pair<VertexID, VertexID>> local_components;
+    // local_components.reserve(local_component_sizes.size());
+    for(auto &kv : local_component_sizes)
+      local_components.emplace_back(kv.first, kv.second);
+    int num_local_components = local_components.size();
+
+    // Exchange number of local components
+    std::vector<int> num_components(size_);
+    MPI_Gather(&num_local_components, 1, MPI_INT, &num_components[0], 1, MPI_INT, ROOT, MPI_COMM_WORLD);
+
+    // Compute diplacements
+    std::vector<int> displ_components(size_, 0);
+    int num_global_components = 0;
+    for (PEID i = 0; i < size_; ++i) {
+      displ_components[i] = num_global_components;
+      num_global_components += num_components[i];
+    }
+
+    // Add datatype
+    MPI_Datatype MPI_COMP;
+    MPI_Type_vector(1, 2, 0, MPI_LONG, &MPI_COMP);
+    MPI_Type_commit(&MPI_COMP);
+
+    // Exchange components
+    std::vector<std::pair<VertexID, VertexID>> global_components(num_global_components);
+    MPI_Gatherv(&local_components[0], num_local_components, MPI_COMP,
+                &global_components[0], &num_components[0], &displ_components[0], MPI_COMP,
+                ROOT, MPI_COMM_WORLD);
+
+    if (rank_ == ROOT) {
+      std::unordered_map<VertexID, VertexID> global_component_sizes;
+      for (auto &comp : global_components) {
+        VertexID c = comp.first;
+        VertexID size = comp.second;
+        if (global_component_sizes.find(c) == end(global_component_sizes))
+          global_component_sizes[c] = 0;
+        global_component_sizes[c] += size;
+      }
+
+      std::unordered_map<VertexID, VertexID> condensed_component_sizes;
+      for (auto &cs : global_component_sizes) {
+        VertexID c = cs.first;
+        VertexID size = cs.second;
+        if (condensed_component_sizes.find(size) == end(condensed_component_sizes)) {
+          condensed_component_sizes[size] = 0;
+        }
+        condensed_component_sizes[size]++;
+      }
+
+      // Build final vector
+      std::vector<std::pair<VertexID, VertexID>> components;
+      components.reserve(condensed_component_sizes.size());
+      for(auto &kv : condensed_component_sizes)
+        components.emplace_back(kv.first, kv.second);
+      std::sort(begin(components), end(components));
+
+      std::cout << "[ ";
+      for (auto &comp : components)
+        std::cout << comp.first << "(" << comp.second << ") ";
+      std::cout << "]" << std::endl;
+    }
+
+    MPI_Barrier(MPI_COMM_WORLD);
+  }
+
+  void SetVertexPayload(VertexID v, VertexPayload &&msg, bool propagate = true);
+
+  inline VertexPayload &GetVertexMessage(const VertexID v) {
+    return vertex_payload_[contraction_level_][v];
+  }
+
+  void SetVertexMessage(const VertexID v, VertexPayload &&msg) {
+    vertex_payload_[contraction_level_][v] = msg;
   }
 
   void SetParent(const VertexID v, const VertexID parent) {
-    parent_[v] = parent;
-  }
-
-  void SetParents(const std::vector<VertexID> &parent) {
-    ForallVertices([&](const VertexID &v) {
-      parent_[v] = parent[v];
-    });
+    parent_[contraction_level_][v] = parent;
   }
 
   inline std::string GetVertexString(const VertexID v) {
@@ -298,31 +589,24 @@ class GraphAccess {
   }
 
   inline VertexID GetVertexDeviate(const VertexID v) const {
-    return vertex_payload_[v].deviate_;
+    return vertex_payload_[contraction_level_][v].deviate_;
   }
 
   inline VertexID GetVertexLabel(const VertexID v) const {
-    return vertex_payload_[v].label_;
+    return vertex_payload_[contraction_level_][v].label_;
   }
 
   inline PEID GetVertexRoot(const VertexID v) const {
-    return vertex_payload_[v].root_;
+    return vertex_payload_[contraction_level_][v].root_;
   }
 
   inline VertexID GetParent(const VertexID v) const {
-    return parent_[v];
+    return parent_[contraction_level_][v];
   }
 
   inline VertexID AddVertex() {
     return vertex_counter_++;
   }
-
-  void SetActiveVertices(const std::vector<bool> &is_active) {
-    ForallVertices([&](const VertexID &v) {
-      is_active_[v] = is_active[v];
-    });
-  }
-
 
   inline void RemoveVertex() {
   }
@@ -334,7 +618,7 @@ class GraphAccess {
   // Local IDs
   bool IsConnected(VertexID from, VertexID to) {
     ForallNeighbors(from, [&](VertexID v) {
-      if (v == to) return true; 
+        if (v == to) return true; 
     });
     return false;
   }
@@ -508,14 +792,15 @@ class GraphAccess {
 
   std::vector<LocalVertexData> local_vertices_data_;
   std::vector<GhostVertexData> ghost_vertices_data_;
-  std::vector<VertexPayload> vertex_payload_;
-  std::vector<VertexID> parent_;
+  std::vector<std::vector<VertexPayload>> vertex_payload_;
+  std::vector<std::vector<VertexID>> parent_;
 
   VertexID number_of_vertices_;
   VertexID number_of_local_vertices_;
   VertexID number_of_global_vertices_;
 
   EdgeID number_of_edges_;
+  EdgeID number_of_global_edges_;
 
   // Vertex mapping
   VertexID local_offset_;
@@ -525,8 +810,11 @@ class GraphAccess {
   std::unordered_map<VertexID, VertexID> global_to_local_map_;
 
   // Contraction
+  VertexID contraction_level_, max_contraction_level_;
   std::vector<VertexID> contraction_vertices_;
-  std::vector<bool> is_active_;
+  std::vector<std::vector<bool>> active_vertices_;
+  std::vector<std::vector<std::pair<VertexID, VertexID>>> added_edges_;
+  std::vector<std::vector<std::pair<VertexID, VertexID>>> removed_edges_;
 
   // Buffers
   std::vector<std::vector<VertexID>> edge_buffers_;
@@ -540,10 +828,6 @@ class GraphAccess {
   // Temporary counters
   VertexID vertex_counter_;
   EdgeID edge_counter_;
-
-  void SetVertexMessage(const VertexID v, VertexPayload &&msg) {
-    vertex_payload_[v] = msg;
-  }
 };
 
 #endif
