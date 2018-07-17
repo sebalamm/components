@@ -59,17 +59,16 @@ EdgeID GraphAccess::AddEdge(VertexID from, VertexID to, PEID rank) {
     local_vertices_data_[from].is_interface_vertex_ = true;
     if (IsGhostFromGlobal(to)) { // true if ghost already in map, otherwise false
       edges_[from].emplace_back(global_to_local_map_[to]);
-      // Insert reverse edge?
-      // TODO: Does this break anything?
       edges_[global_to_local_map_[to]].emplace_back(from);
       active_vertices_[contraction_level_][global_to_local_map_[to]] = true;
       vertex_payload_[contraction_level_][global_to_local_map_[to]] = 
-          {std::numeric_limits<VertexID>::max() - 1, to, neighbor};
+          // {std::numeric_limits<VertexID>::max() - 1, to, neighbor};
+          {std::numeric_limits<VertexID>::max() - 1, 
+           GetVertexLabel(global_to_local_map_[to]), 
+           neighbor};
     } else {
       global_to_local_map_[to] = number_of_vertices_++;
       edges_[from].emplace_back(global_to_local_map_[to]);
-      // Insert reverse edge?
-      // TODO: Does this break anything?
       edges_.resize(number_of_vertices_);
       edges_[global_to_local_map_[to]].emplace_back(from);
       active_vertices_[contraction_level_].resize(number_of_vertices_);

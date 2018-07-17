@@ -58,10 +58,10 @@ class Components {
     Contraction ccont(cag, rank_, size_);
     GraphAccess ccag = ccont.BuildComponentAdjacencyGraph();
     rng_offset_ = ccag.GatherNumberOfGlobalVertices();
+    // ccag.OutputLocal();
 
     if (rank_ == ROOT) std::cout << "[STATUS] Perform main algorithm (" << t.Elapsed() << ")" << std::endl;
     PerformDecomposition(ccag);
-    // ccag.OutputLabels();
     if (rank_ == ROOT) std::cout << "[STATUS] Apply labels (" << t.Elapsed() << ")" << std::endl;
     ApplyToLocalComponents(ccag, cag);
     ApplyToLocalComponents(cag, g);
@@ -155,7 +155,7 @@ class Components {
       num_global_vertices += num_vertices[i];
     }
 
-    // Distribte vertices/degrees using all-gather
+    // Distribute vertices/degrees using all-gather
     std::vector<VertexID> global_vertices(num_global_vertices);
     std::vector<VertexID> global_degrees(num_global_vertices);
     MPI_Allgatherv(&local_vertices[0], num_local_vertices, MPI_LONG,

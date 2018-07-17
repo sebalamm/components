@@ -33,30 +33,41 @@ void NodeCommunicator::ReceiveMessages() {
     int message_length;
     MPI_Get_count(&st, MPI_LONG, &message_length);
 
+    // if (rank_ == 11) std::cout << "start recv " << messages_recv << " " << recv_tag_ << std::endl;
     std::vector<VertexID> message(static_cast<unsigned long>(message_length));
     MPI_Status rst{};
     MPI_Recv(&message[0], message_length,
              MPI_LONG, st.MPI_SOURCE,
              recv_tag_, communicator_, &rst);
     messages_recv++;
-    if (message_length == 1) continue;
+    // if (rank_ == 11) std::cout << "start ml " << message_length << std::endl;
+    if (message_length < 4) continue;
 
     for (int i = 0; i < message_length - 1; i += 4) {
+    // if (rank_ == 11) std::cout << message[i] << std::endl;
+    // if (rank_ == 11 && message[i] == 17) {
+    //   g_->OutputLocal();
+    //   std::cout << st.MPI_SOURCE << std::endl;
+    //   std::cout << g_->IsGhostFromGlobal(message[i]) << std::endl;
+    // }
       VertexID local_id = g_->GetLocalID(message[i]);
       VertexID deviate = message[i + 1];
       VertexID label = message[i + 2];
       PEID root = static_cast<PEID>(message[i + 3]);
-#ifndef NDEBUG
-      std::cout << "[R" << rank_ << "] recv [" << local_id << "]("
-                << deviate << "," << label
-                << "," << root << ") from pe "
-                << st.MPI_SOURCE << " with tag " << recv_tag_
-                << " length " << message_length << " ["
-                << messages_recv << "/" << GetNumberOfAdjacentPEs() << "]"
-                << std::endl;
-#endif
+// #ifndef NDEBUG
+// if (rank_ == 11) {
+//       std::cout << "[R" << rank_ << "] recv [" << local_id << "]("
+//                 << deviate << "," << label
+//                 << "," << root << ") from pe "
+//                 << st.MPI_SOURCE << " with tag " << recv_tag_
+//                 << " length " << message_length << " ["
+//                 << messages_recv << "/" << GetNumberOfAdjacentPEs() << "]"
+//                 << std::endl;
+//     }
+// #endif
       g_->HandleGhostUpdate(local_id, label, deviate, root);
     }
+    // if (rank_ == 11) std::cout << "done" << std::endl;
   }
   isend_requests_.clear();
 }
