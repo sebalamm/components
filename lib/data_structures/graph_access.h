@@ -205,11 +205,20 @@ class GraphAccess {
     added_edges_.resize(contraction_level_ + 2);
     removed_edges_.resize(contraction_level_ + 2);
 
+    // OutputLocal();
+    MPI_Barrier(MPI_COMM_WORLD);
+    // MPI_Barrier(MPI_COMM_WORLD);
+    // exit(0);
+
     // Determine edges to communicate
     // Gather labels to communicate
     std::vector<std::unordered_set<VertexID>> send_ids(size_);
     std::vector<std::vector<VertexID>> send_buffers(size_);
     std::vector<std::vector<VertexID>> receive_buffers(size_);
+    for (int i = 0; i < size_; ++i) {
+      send_buffers[i].clear();
+      receive_buffers[i].clear();
+    }
     ForallLocalVertices([&](VertexID v) {
       VertexID vlabel = GetVertexLabel(v);
       ForallAdjacentEdges(v, [&](EdgeID e) {
@@ -221,9 +230,9 @@ class GraphAccess {
           if (send_ids[pe].find(update_id) == send_ids[pe].end()) {
             send_ids[pe].insert(update_id);
             // TODO: Encode edges to reduce volume
-            send_buffers[pe].push_back(vlabel);
-            send_buffers[pe].push_back(wlabel);
-            send_buffers[pe].push_back(GetVertexRoot(w));
+            send_buffers[pe].emplace_back(vlabel);
+            send_buffers[pe].emplace_back(wlabel);
+            send_buffers[pe].emplace_back(GetVertexRoot(w));
             // std::cout << "[R" << rank_ << ":" << contraction_level_ << "]"
             //           << " send (" << vlabel << "," << wlabel << "," << GetVertexRoot(w) << ")"
             //           << " to " << pe << std::endl;
@@ -237,52 +246,95 @@ class GraphAccess {
       parent_[contraction_level_ + 1][v] = parent_[contraction_level_][v];
     });
 
+    ForallGhostVertices([&](VertexID v) {
+      vertex_payload_[contraction_level_ + 1][v] =
+          {std::numeric_limits<VertexID>::max() - 1, GetVertexLabel(v), GetVertexRoot(v)};
+    });
+
+    // Get adjacency (otherwise we get deadlocks with added edges)
+    std::vector<bool> is_adj(size_);
+    PEID num_adj = 0;
+    for (PEID pe = 0; pe < size_; pe++) {
+      is_adj[pe] = IsAdjacentPE(pe);
+      if (is_adj[pe]) num_adj++;
+    }
+    MPI_Barrier(MPI_COMM_WORLD);
+
     // Propagate edge buffers until all vertices are converged
     contraction_level_++;
     std::unordered_set<VertexID> inserted_edges;
     std::unordered_set<VertexID> remaining_vertices;
+    std::vector<MPI_Request*> requests;
+    requests.clear();
     int converged_globally = 0;
     while (converged_globally == 0) {
       int converged_locally = 1;
 
       // Send edges
       for (PEID pe = 0; pe < size_; ++pe) {
-        if (IsAdjacentPE(pe) || pe == rank_) {
-          int send_tag = 20 * size_ + pe;
-          if (send_buffers[pe].empty()) 
-            send_buffers[pe].emplace_back(0);
-          MPI_Request req;
-          MPI_Isend(&send_buffers[pe][0],
-                    static_cast<int>(send_buffers[pe].size()),
-                    MPI_LONG, pe,
-                    send_tag, MPI_COMM_WORLD, &req);
+        if (is_adj[pe]) {
+        // if (IsAdjacentPE(pe)) {
+          auto *req = new MPI_Request();
+          MPI_Isend(send_buffers[pe].data(), static_cast<int>(send_buffers[pe].size()), MPI_LONG, pe, 0, MPI_COMM_WORLD, req);
+          // if (send_buffers[pe].size() > 1) 
           // std::cout << "[R" << rank_ << ":" << contraction_level_ << "]"
-          //           << " send msg to " << pe << std::endl;
+          //           << " send msg to " << pe << " with " << send_buffers[pe].size() << std::endl;
+          requests.emplace_back(req);
         }
       }
+      MPI_Barrier(MPI_COMM_WORLD);
 
       // Receive edges
-      for (PEID pe = 0; pe < size_; ++pe) {
-        if (IsAdjacentPE(pe) || pe == rank_) {
-          MPI_Status st{};
-          MPI_Probe(MPI_ANY_SOURCE, 20 * size_ + rank_, MPI_COMM_WORLD, &st);
-          int message_length;
-          MPI_Get_count(&st, MPI_LONG, &message_length);
+      PEID messages_recv = 0;
+      int message_length = 0;
+      for (int i = 0; i < size_; ++i) receive_buffers[i].clear();
+      // for (PEID pe = 0; pe < size_; ++pe) {
+      //   // if (is_adj[pe] || pe == rank_) {
+      //   if (IsAdjacentPE(pe)) {
+      //     MPI_Status st{};
+      //     // std::cout << "[R" << rank_ << ":" << contraction_level_ << "]"
+      //     //           << " probe msg from " << pe << std::endl;
+      //     MPI_Probe(pe, 321 * size_, MPI_COMM_WORLD, &st);
+      //     MPI_Get_count(&st, MPI_LONG, &message_length);
+      //     messages_recv++;
+      //     std::cout << "[R" << rank_ << ":" << contraction_level_ << "]"
+      //               << " probed msg from " << st.MPI_SOURCE << " with length " << message_length << " " << (message_length == MPI_UNDEFINED) << std::endl;
+      //     receive_buffers[st.MPI_SOURCE].resize(message_length);
+      //     MPI_Status rst{};
+      //     // std::cout << "[R" << rank_ << ":" << contraction_level_ << "]"
+      //     //           << " fetch msg from " << st.MPI_SOURCE << " with " << message_length << std::endl;
+      //     MPI_Recv(&receive_buffers[st.MPI_SOURCE][0], message_length, MPI_LONG, st.MPI_SOURCE, 321 * size_, MPI_COMM_WORLD, &rst);
+      //     // std::cout << "[R" << rank_ << ":" << contraction_level_ << "]"
+      //     //           << " got msg from " << st.MPI_SOURCE << " with " << message_length << std::endl;
+      //   }
+      // }
+      receive_buffers[rank_] = send_buffers[rank_];
+      while (messages_recv < num_adj) {
+      // while (messages_recv < GetNumberOfAdjacentPEs()) {
+        MPI_Status st{};
+        // std::cout << "[R" << rank_ << ":" << contraction_level_ << "]"
+        //           << " probe msg from " << pe << std::endl;
+        MPI_Probe(MPI_ANY_SOURCE, 0, MPI_COMM_WORLD, &st);
+        MPI_Get_count(&st, MPI_LONG, &message_length);
+        messages_recv++;
+        // std::cout << "[R" << rank_ << ":" << contraction_level_ << "]"
+        //           << " probed msg from " << st.MPI_SOURCE << " with length " << message_length << std::endl;
 
-          receive_buffers[pe].resize(message_length);
-          MPI_Status rst{};
-          // std::cout << "[R" << rank_ << ":" << contraction_level_ << "]"
-          //           << " fetch msg from " << pe << std::endl;
-          MPI_Recv(&receive_buffers[pe][0], message_length,
-                   MPI_LONG, st.MPI_SOURCE,
-                   20 * size_ + rank_, MPI_COMM_WORLD, &rst);
-        }
+        receive_buffers[st.MPI_SOURCE].resize(message_length);
+        MPI_Status rst{};
+        // std::cout << "[R" << rank_ << ":" << contraction_level_ << "]"
+        //           << " fetch msg from " << st.MPI_SOURCE << " with " << message_length << std::endl;
+        MPI_Recv(&receive_buffers[st.MPI_SOURCE][0], message_length, MPI_LONG, st.MPI_SOURCE, 0, MPI_COMM_WORLD, &rst);
+        // std::cout << "[R" << rank_ << ":" << contraction_level_ << "]"
+        //           << " got msg from " << st.MPI_SOURCE << " with " << message_length << std::endl;
       }
-      // std::cout << "done receive " << rank_ << std::endl;
-      // MPI_Barrier(MPI_COMM_WORLD);
+      // std::cout << "[R" << rank_ << ":" << contraction_level_ << "]"
+      //           << " work on edges" << std::endl;
+      MPI_Barrier(MPI_COMM_WORLD);
 
       // Switch buffers
       for (int i = 0; i < size_; ++i) send_buffers[i].clear();
+      requests.clear();
       // if (send_buffers == &send_buffers_a) {
       //   for (int i = 0; i < size_; ++i) send_buffers_b[i].clear();
       //   send_buffers = &send_buffers_b;
@@ -294,7 +346,9 @@ class GraphAccess {
       // Receive edges and apply updates
       for (PEID pe = 0; pe < size_; ++pe) {
         // std::cout << "next pe" << std::endl;
-        if (!IsAdjacentPE(pe) && pe != rank_) continue;
+        // if (!is_adj[pe] && pe != rank_) continue;
+        // if (!IsAdjacentPE(pe) && pe != rank_) continue;
+        // send_buffers[pe].clear();
         if (receive_buffers[pe].size() < 3) continue;
         for (int i = 0; i < receive_buffers[pe].size(); i += 3) {
           // std::cout << "recvb " << pe << " size " << receive_buffers[pe].size() << std::endl;
@@ -316,7 +370,6 @@ class GraphAccess {
                 VertexID edge_id = v + wlabel * GetNumberOfLocalVertices();
                 if (inserted_edges.find(edge_id) == inserted_edges.end()) {
                   inserted_edges.insert(edge_id);
-                  // active_vertices_[contraction_level_][v] = true;
                   AddEdge(v, wlabel, wroot);
                   remaining_vertices.insert(v);
                   remaining_vertices.insert(GetLocalID(wlabel));
@@ -332,9 +385,9 @@ class GraphAccess {
                 if (send_ids[pe].find(update_id) == send_ids[pe].end()) {
                   send_ids[pe].insert(update_id);
                   // TODO: Encode edges to reduce volume
-                  send_buffers[pe].push_back(vlabel);
-                  send_buffers[pe].push_back(wlabel);
-                  send_buffers[pe].push_back(wroot);
+                  send_buffers[pe].emplace_back(vlabel);
+                  send_buffers[pe].emplace_back(wlabel);
+                  send_buffers[pe].emplace_back(wroot);
                   // std::cout << "[R" << rank_ << ":" << contraction_level_ << "]"
                   //           << " propagate (" << vlabel << "," << wlabel << "," << wroot << ")"
                   //           << " to " << pe << std::endl;
@@ -355,10 +408,10 @@ class GraphAccess {
                     MPI_MIN,
                     MPI_COMM_WORLD);
       // std::cout << "R" << rank_ << " finish convergence " << converged_globally << std::endl;
-      // MPI_Barrier(MPI_COMM_WORLD);
+      MPI_Barrier(MPI_COMM_WORLD);
     }
     // std::cout << "contraction done" << std::endl;
-    // MPI_Barrier(MPI_COMM_WORLD);
+    MPI_Barrier(MPI_COMM_WORLD);
     // exit(0);
     // Only keep remaining vertices active
     std::fill(begin(active_vertices_[contraction_level_]), 
@@ -370,6 +423,7 @@ class GraphAccess {
 
   void MoveUpContraction() {
     // TODO: Does not work if graph is completely empty
+    // OutputLocal();
     while (contraction_level_ > 0) {
       // Remove current edges from current level
       ForallLocalVertices([&](VertexID v) {
@@ -397,6 +451,7 @@ class GraphAccess {
       // MPI_Barrier(MPI_COMM_WORLD);
       // exit(1);
 
+      // OutputLocal();
       // Update local labels
       ForallLocalVertices([&](VertexID v) {
         if (vertex_payload_[contraction_level_][v].label_ !=

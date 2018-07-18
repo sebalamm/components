@@ -175,6 +175,8 @@ class Components {
 
   void RunExponentialBFS(GraphAccess &g) {
     if (rank_ == ROOT) std::cout << "[STATUS] |-- Iteration " << iteration_ << std::endl;
+    // if (iteration_ == 2) g.OutputLocal();
+    MPI_Barrier(MPI_COMM_WORLD);
 
     // bool stop = false;
     // g.ForallLocalVertices([&](const VertexID v) {

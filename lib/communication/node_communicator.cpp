@@ -43,7 +43,7 @@ void NodeCommunicator::ReceiveMessages() {
     // if (rank_ == 11) std::cout << "start ml " << message_length << std::endl;
     if (message_length < 4) continue;
 
-    for (int i = 0; i < message_length - 1; i += 4) {
+    for (int i = 0; i < message_length; i += 4) {
     // if (rank_ == 11) std::cout << message[i] << std::endl;
     // if (rank_ == 11 && message[i] == 17) {
     //   g_->OutputLocal();
