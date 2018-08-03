@@ -193,22 +193,18 @@ class GraphAccess {
 
   void DetermineActiveVertices() {
     active_vertices_.resize(contraction_level_ + 2);
-    active_vertices_[contraction_level_ + 1].resize(number_of_vertices_, true);
+    active_vertices_[contraction_level_ + 1].resize(number_of_vertices_, false);
     vertex_payload_.resize(contraction_level_ + 2);
     vertex_payload_[contraction_level_ + 1].resize(number_of_vertices_);
 
     // Parent information
     parent_.resize(contraction_level_ + 2);
     parent_[contraction_level_ + 1].resize(number_of_vertices_);
+    // if (rank_ == 0) OutputLocal();
 
     // Update stacks
     added_edges_.resize(contraction_level_ + 2);
     removed_edges_.resize(contraction_level_ + 2);
-
-    // OutputLocal();
-    MPI_Barrier(MPI_COMM_WORLD);
-    // MPI_Barrier(MPI_COMM_WORLD);
-    // exit(0);
 
     // Determine edges to communicate
     // Gather labels to communicate
@@ -221,29 +217,29 @@ class GraphAccess {
     }
     ForallLocalVertices([&](VertexID v) {
       VertexID vlabel = GetVertexLabel(v);
-      ForallAdjacentEdges(v, [&](EdgeID e) {
-        VertexID w = edges_[v][e].target_;
+      ForallNeighbors(v, [&](VertexID w) {
         VertexID wlabel = GetVertexLabel(w);
         if (vlabel != wlabel) {
           PEID pe = GetPE(GetParent(v));
           VertexID update_id = vlabel + GetNumberOfLocalVertices() * wlabel;
           if (send_ids[pe].find(update_id) == send_ids[pe].end()) {
             send_ids[pe].insert(update_id);
-            // TODO: Encode edges to reduce volume
             send_buffers[pe].emplace_back(vlabel);
             send_buffers[pe].emplace_back(wlabel);
             send_buffers[pe].emplace_back(GetVertexRoot(w));
-            // std::cout << "[R" << rank_ << ":" << contraction_level_ << "]"
-            //           << " send (" << vlabel << "," << wlabel << "," << GetVertexRoot(w) << ")"
-            //           << " to " << pe << std::endl;
+            // if (vlabel == 4637 || wlabel == 4637)
+            //   std::cout << "[R" << rank_ << ":" << contraction_level_ << "]"
+            //             << " send (" << vlabel << " (" << GetVertexRoot(v) << "), " << wlabel << "  (" << GetVertexRoot(w) << "))"
+            //             << " to " << pe << " neighbor " << GetPE(w) << " v " << GetGlobalID(w) << std::endl;
           }
         }
         removed_edges_[contraction_level_].emplace_back(v, GetGlobalID(w));
       });
       RemoveAllEdges(v);
       vertex_payload_[contraction_level_ + 1][v] =
-          {std::numeric_limits<VertexID>::max() - 1, GetVertexLabel(v), rank_};
+          {std::numeric_limits<VertexID>::max() - 1, GetVertexLabel(v), GetVertexRoot(v)};
       parent_[contraction_level_ + 1][v] = parent_[contraction_level_][v];
+      active_vertices_[contraction_level_ + 1][v] = true;
     });
 
     ForallGhostVertices([&](VertexID v) {
@@ -273,12 +269,8 @@ class GraphAccess {
       // Send edges
       for (PEID pe = 0; pe < size_; ++pe) {
         if (is_adj[pe]) {
-        // if (IsAdjacentPE(pe)) {
           auto *req = new MPI_Request();
           MPI_Isend(send_buffers[pe].data(), static_cast<int>(send_buffers[pe].size()), MPI_LONG, pe, 0, MPI_COMM_WORLD, req);
-          // if (send_buffers[pe].size() > 1) 
-          // std::cout << "[R" << rank_ << ":" << contraction_level_ << "]"
-          //           << " send msg to " << pe << " with " << send_buffers[pe].size() << std::endl;
           requests.emplace_back(req);
         }
       }
@@ -288,118 +280,81 @@ class GraphAccess {
       PEID messages_recv = 0;
       int message_length = 0;
       for (int i = 0; i < size_; ++i) receive_buffers[i].clear();
-      // for (PEID pe = 0; pe < size_; ++pe) {
-      //   // if (is_adj[pe] || pe == rank_) {
-      //   if (IsAdjacentPE(pe)) {
-      //     MPI_Status st{};
-      //     // std::cout << "[R" << rank_ << ":" << contraction_level_ << "]"
-      //     //           << " probe msg from " << pe << std::endl;
-      //     MPI_Probe(pe, 321 * size_, MPI_COMM_WORLD, &st);
-      //     MPI_Get_count(&st, MPI_LONG, &message_length);
-      //     messages_recv++;
-      //     std::cout << "[R" << rank_ << ":" << contraction_level_ << "]"
-      //               << " probed msg from " << st.MPI_SOURCE << " with length " << message_length << " " << (message_length == MPI_UNDEFINED) << std::endl;
-      //     receive_buffers[st.MPI_SOURCE].resize(message_length);
-      //     MPI_Status rst{};
-      //     // std::cout << "[R" << rank_ << ":" << contraction_level_ << "]"
-      //     //           << " fetch msg from " << st.MPI_SOURCE << " with " << message_length << std::endl;
-      //     MPI_Recv(&receive_buffers[st.MPI_SOURCE][0], message_length, MPI_LONG, st.MPI_SOURCE, 321 * size_, MPI_COMM_WORLD, &rst);
-      //     // std::cout << "[R" << rank_ << ":" << contraction_level_ << "]"
-      //     //           << " got msg from " << st.MPI_SOURCE << " with " << message_length << std::endl;
-      //   }
-      // }
       receive_buffers[rank_] = send_buffers[rank_];
       while (messages_recv < num_adj) {
-      // while (messages_recv < GetNumberOfAdjacentPEs()) {
         MPI_Status st{};
-        // std::cout << "[R" << rank_ << ":" << contraction_level_ << "]"
-        //           << " probe msg from " << pe << std::endl;
         MPI_Probe(MPI_ANY_SOURCE, 0, MPI_COMM_WORLD, &st);
         MPI_Get_count(&st, MPI_LONG, &message_length);
         messages_recv++;
-        // std::cout << "[R" << rank_ << ":" << contraction_level_ << "]"
-        //           << " probed msg from " << st.MPI_SOURCE << " with length " << message_length << std::endl;
 
         receive_buffers[st.MPI_SOURCE].resize(message_length);
         MPI_Status rst{};
-        // std::cout << "[R" << rank_ << ":" << contraction_level_ << "]"
-        //           << " fetch msg from " << st.MPI_SOURCE << " with " << message_length << std::endl;
         MPI_Recv(&receive_buffers[st.MPI_SOURCE][0], message_length, MPI_LONG, st.MPI_SOURCE, 0, MPI_COMM_WORLD, &rst);
-        // std::cout << "[R" << rank_ << ":" << contraction_level_ << "]"
-        //           << " got msg from " << st.MPI_SOURCE << " with " << message_length << std::endl;
       }
-      // std::cout << "[R" << rank_ << ":" << contraction_level_ << "]"
-      //           << " work on edges" << std::endl;
       MPI_Barrier(MPI_COMM_WORLD);
 
-      // Switch buffers
+      // Clear buffers
       for (int i = 0; i < size_; ++i) send_buffers[i].clear();
       requests.clear();
-      // if (send_buffers == &send_buffers_a) {
-      //   for (int i = 0; i < size_; ++i) send_buffers_b[i].clear();
-      //   send_buffers = &send_buffers_b;
-      // } else {
-      //   for (int i = 0; i < size_; ++i) send_buffers_a[i].clear();
-      //   send_buffers = &send_buffers_a;
-      // }
 
       // Receive edges and apply updates
       for (PEID pe = 0; pe < size_; ++pe) {
-        // std::cout << "next pe" << std::endl;
-        // if (!is_adj[pe] && pe != rank_) continue;
-        // if (!IsAdjacentPE(pe) && pe != rank_) continue;
-        // send_buffers[pe].clear();
         if (receive_buffers[pe].size() < 3) continue;
         for (int i = 0; i < receive_buffers[pe].size(); i += 3) {
-          // std::cout << "recvb " << pe << " size " << receive_buffers[pe].size() << std::endl;
           VertexID vlabel = receive_buffers[pe][i];
           VertexID wlabel = receive_buffers[pe][i + 1];
           VertexID wroot = receive_buffers[pe][i + 2];
-
-          // std::cout << "[R" << rank_ << ":" << contraction_level_ << "]"
-          //           << " recv (" << vlabel << "," << wlabel << "," << wroot << ")"
-          //           << " from " << pe << std::endl;
+          VertexID update_id = vlabel + GetNumberOfLocalVertices() * wlabel;
 
           ForallLocalVertices([&](VertexID v) {
             // Check if you labels corresponds to message
             // If so, add corresponding edges
             if (GetVertexLabel(v) == vlabel) {
               // Check if root
-              if (GetParent(v) == v) {
+              if (GetVertexRoot(v) == rank_) {
                 // Insert edge
-                VertexID edge_id = v + wlabel * GetNumberOfLocalVertices();
-                if (inserted_edges.find(edge_id) == inserted_edges.end()) {
-                  inserted_edges.insert(edge_id);
-                  AddEdge(v, wlabel, wroot);
-                  remaining_vertices.insert(v);
+                if (inserted_edges.find(update_id) == end(inserted_edges)) {
+                  inserted_edges.insert(update_id);
+                  VertexID vlocal = GetLocalID(vlabel);
+                  AddEdge(vlocal, wlabel, wroot);
+                  added_edges_[contraction_level_ - 1].emplace_back(vlocal, wlabel);
+                  remaining_vertices.insert(vlocal);
                   remaining_vertices.insert(GetLocalID(wlabel));
-                  added_edges_[contraction_level_ - 1].emplace_back(v, wlabel);
-                  // std::cout << "[R" << rank_ << ":" << contraction_level_ << "]"
-                  //           << " add edge (" << vlabel << "," << wlabel << "," << wroot << ")"
-                  //           << std::endl;
+                  VertexID wlocal = GetLocalID(wlabel);
+                  if (IsLocal(wlocal)) {
+                    AddEdge(wlocal, vlabel, wroot);
+                    added_edges_[contraction_level_ - 1].emplace_back(wlocal, vlabel);
+                  }
+                  vertex_payload_[contraction_level_][vlocal] =
+                      {std::numeric_limits<VertexID>::max() - 1, vlabel, rank_};
+                  vertex_payload_[contraction_level_][wlocal] =
+                      {std::numeric_limits<VertexID>::max() - 1, wlabel, wroot};
+                  // if (vlabel == 4637 || wlabel == 4637)
+                  //   std::cout << "[R" << rank_ << ":" << contraction_level_ << "]"
+                  //             << " adde (" << vlabel << " (" << GetVertexRoot(v) << "), " << wlabel << "  (" << wroot << "))"
+                  //             << std::endl;
+                  converged_locally = 0;
                 }
               } else {
                 // Continue propagation
                 PEID pe = GetPE(GetParent(v));
-                VertexID update_id = vlabel + GetNumberOfLocalVertices() * wlabel;
                 if (send_ids[pe].find(update_id) == send_ids[pe].end()) {
                   send_ids[pe].insert(update_id);
-                  // TODO: Encode edges to reduce volume
                   send_buffers[pe].emplace_back(vlabel);
                   send_buffers[pe].emplace_back(wlabel);
                   send_buffers[pe].emplace_back(wroot);
-                  // std::cout << "[R" << rank_ << ":" << contraction_level_ << "]"
-                  //           << " propagate (" << vlabel << "," << wlabel << "," << wroot << ")"
-                  //           << " to " << pe << std::endl;
+                  // if (vlabel == 4637 || wlabel == 4637)
+                  //   std::cout << "[R" << rank_ << ":" << contraction_level_ << "]"
+                  //             << " prop (" << vlabel << " (" << GetVertexRoot(v) << "), " << wlabel << "  (" << wroot << "))"
+                  //             << " to " << pe << std::endl;
+                  converged_locally = 0;
                 }
               }
-              converged_locally = 0;
             }
           });
         }
       }
 
-      // std::cout << "R" << rank_ << " wait for convergence" << std::endl;
       // Check if all PEs are done
       MPI_Allreduce(&converged_locally,
                     &converged_globally,
@@ -407,18 +362,15 @@ class GraphAccess {
                     MPI_INT,
                     MPI_MIN,
                     MPI_COMM_WORLD);
-      // std::cout << "R" << rank_ << " finish convergence " << converged_globally << std::endl;
-      MPI_Barrier(MPI_COMM_WORLD);
     }
-    // std::cout << "contraction done" << std::endl;
     MPI_Barrier(MPI_COMM_WORLD);
-    // exit(0);
+
     // Only keep remaining vertices active
     std::fill(begin(active_vertices_[contraction_level_]), 
               end(active_vertices_[contraction_level_]), false);
     for (auto &v : remaining_vertices)
       active_vertices_[contraction_level_][v] = true;
-
+    // if (rank_ == 0) OutputLocal();
   }
 
   void MoveUpContraction() {
@@ -536,7 +488,6 @@ class GraphAccess {
   inline VertexID GetGlobalID(VertexID v) const {
     return IsLocal(v) ? v + local_offset_
                       : ghost_vertices_data_[v - ghost_offset_].global_id_;
-
   }
 
   inline PEID GetPE(VertexID v) const {

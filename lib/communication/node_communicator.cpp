@@ -14,6 +14,11 @@ void NodeCommunicator::AddMessage(const VertexID v,
         (*current_send_buffers_)[neighbor].emplace_back(msg.label_);
         (*current_send_buffers_)[neighbor].emplace_back(msg.root_);
         packed_pes_[neighbor] = true;
+
+        // if (g_->GetGlobalID(v) == 6) {
+        //   g_->OutputLocal();
+        //   std::cout << rank_ << std::endl;
+        // }
       }
     }
   });
@@ -44,8 +49,12 @@ void NodeCommunicator::ReceiveMessages() {
     if (message_length < 4) continue;
 
     for (int i = 0; i < message_length; i += 4) {
-    // if (rank_ == 11) std::cout << message[i] << std::endl;
-    // if (rank_ == 11 && message[i] == 17) {
+    // if (rank_ == 0) std::cout 
+    //                   << message[i] 
+    //                   << " "
+    //                   << g_->IsGhostFromGlobal(message[i]) 
+    //                   << std::endl;
+    // if (rank_ == 3 && message[i] == 6) {
     //   g_->OutputLocal();
     //   std::cout << st.MPI_SOURCE << std::endl;
     //   std::cout << g_->IsGhostFromGlobal(message[i]) << std::endl;

@@ -62,6 +62,7 @@ EdgeID GraphAccess::AddEdge(VertexID from, VertexID to, PEID rank) {
       edges_[global_to_local_map_[to]].emplace_back(from);
       active_vertices_[contraction_level_][global_to_local_map_[to]] = true;
       vertex_payload_[contraction_level_][global_to_local_map_[to]] = 
+      // TODO: This caused the last segfaults
           {std::numeric_limits<VertexID>::max() - 1, GetVertexLabel(global_to_local_map_[to]), neighbor};
           // {std::numeric_limits<VertexID>::max() - 1, to, neighbor};
     } else {
