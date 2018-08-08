@@ -117,7 +117,10 @@ class GraphAccess {
         ghost_comm_(nullptr),
         vertex_counter_(0),
         edge_counter_(0) {}
-  virtual ~GraphAccess() = default;
+  virtual ~GraphAccess() {
+    free(ghost_comm_);
+    ghost_comm_ = nullptr;
+  };
 
   GraphAccess(GraphAccess &&rhs) = default;
 
@@ -254,7 +257,6 @@ class GraphAccess {
       is_adj[pe] = IsAdjacentPE(pe);
       if (is_adj[pe]) num_adj++;
     }
-    MPI_Barrier(MPI_COMM_WORLD);
 
     // Propagate edge buffers until all vertices are converged
     contraction_level_++;
@@ -274,7 +276,6 @@ class GraphAccess {
           requests.emplace_back(req);
         }
       }
-      MPI_Barrier(MPI_COMM_WORLD);
 
       // Receive edges
       PEID messages_recv = 0;
@@ -356,12 +357,14 @@ class GraphAccess {
       }
 
       // Check if all PEs are done
+      // std::cout << "[R " << rank_ << "] convergence" << std::endl;
       MPI_Allreduce(&converged_locally,
                     &converged_globally,
                     1,
                     MPI_INT,
                     MPI_MIN,
                     MPI_COMM_WORLD);
+      // std::cout << "[R " << rank_ << "] done" << std::endl;
     }
     MPI_Barrier(MPI_COMM_WORLD);
 
