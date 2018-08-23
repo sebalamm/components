@@ -35,6 +35,7 @@
 #include <tuple>
 #include <unordered_set>
 #include <boost/functional/hash.hpp>
+#include <google/sparse_hash_set>
 
 #include "config.h"
 
@@ -211,7 +212,7 @@ class GraphAccess {
 
     // Determine edges to communicate
     // Gather labels to communicate
-    std::vector<std::unordered_set<VertexID>> send_ids(size_);
+    std::vector<google::sparse_hash_set<VertexID>> send_ids(size_);
     std::vector<std::vector<VertexID>> send_buffers(size_);
     std::vector<std::vector<VertexID>> receive_buffers(size_);
     for (int i = 0; i < size_; ++i) {
@@ -223,7 +224,8 @@ class GraphAccess {
       ForallNeighbors(v, [&](VertexID w) {
         VertexID wlabel = GetVertexLabel(w);
         if (vlabel != wlabel) {
-          PEID pe = GetPE(GetParent(v));
+          std::pair<PEID, VertexID> parent = GetParent(v);
+          PEID pe = parent.first;
           VertexID update_id = vlabel + GetNumberOfLocalVertices() * wlabel;
           if (send_ids[pe].find(update_id) == send_ids[pe].end()) {
             send_ids[pe].insert(update_id);
@@ -260,8 +262,8 @@ class GraphAccess {
 
     // Propagate edge buffers until all vertices are converged
     contraction_level_++;
-    std::unordered_set<VertexID> inserted_edges;
-    std::unordered_set<VertexID> remaining_vertices;
+    google::sparse_hash_set<VertexID> inserted_edges;
+    google::sparse_hash_set<VertexID> remaining_vertices;
     std::vector<MPI_Request*> requests;
     requests.clear();
     int converged_globally = 0;
@@ -338,7 +340,8 @@ class GraphAccess {
                 }
               } else {
                 // Continue propagation
-                PEID pe = GetPE(GetParent(v));
+                std::pair<PEID, VertexID> parent = GetParent(v);
+                PEID pe = parent.first;
                 if (send_ids[pe].find(update_id) == send_ids[pe].end()) {
                   send_ids[pe].insert(update_id);
                   send_buffers[pe].emplace_back(vlabel);
@@ -426,8 +429,9 @@ class GraphAccess {
 
         // Send current label from root
         ForallLocalVertices([&](VertexID v) {
-          if (GetVertexLabel(GetParent(v)) != GetVertexLabel(v)) {
-            SetVertexPayload(v, {0, GetVertexLabel(GetParent(v)), rank_});
+          std::pair<PEID, VertexID> parent = GetParent(v);
+          if (GetVertexLabel(parent.second) != GetVertexLabel(v)) {
+            SetVertexPayload(v, {0, GetVertexLabel(parent.second), rank_});
             converged_locally = 0;
           }
         });
@@ -636,8 +640,8 @@ class GraphAccess {
     vertex_payload_[contraction_level_][v] = msg;
   }
 
-  void SetParent(const VertexID v, const VertexID parent) {
-    parent_[contraction_level_][v] = parent;
+  void SetParent(const VertexID v, const PEID parent_pe, const VertexID parent_v) {
+    parent_[contraction_level_][v] = std::make_pair(parent_pe, parent_v);
   }
 
   inline std::string GetVertexString(const VertexID v) {
@@ -660,7 +664,7 @@ class GraphAccess {
     return vertex_payload_[contraction_level_][v].root_;
   }
 
-  inline VertexID GetParent(const VertexID v) const {
+  inline std::pair<PEID, VertexID> & GetParent(const VertexID v) {
     return parent_[contraction_level_][v];
   }
 
@@ -854,7 +858,7 @@ class GraphAccess {
   std::vector<LocalVertexData> local_vertices_data_;
   std::vector<GhostVertexData> ghost_vertices_data_;
   std::vector<std::vector<VertexPayload>> vertex_payload_;
-  std::vector<std::vector<VertexID>> parent_;
+  std::vector<std::vector<std::pair<PEID, VertexID>>> parent_;
 
   VertexID number_of_vertices_;
   VertexID number_of_local_vertices_;

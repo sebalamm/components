@@ -200,7 +200,7 @@ class Components {
       std::mt19937
           generator(static_cast<unsigned int>(config_.seed + g.GetVertexLabel(v)
           + iteration_ * rng_offset_));
-      if (g.IsLocal(v)) g.SetParent(v, v);
+      if (g.IsLocal(v)) g.SetParent(v, rank_, v);
 
       // Weigh distribution towards high degree vertices
       // TODO: Test different weighing functions 
@@ -232,7 +232,7 @@ class Components {
           if (g.GetVertexDeviate(w) + 1 < smallest_payload.deviate_ ||
               (g.GetVertexDeviate(w) + 1 == smallest_payload.deviate_ &&
                   g.GetVertexLabel(w) < smallest_payload.label_)) {
-            g.SetParent(v, w);
+            g.SetParent(v, g.GetPE(w), w);
             smallest_payload = {g.GetVertexDeviate(w) + 1, g.GetVertexLabel(w),
                                 g.GetVertexRoot(w)};
             converged_locally = 0;
