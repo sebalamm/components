@@ -214,15 +214,19 @@ class GraphAccess {
     // Gather labels to communicate
     VertexID offset = GatherNumberOfGlobalVertices();
     google::sparse_hash_set<VertexID> send_ids(size_);
-    std::vector<std::vector<VertexID>> send_buffers(size_);
+    std::vector<std::vector<VertexID>> send_buffers_a(size_);
+    std::vector<std::vector<VertexID>> send_buffers_b(size_);
+    std::vector<std::vector<VertexID>>* current_send_buffers = &send_buffers_a;
     std::vector<std::vector<VertexID>> receive_buffers(size_);
     for (int i = 0; i < size_; ++i) {
-      send_buffers[i].clear();
+      send_buffers_a[i].clear();
+      send_buffers_b[i].clear();
       receive_buffers[i].clear();
     }
 
     google::sparse_hash_set<VertexID> inserted_edges;
     google::sparse_hash_set<VertexID> remaining_vertices;
+    std::vector<std::vector<std::pair<VertexID, VertexID>>> edges_to_add(size_);
     ForallLocalVertices([&](VertexID v) {
       VertexID vlabel = GetVertexLabel(v);
       ForallNeighbors(v, [&](VertexID w) {
@@ -242,10 +246,10 @@ class GraphAccess {
             }
             // Send edge
             send_ids.insert(update_id);
-            send_buffers[pe].emplace_back(vlabel);
-            send_buffers[pe].emplace_back(wlabel);
-            send_buffers[pe].emplace_back(GetVertexRoot(w));
-            send_buffers[pe].emplace_back(parent.second);
+            (*current_send_buffers)[pe].emplace_back(vlabel);
+            (*current_send_buffers)[pe].emplace_back(wlabel);
+            (*current_send_buffers)[pe].emplace_back(GetVertexRoot(w));
+            (*current_send_buffers)[pe].emplace_back(parent.second);
           }
         }
         removed_edges_[contraction_level_].emplace_back(v, GetGlobalID(w));
@@ -282,7 +286,7 @@ class GraphAccess {
       for (PEID pe = 0; pe < size_; ++pe) {
         if (is_adj[pe]) {
           auto *req = new MPI_Request();
-          MPI_Isend(send_buffers[pe].data(), static_cast<int>(send_buffers[pe].size()), MPI_LONG, pe, 0, MPI_COMM_WORLD, req);
+          MPI_Isend((*current_send_buffers)[pe].data(), static_cast<int>((*current_send_buffers)[pe].size()), MPI_LONG, pe, 0, MPI_COMM_WORLD, req);
           requests.emplace_back(req);
         }
       }
@@ -291,7 +295,7 @@ class GraphAccess {
       PEID messages_recv = 0;
       int message_length = 0;
       for (int i = 0; i < size_; ++i) receive_buffers[i].clear();
-      receive_buffers[rank_] = send_buffers[rank_];
+      receive_buffers[rank_] = (*current_send_buffers)[rank_];
       while (messages_recv < num_adj) {
         MPI_Status st{};
         MPI_Probe(MPI_ANY_SOURCE, 0, MPI_COMM_WORLD, &st);
@@ -302,10 +306,15 @@ class GraphAccess {
         MPI_Status rst{};
         MPI_Recv(&receive_buffers[st.MPI_SOURCE][0], message_length, MPI_LONG, st.MPI_SOURCE, 0, MPI_COMM_WORLD, &rst);
       }
-      MPI_Barrier(MPI_COMM_WORLD);
 
       // Clear buffers
-      for (int i = 0; i < size_; ++i) send_buffers[i].clear();
+      if (current_send_buffers == &send_buffers_a) {
+        for (int i = 0; i < size_; ++i) send_buffers_b[i].clear();
+        current_send_buffers = &send_buffers_b;
+      } else {
+        for (int i = 0; i < size_; ++i) send_buffers_a[i].clear();
+        current_send_buffers = &send_buffers_a;
+      }
       requests.clear();
 
       // Receive edges and apply updates
@@ -321,26 +330,15 @@ class GraphAccess {
           // If link root is on same PE just jump to it
           if (GetVertexRoot(GetLocalID(link)) == rank_ && inserted_edges.find(update_id) == end(inserted_edges)) {
             // V -> W
-            VertexID vlocal = GetLocalID(vlabel);
-            AddEdge(vlocal, wlabel, wroot);
-            added_edges_[contraction_level_ - 1].emplace_back(vlocal, wlabel);
+            edges_to_add[wroot].emplace_back(vlabel, wlabel);
             inserted_edges.insert(update_id);
             send_ids.insert(update_id);
             // W -> V
-            VertexID wlocal = GetLocalID(wlabel);
-            if (IsLocal(wlocal)) {
-              AddEdge(wlocal, vlabel, wroot);
-              added_edges_[contraction_level_ - 1].emplace_back(wlocal, vlabel);
+            if (wroot == rank_) {
+              edges_to_add[rank_].emplace_back(wlabel, vlabel);
               inserted_edges.insert(wlabel + offset * vlabel);
               send_ids.insert(wlabel + offset * vlabel);
             }
-            remaining_vertices.insert(vlocal);
-            remaining_vertices.insert(wlocal);
-            // New payloads
-            vertex_payload_[contraction_level_][vlocal] =
-                {std::numeric_limits<VertexID>::max() - 1, vlabel, rank_};
-            vertex_payload_[contraction_level_][wlocal] =
-                {std::numeric_limits<VertexID>::max() - 1, wlabel, wroot};
             converged_locally = 0;
           // } else if (GetVertexRoot(GetLocalID(link)) != rank_ && send_ids.find(update_id) == send_ids.end()) {
           } else if (GetVertexRoot(GetLocalID(link)) != rank_) {
@@ -355,10 +353,10 @@ class GraphAccess {
             }
             // Send edge
             // send_ids.insert(update_id);
-            send_buffers[pe].emplace_back(vlabel);
-            send_buffers[pe].emplace_back(wlabel);
-            send_buffers[pe].emplace_back(wroot);
-            send_buffers[pe].emplace_back(parent.second);
+            (*current_send_buffers)[pe].emplace_back(vlabel);
+            (*current_send_buffers)[pe].emplace_back(wlabel);
+            (*current_send_buffers)[pe].emplace_back(wroot);
+            (*current_send_buffers)[pe].emplace_back(parent.second);
             converged_locally = 0;
           }
         }
@@ -372,13 +370,28 @@ class GraphAccess {
                     MPI_MIN,
                     MPI_COMM_WORLD);
     }
-    MPI_Barrier(MPI_COMM_WORLD);
 
-    // Only keep remaining vertices active
+    // Insert edges and keep corresponding vertices
     std::fill(begin(active_vertices_[contraction_level_]), 
               end(active_vertices_[contraction_level_]), false);
-    for (auto &v : remaining_vertices)
-      active_vertices_[contraction_level_][v] = true;
+    for (PEID pe = 0; pe < size_; pe++) {
+      for (auto &e : edges_to_add[pe]) {
+        VertexID vlabel = e.first;
+        VertexID wlabel = e.second;
+        VertexID vlocal = GetLocalID(vlabel);
+        // Add edge
+        AddEdge(vlocal, wlabel, pe);
+        added_edges_[contraction_level_ - 1].emplace_back(vlocal, wlabel);
+        VertexID wlocal = GetLocalID(wlabel);
+        // Vertices remain active
+        active_vertices_[contraction_level_][vlocal] = true;
+        active_vertices_[contraction_level_][wlocal] = true;
+        vertex_payload_[contraction_level_][vlocal] =
+            {std::numeric_limits<VertexID>::max() - 1, vlabel, rank_};
+        vertex_payload_[contraction_level_][wlocal] =
+            {std::numeric_limits<VertexID>::max() - 1, wlabel, pe};
+      }
+    }
   }
 
   void MoveUpContraction() {
