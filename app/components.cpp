@@ -41,7 +41,7 @@ int main(int argn, char **argv) {
   Config conf;
   ParseParameters(argn, argv, conf);
   kagen::KaGen gen(rank, size);
-  kagen::EdgeList edge_list = gen.GenerateUndirectedGNM((ULONG) 1 << 20, (ULONG) 1 << 20);
+  kagen::EdgeList edge_list = gen.GenerateUndirectedGNM((ULONG) 1 << 18, (ULONG) 1 << 18);
   GraphAccess G = GraphIO::ReadDistributedEdgeList(conf, rank, size, MPI_COMM_WORLD, edge_list);
       //G = GraphIO::ReadDistributedGraph(conf, rank, size, MPI_COMM_WORLD);
 

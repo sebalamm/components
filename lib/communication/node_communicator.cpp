@@ -53,6 +53,8 @@ void NodeCommunicator::ReceiveMessages() {
     //                   << message[i] 
     //                   << " "
     //                   << g_->IsGhostFromGlobal(message[i]) 
+    //                   << " "
+    //                   << st.MPI_SOURCE 
     //                   << std::endl;
     // if (rank_ == 3 && message[i] == 6) {
     //   g_->OutputLocal();
