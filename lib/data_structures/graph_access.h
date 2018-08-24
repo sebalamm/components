@@ -229,21 +229,24 @@ class GraphAccess {
         VertexID wlabel = GetVertexLabel(w);
         if (vlabel != wlabel) {
           VertexID update_id = vlabel + offset * wlabel;
-          // Local propagation
-          PEID cv = v;
-          std::pair<PEID, VertexID> parent = GetParent(cv);
-          PEID pe = parent.first;
-          // while (pe == rank_) {
-          //   cv = GetLocalID(parent.second);
-          //   parent = GetParent(cv);
-          //   pe = parent.first;
-          // }
-          // // Send edge
-          // send_ids.insert(update_id);
-          send_buffers[pe].emplace_back(vlabel);
-          send_buffers[pe].emplace_back(wlabel);
-          send_buffers[pe].emplace_back(GetVertexRoot(w));
-          send_buffers[pe].emplace_back(parent.second);
+          // TODO: Try to apply updates directly
+          if (send_ids.find(update_id) == send_ids.end()) {
+            // Local propagation
+            PEID cv = v;
+            std::pair<PEID, VertexID> parent = GetParent(cv);
+            PEID pe = parent.first;
+            while (GetVertexRoot(v) != rank_ && pe == rank_) {
+              cv = GetLocalID(parent.second);
+              parent = GetParent(cv);
+              pe = parent.first;
+            }
+            // Send edge
+            send_ids.insert(update_id);
+            send_buffers[pe].emplace_back(vlabel);
+            send_buffers[pe].emplace_back(wlabel);
+            send_buffers[pe].emplace_back(GetVertexRoot(w));
+            send_buffers[pe].emplace_back(parent.second);
+          }
         }
         removed_edges_[contraction_level_].emplace_back(v, GetGlobalID(w));
       });
@@ -339,7 +342,8 @@ class GraphAccess {
             vertex_payload_[contraction_level_][wlocal] =
                 {std::numeric_limits<VertexID>::max() - 1, wlabel, wroot};
             converged_locally = 0;
-          } else if (GetVertexRoot(GetLocalID(link)) != rank_ && send_ids.find(update_id) == send_ids.end()){
+          // } else if (GetVertexRoot(GetLocalID(link)) != rank_ && send_ids.find(update_id) == send_ids.end()) {
+          } else if (GetVertexRoot(GetLocalID(link)) != rank_) {
             // Local propagation
             PEID cv = GetLocalID(link);
             std::pair<PEID, VertexID> parent = GetParent(cv);
@@ -350,7 +354,7 @@ class GraphAccess {
               pe = parent.first;
             }
             // Send edge
-            send_ids.insert(update_id);
+            // send_ids.insert(update_id);
             send_buffers[pe].emplace_back(vlabel);
             send_buffers[pe].emplace_back(wlabel);
             send_buffers[pe].emplace_back(wroot);
@@ -375,7 +379,6 @@ class GraphAccess {
               end(active_vertices_[contraction_level_]), false);
     for (auto &v : remaining_vertices)
       active_vertices_[contraction_level_][v] = true;
-    // if (rank_ == 0 && contraction_level_ == 1) OutputLocal();
   }
 
   void MoveUpContraction() {
@@ -390,23 +393,8 @@ class GraphAccess {
       // Decrease level
       contraction_level_--;
 
-      // TODO: We need to minimize memory
-      // std::unordered_map<VertexID, VertexID> prev_labels;
-      // ForallLocalVertices([&](VertexID v) {
-      //   prev_labels[v] = GetVertexLabel(v);
-      //   ForallNeighbors(v, [&](VertexID w) {
-      //     prev_labels[w] = GetVertexLabel(w);
-      //   });
-      // });
-
       for (auto &e : removed_edges_[contraction_level_])
         AddEdge(std::get<0>(e), std::get<1>(e), GetPE(GetLocalID(std::get<1>(e))));
-      // SendAndReceiveGhostVertices();
-      // for (auto &kv : prev_labels) 
-      //   vertex_payload_[contraction_level_][kv.first].label_ = kv.second;
-      // OutputLocal();
-      // MPI_Barrier(MPI_COMM_WORLD);
-      // exit(1);
 
       // OutputLocal();
       // Update local labels
