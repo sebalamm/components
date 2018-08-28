@@ -38,6 +38,7 @@ void ParseParameters(int argn, char **argv,
   conf.input_file = args.Get<std::string>("in", "in");
   conf.output_file = args.Get<std::string>("out", "out");
   conf.debug_output_file = args.Get<std::string>("debug_out", "tmp");
+  conf.input_size = args.Get<unsigned int>("size", 20);
 
   // Benchmarks
   conf.iterations = args.Get<unsigned int>("i", 10);

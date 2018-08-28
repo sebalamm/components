@@ -338,7 +338,6 @@ class Components {
     // Distribute labels to other PEs
     g.DistributeLabelsFromRoot(labels, num_vertices_per_pe);
   }
-
 };
 
 #endif

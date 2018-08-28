@@ -102,26 +102,8 @@ struct Edge {
 class NodeCommunicator;
 class GraphAccess {
  public:
-  GraphAccess(const PEID rank, const PEID size)
-      : rank_(rank),
-        size_(size),
-        number_of_vertices_(0),
-        number_of_local_vertices_(0),
-        number_of_global_vertices_(0),
-        number_of_edges_(0),
-        number_of_global_edges_(0),
-        local_offset_(0),
-        ghost_offset_(0),
-        contraction_level_(0),
-        max_contraction_level_(0),
-        edge_buffers_(size),
-        ghost_comm_(nullptr),
-        vertex_counter_(0),
-        edge_counter_(0) {}
-  virtual ~GraphAccess() {
-    free(ghost_comm_);
-    ghost_comm_ = nullptr;
-  };
+  GraphAccess(const PEID rank, const PEID size);
+  virtual ~GraphAccess();
 
   GraphAccess(GraphAccess &&rhs) = default;
 
@@ -314,6 +296,12 @@ class GraphAccess {
       } else {
         for (int i = 0; i < size_; ++i) send_buffers_a[i].clear();
         current_send_buffers = &send_buffers_a;
+      }
+
+      for (unsigned int i = 0; i < requests.size(); ++i) {
+        MPI_Status st;
+        MPI_Wait(requests[i], &st);
+        delete requests[i];
       }
       requests.clear();
 
@@ -621,7 +609,7 @@ class GraphAccess {
         components.emplace_back(kv.first, kv.second);
       std::sort(begin(components), end(components));
 
-      std::cout << "[ ";
+      std::cout << "COMPONENTS [ ";
       for (auto &comp : components)
         std::cout << comp.first << "(" << comp.second << ") ";
       std::cout << "]" << std::endl;

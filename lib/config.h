@@ -34,6 +34,8 @@ struct Config {
   int seed{};
   // Input filename
   std::string input_file;
+  // Input size
+  VertexID input_size;
   // Output filename
   std::string output_file;
   // Debug output

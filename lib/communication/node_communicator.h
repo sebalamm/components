@@ -33,12 +33,11 @@ using Buffer = std::vector<VertexID>;
 
 class NodeCommunicator {
  public:
-  NodeCommunicator(GraphAccess *g,
-                   const PEID rank,
+  NodeCommunicator(const PEID rank,
                    const PEID size,
                    MPI_Comm communicator)
       : communicator_(communicator),
-        g_(g),
+        g_(nullptr),
         rank_(rank),
         size_(size) {
     packed_pes_.resize(static_cast<unsigned long>(size_), false);
@@ -49,10 +48,14 @@ class NodeCommunicator {
     send_tag_ = static_cast<unsigned int>(100 * size_);
     recv_tag_ = static_cast<unsigned int>(100 * size_);
   }
-  virtual ~NodeCommunicator() = default;
+  virtual ~NodeCommunicator() {};
 
   NodeCommunicator(const NodeCommunicator &rhs) = default;
   NodeCommunicator(NodeCommunicator &&rhs) = default;
+ 
+  inline void SetGraph(GraphAccess *g) {
+    g_ = g;
+  }
 
   inline void SetAdjacentPE(const PEID neighbor, const bool is_adj) {
     adjacent_pes_[neighbor] = is_adj;

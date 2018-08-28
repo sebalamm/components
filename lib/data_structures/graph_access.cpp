@@ -4,6 +4,31 @@
 #include "graph_access.h"
 #include "node_communicator.h"
 
+GraphAccess::GraphAccess(const PEID rank, const PEID size) 
+    : rank_(rank),
+      size_(size),
+      number_of_vertices_(0),
+      number_of_local_vertices_(0),
+      number_of_global_vertices_(0),
+      number_of_edges_(0),
+      number_of_global_edges_(0),
+      local_offset_(0),
+      ghost_offset_(0),
+      contraction_level_(0),
+      max_contraction_level_(0),
+      edge_buffers_(size),
+      ghost_comm_(nullptr),
+      vertex_counter_(0),
+      edge_counter_(0) {
+  ghost_comm_ = new NodeCommunicator(rank_, size_, MPI_COMM_WORLD);
+  ghost_comm_->SetGraph(this);
+}
+
+GraphAccess::~GraphAccess() {
+  delete ghost_comm_;
+  ghost_comm_ = nullptr;
+}
+
 void GraphAccess::StartConstruct(const VertexID local_n,
                                  const EdgeID local_m,
                                  const VertexID local_offset) {
@@ -29,7 +54,6 @@ void GraphAccess::StartConstruct(const VertexID local_n,
   removed_edges_.resize(local_n);
 
   adjacent_pes_.resize(static_cast<unsigned long>(size_), false);
-  ghost_comm_ = new NodeCommunicator(this, rank_, size_, MPI_COMM_WORLD);
 }
 
 void GraphAccess::SendAndReceiveGhostVertices() {
