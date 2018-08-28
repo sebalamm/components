@@ -38,7 +38,6 @@ void ParseParameters(int argn, char **argv,
   conf.input_file = args.Get<std::string>("in", "in");
   conf.output_file = args.Get<std::string>("out", "out");
   conf.debug_output_file = args.Get<std::string>("debug_out", "tmp");
-  conf.input_size = args.Get<unsigned int>("size", 20);
 
   // Benchmarks
   conf.iterations = args.Get<unsigned int>("i", 10);
@@ -54,6 +53,13 @@ void ParseParameters(int argn, char **argv,
 
   // High-degree vertices
   conf.degree_limit = args.Get<unsigned int>("deg", 100);
+
+  // Generator
+  conf.gen = args.Get<std::string>("gen", "gnm_undirected");
+  conf.gen_n = 1 << args.Get<unsigned int>("n", 18);
+  conf.gen_m = 1 << args.Get<unsigned int>("m", 20);
+  conf.gen_r = args.Get<float>("r", 0.001);
+  conf.gen_k = args.Get<PEID>("k", 0);
 }
 
 #endif

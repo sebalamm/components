@@ -34,8 +34,6 @@ struct Config {
   int seed{};
   // Input filename
   std::string input_file;
-  // Input size
-  VertexID input_size;
   // Output filename
   std::string output_file;
   // Debug output
@@ -53,6 +51,12 @@ struct Config {
   unsigned int prop_iterations{};
   // Decomposition
   double beta{};
+  // Generator
+  std::string gen;
+  VertexID gen_n;
+  EdgeID gen_m;
+  float gen_r;
+  PEID gen_k;
 };
 
 #endif

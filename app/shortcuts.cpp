@@ -40,20 +40,31 @@ int main(int argn, char **argv) {
   // Read command-line args
   Config conf;
   ParseParameters(argn, argv, conf);
+
+  // Parse for kagen input
   kagen::KaGen gen(rank, size);
-  kagen::EdgeList edge_list = gen.GenerateUndirectedGNM((ULONG) 1 << conf.input_size, (ULONG) 1 << conf.input_size);
+  kagen::EdgeList edge_list;
+  if (conf.gen == "gnm_undirected")
+      edge_list = gen.GenerateUndirectedGNM(conf.gen_n, conf.gen_m, conf.gen_k);
+  else if (conf.gen == "rgg_2d")
+      edge_list = gen.Generate2DRGG(conf.gen_n, conf.gen_r, conf.gen_k);
+  else {
+    if (rank == ROOT) 
+      std::cout << "generator not supported" << std::endl;
+    MPI_Finalize();
+    exit(1);
+  }
   GraphAccess G = GraphIO::ReadDistributedEdgeList(conf, rank, size, MPI_COMM_WORLD, edge_list);
       //G = GraphIO::ReadDistributedGraph(conf, rank, size, MPI_COMM_WORLD);
 
   VertexID n = G.GatherNumberOfGlobalVertices();
   EdgeID m = G.GatherNumberOfGlobalEdges();
   if (rank == ROOT) {
-    std::cout << "compute ccs ("
+    std::cout << "INPUT "
               << "s=" << conf.seed << ", "
               << "p=" << size  << ", "
               << "n=" << n << ", "
-              << "m=" << m << ")"
-              << std::endl;
+              << "m=" << m << std::endl;
   }
 
   // Timers
