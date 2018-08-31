@@ -23,7 +23,7 @@
 #define _CONTRACTION_H_
 
 #include <iostream>
-#include <google/dense_hash_map>
+#include <google/sparse_hash_set>
 
 #include "config.h"
 #include "definitions.h"
@@ -130,20 +130,12 @@ class Contraction {
     std::vector<bool> packed_pes(size_, false);
     std::vector<bool> largest_pes(size_, false);
 
-    // Optimization: Don't send largest component between pairs of PEs
-    // std::unordered_map<VertexID, VertexID> component_sizes;
-    // std::unordered_map<PEID, VertexID> largest_component_sizes;
-    // std::unordered_map<PEID, VertexID> largest_component_ids;
-    // for (const auto &pe : g_.GetAdjacentPEs()) {
-    //   largest_component_sizes[pe] = 0;
-    //   largest_component_ids[pe] = 0;
-    // }
-
     google::dense_hash_map<VertexID, VertexID> component_sizes;
     component_sizes.set_empty_key(std::numeric_limits<VertexID>::max());
     std::vector<VertexID> largest_component_sizes(size_, 0);
     std::vector<VertexID> largest_component_ids(size_, 0);
 
+    // Find largest components for each neighbor
     g_.ForallLocalVertices([&](const VertexID v) {
       if (g_.IsInterface(v)) {
         VertexID cv = g_.GetContractionVertex(v);
@@ -162,7 +154,6 @@ class Contraction {
       }
     });
 
-    // for (const auto &pe : g_.GetAdjacentPEs()) {
     for (PEID i = 0; i < size_; ++i) {
       if (largest_component_sizes[i] > 0) {
         node_buffers_[i].push_back(std::numeric_limits<VertexID>::max()); 
@@ -170,30 +161,44 @@ class Contraction {
       }
     }
 
-    // Collect remaining ghost vertex updates O(n/P)
+    // Helper functions
+    auto pair = [&](VertexID x, VertexID y) {
+      return static_cast<VertexID>((0.5 * ((x + y) * (x + y + 1))) + y);
+    };
+
+    auto depair = [&](VertexID z) {
+      VertexID w = static_cast<VertexID>(0.5 * (sqrt(8 * z + 1) - 1));
+      VertexID t = 0.5 * ((w * w) + w);
+      VertexID y = z - t;
+      VertexID x = w - y;
+      return std::make_pair(x, y);
+    };
+
+    // Gather components with the same neighbor
+    google::sparse_hash_set<VertexID> unique_neighbors;
     g_.ForallLocalVertices([&](const VertexID v) {
       if (g_.IsInterface(v)) {
         g_.ForallNeighbors(v, [&](const VertexID w) {
-          if (g_.IsGhost(w)) {
-            PEID target_pe = g_.GetPE(w);
-            if (!packed_pes[target_pe]) {
-              if (g_.GetContractionVertex(v) != largest_component_ids[target_pe]) {
-                node_buffers_[target_pe].push_back(g_.GetGlobalID(v));
-                node_buffers_[target_pe].push_back(g_.GetContractionVertex(v));
-                packed_pes[target_pe] = true;
-              }
-            }
-          }
-        });
-
-        g_.ForallNeighbors(v, [&](const VertexID w) {
-          if (g_.IsGhost(w)) {
-            PEID target_pe = g_.GetPE(w);
-            packed_pes[target_pe] = false;
-          }
+          // unique_neighbors[w][g_.GetContractionVertex(v)];   
+          PEID target_pe = g_.GetPE(w);
+          VertexID comp_pair = pair(w, g_.GetContractionVertex(v));
+          auto dp = depair(comp_pair);
+          if (g_.IsGhost(w) 
+                && unique_neighbors.find(comp_pair) == end(unique_neighbors)
+                && g_.GetContractionVertex(v) != largest_component_ids[target_pe])
+            unique_neighbors.insert(comp_pair);
         });
       }
     });
+
+    for (const VertexID m : unique_neighbors) {
+      auto dp = depair(m);
+      VertexID ghost = dp.first;
+      VertexID contraction_vertex = dp.second;
+      PEID target_pe = g_.GetPE(ghost);
+      node_buffers_[target_pe].push_back(g_.GetGlobalID(ghost));
+      node_buffers_[target_pe].push_back(contraction_vertex);
+    }
 
     // Send ghost vertex updates O(cut size) (communication)
     for (PEID i = 0; i < size_; ++i) {
@@ -215,7 +220,13 @@ class Contraction {
     PEID num_adjacent_pes = g_.GetNumberOfAdjacentPEs();
     PEID recv_messages = 0;
     std::vector<bool> relabled(g_.GetNumberOfVertices(), false);
-    std::vector<VertexID> largest_components(size_, 0);
+    std::vector<VertexID> largest_components(size_, std::numeric_limits<VertexID>::max());
+
+    std::unordered_map<VertexID, std::vector<VertexID>> components_for_pe;
+    g_.ForallLocalVertices([&](const VertexID v) {
+      if (g_.IsInterface(v)) components_for_pe[v].resize(size_, std::numeric_limits<VertexID>::max());
+    });
+
     while (recv_messages < num_adjacent_pes) {
       MPI_Status st{};
       MPI_Probe(MPI_ANY_SOURCE, rank_ + 6 * size_, MPI_COMM_WORLD, &st);
@@ -239,17 +250,23 @@ class Contraction {
         VertexID contraction_id = message[i + 1];
         if (global_id == std::numeric_limits<VertexID>::max())
           largest_components[st.MPI_SOURCE] = contraction_id;
-        else  {
-          g_.SetContractionVertex(g_.GetLocalID(global_id), contraction_id);
-          relabled[g_.GetLocalID(global_id)] = true;
-        }
+        else 
+          components_for_pe[g_.GetLocalID(global_id)][st.MPI_SOURCE] = contraction_id;
       }
     }
-    
-    // Apply largest component to all unlabeled vertices
-    g_.ForallGhostVertices([&](const VertexID v) {
-      if (!relabled[v])
-        g_.SetContractionVertex(v, largest_components[g_.GetPE(v)]);
+
+    // Apply labels
+    g_.ForallLocalVertices([&](const VertexID v) {
+      if (g_.IsInterface(v)) {
+        g_.ForallNeighbors(v, [&](const VertexID w) {
+          if (g_.IsGhost(w)) {
+            if (components_for_pe[v][g_.GetPE(w)] != std::numeric_limits<VertexID>::max())
+              g_.SetContractionVertex(w, components_for_pe[v][g_.GetPE(w)]);
+            else 
+              g_.SetContractionVertex(w, largest_components[g_.GetPE(w)]);
+          }
+        });
+      }
     });
   }
 
@@ -307,8 +324,6 @@ class Contraction {
                MPI_COMM_WORLD,
                &rst);
       recv_messages++;
-
-      // std::cout << "[R" << rank_ << "] recv msg " << recv_messages << "/" << num_adjacent_pes << " from " << st.MPI_SOURCE << " with length " << message_length << std::endl;
 
       if (message_length == 1) continue;
       for (int i = 0; i < message_length - 1; i += 2) {

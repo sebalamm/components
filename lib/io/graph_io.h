@@ -67,6 +67,89 @@ class GraphIO {
     std::cout << "rank " << rank << " from " << from << " to " << to
               << " amount " << number_of_local_vertices << std::endl;
 
+    // TODO: Reshuffling here probably won't work since we have 
+    // to make changes to our entire data structure.
+    // Better to shuffle how we read the input file (like Tom).
+    // // Determine random target for each local vertex
+    // srand(rank);
+    // std::vector<std::vector<VertexID>> vertices_for_pe(size);
+    // for (VertexID v = 0; v < number_of_local_vertices; ++v) {
+    //   PEID target = rand() % size;
+    //   vertices_for_pe[target].emplace_back(from + v);
+    // }
+
+    // // Compute send displacements and actual message
+    // {
+    //   VertexID displ = 0;
+    //   std::vector<VertexID> msg;
+    //   std::vector<int> msg_size(size, 0);
+    //   std::vector<int> vertex_displ(size, 0);
+    //   for (PEID pe = 0; pe < size; ++pe) {
+    //     vertex_displ[pe] = displ;
+    //     for (VertexID & v : vertices_for_pe[pe]) msg.emplace_back(v);
+    //     msg_size[pe] = vertices_for_pe[pe].size();
+    //     displ += vertices_for_pe[pe].size();
+    //   }
+
+    //   // Exchange displacements
+    //   std::vector<int> global_msg_size(size, 0);
+    //   MPI_Alltoall(msg_size.data(), 1, MPI_INT, 
+    //                global_msg_size.data(), 1, MPI_INT,
+    //                MPI_COMM_WORLD);
+
+    //   // Compute receive displacements
+    //   VertexID global_displ = 0;
+    //   std::vector<int> global_vertex_displ(size, 0);
+    //   for (PEID pe = 0; pe < size; ++pe) {
+    //     global_vertex_displ[pe] = global_displ;
+    //     global_displ += global_msg_size[pe];
+    //   }
+
+    //   // Send/receive vertices
+    //   std::vector<VertexID> global_msg(global_displ, 0);
+    //   MPI_Alltoallv(msg.data(), msg_size.data(), vertex_displ.data(), MPI_LONG, 
+    //                 global_msg.data(), global_msg_size.data(), global_vertex_displ.data(), MPI_LONG,
+    //                 MPI_COMM_WORLD);
+    // }
+
+    // // Compute send displacements and actual message
+    // {
+    //   VertexID displ = 0;
+    //   std::vector<VertexID> msg;
+    //   std::vector<int> msg_size(size, 0);
+    //   std::vector<int> edge_displ(size, 0);
+    //   for (PEID pe = 0; pe < size; ++pe) {
+    //     edge_displ[pe] = displ;
+    //     for (VertexID & v : vertices_for_pe[pe]) {
+    //       for (VertexID & w : local_edge_lists[v - from]) {
+    //         msg.emplace_back(w);
+    //       }
+    //       msg_size[pe] += local_edge_lists[v - from].size();
+    //       displ += local_edge_lists[v - from].size();
+    //     }
+    //   }
+
+    //   // Exchange displacements
+    //   std::vector<int> global_msg_size(size, 0);
+    //   MPI_Alltoall(msg_size.data(), 1, MPI_INT, 
+    //                global_msg_size.data(), 1, MPI_INT,
+    //                MPI_COMM_WORLD);
+
+    //   // Compute receive displacements
+    //   VertexID global_displ = 0;
+    //   std::vector<int> global_edge_displ(size, 0);
+    //   for (PEID pe = 0; pe < size; ++pe) {
+    //     global_edge_displ[pe] = global_displ;
+    //     global_displ += global_msg_size[pe];
+    //   }
+
+    //   // Send/receive vertices
+    //   std::vector<VertexID> global_msg(global_displ, 0);
+    //   MPI_Alltoallv(msg.data(), msg_size.data(), edge_displ.data(), MPI_LONG, 
+    //                 global_msg.data(), global_msg_size.data(), global_edge_displ.data(), MPI_LONG,
+    //                 MPI_COMM_WORLD);
+    // }
+
     // Build graph
     GraphAccess G(rank, size);
     G.StartConstruct(number_of_local_vertices, 2 * number_of_local_edges, from);
@@ -82,7 +165,6 @@ class GraphIO {
     }
 
     G.FinishConstruct();
-    MPI_Barrier(comm);
 
     return G;
   }
