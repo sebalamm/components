@@ -58,12 +58,16 @@ class GraphIO {
       number_of_local_edges++;
     }
 
+    // Add datatype
+    MPI_Datatype MPI_COMP;
+    MPI_Type_vector(1, 2, 0, MPI_LONG, &MPI_COMP);
+    MPI_Type_commit(&MPI_COMP);
+
     // Gather vertex distribution
-    VertexID next_from = to + 1;
-    std::vector<VertexID> vertex_dist(size, 0);
-    MPI_Allgather(&next_from, 1, MPI_LONG,
-                  &vertex_dist[0], 1, MPI_LONG, comm);
-    vertex_dist.insert(begin(vertex_dist), 0);
+    std::pair<VertexID, VertexID> range(from, to + 1);
+    std::vector<std::pair<VertexID, VertexID>> vertex_dist(size);
+    MPI_Allgather(&range, 1, MPI_COMP,
+                  &vertex_dist[0], 1, MPI_COMP, comm);
     std::cout << "rank " << rank << " from " << from << " to " << to
               << " amount " << number_of_local_vertices << std::endl;
 
@@ -196,14 +200,23 @@ class GraphIO {
 
     // Read the lines i*ceil(n/size) to (i+1)*floor(n/size) lines of that file
     VertexID leftover_vertices = number_of_vertices % size;
-    VertexID num_vertices = (number_of_vertices / size)
+    VertexID number_of_local_vertices = (number_of_vertices / size)
         + static_cast<VertexID>(rank < leftover_vertices);
-    VertexID from = (rank * num_vertices)
+    VertexID from = (rank * number_of_local_vertices)
         + static_cast<VertexID>(rank >= leftover_vertices ? leftover_vertices
                                                           : 0);
-    VertexID to = from + num_vertices - 1;
+    VertexID to = from + number_of_local_vertices - 1;
 
-    VertexID number_of_local_vertices = to - from + 1;
+    // Add datatype
+    MPI_Datatype MPI_COMP;
+    MPI_Type_vector(1, 2, 0, MPI_LONG, &MPI_COMP);
+    MPI_Type_commit(&MPI_COMP);
+
+    // Gather vertex distribution
+    std::pair<VertexID, VertexID> range(from, to + 1);
+    std::vector<std::pair<VertexID, VertexID>> vertex_dist(size);
+    MPI_Allgather(&range, 1, MPI_COMP,
+                  &vertex_dist[0], 1, MPI_COMP, comm);
     std::cout << "rank " << rank << " from " << from << " to " << to
               << " amount " << number_of_local_vertices << std::endl;
 
@@ -247,14 +260,6 @@ class GraphIO {
     GraphAccess G(rank, size);
     G.StartConstruct(number_of_local_vertices, 2 * edge_counter, from);
 
-    std::vector<VertexID> vertex_dist(static_cast<unsigned long>(size + 1), 0);
-    for (PEID pe_id = 1; pe_id <= size; pe_id++) {
-      VertexID num_vertices_for_pe = (number_of_vertices / size)
-          + static_cast<VertexID>(pe_id < leftover_vertices);
-      vertex_dist[pe_id] = static_cast<VertexID>((pe_id * num_vertices_for_pe)
-          + static_cast<VertexID>(pe_id >= leftover_vertices
-                                  ? leftover_vertices : 0));
-    }
     G.SetOffsetArray(std::move(vertex_dist));
 
     for (VertexID i = 0; i < number_of_local_vertices; ++i) {

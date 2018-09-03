@@ -438,13 +438,13 @@ class GraphAccess {
   //////////////////////////////////////////////
   // Vertex mappings
   //////////////////////////////////////////////
-  inline void SetOffsetArray(std::vector<VertexID> &&vertex_dist) {
+  inline void SetOffsetArray(std::vector<std::pair<VertexID, VertexID>> &&vertex_dist) {
     offset_array_ = vertex_dist;
   }
 
   PEID GetPEFromOffset(const VertexID v) const {
-    for (PEID i = 1; i < (PEID) offset_array_.size(); ++i) {
-      if (v < offset_array_[i]) return i - 1;
+    for (PEID i = 0; i < offset_array_.size(); ++i) {
+      if (v >= offset_array_[i].first && v < offset_array_[i].second) return i;
     }
     return rank_;
   }
@@ -857,7 +857,7 @@ class GraphAccess {
 
   // Vertex mapping
   VertexID local_offset_;
-  std::vector<VertexID> offset_array_;
+  std::vector<std::pair<VertexID, VertexID>> offset_array_;
 
   VertexID ghost_offset_;
   std::unordered_map<VertexID, VertexID> global_to_local_map_;
