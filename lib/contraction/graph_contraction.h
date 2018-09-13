@@ -46,19 +46,19 @@ class Contraction {
   GraphAccess BuildComponentAdjacencyGraph() {
     Timer t;
     t.Restart();
-    if (rank_ == ROOT) std::cout << "[STATUS] |- Compute component prefix sum (" << t.Elapsed() << ")" << std::endl;
+    // if (rank_ == ROOT) std::cout << "[STATUS] |- Compute component prefix sum (" << t.Elapsed() << ")" << std::endl;
     ComputeComponentPrefixSum();
-    if (rank_ == ROOT) std::cout << "[STATUS] |- Compute local contraction mapping (" << t.Elapsed() << ")" << std::endl;
+    // if (rank_ == ROOT) std::cout << "[STATUS] |- Compute local contraction mapping (" << t.Elapsed() << ")" << std::endl;
     ComputeLocalContractionMapping();
-    if (rank_ == ROOT) std::cout << "[STATUS] |- Exchange ghost contraction mapping (" << t.Elapsed() << ")" << std::endl;
+    // if (rank_ == ROOT) std::cout << "[STATUS] |- Exchange ghost contraction mapping (" << t.Elapsed() << ")" << std::endl;
     ExchangeGhostContractionMapping();
 
-    if (rank_ == ROOT) std::cout << "[STATUS] |- Generate local contraction edges (" << t.Elapsed() << ")" << std::endl;
+    // if (rank_ == ROOT) std::cout << "[STATUS] |- Generate local contraction edges (" << t.Elapsed() << ")" << std::endl;
     GenerateLocalContractionEdges();
-    if (rank_ == ROOT) std::cout << "[STATUS] |- Exchange ghost contraction edges (" << t.Elapsed() << ")" << std::endl;
+    // if (rank_ == ROOT) std::cout << "[STATUS] |- Exchange ghost contraction edges (" << t.Elapsed() << ")" << std::endl;
     ExchangeGhostContractionEdges();
 
-    if (rank_ == ROOT) std::cout << "[STATUS] |- Build local contration graph (" << t.Elapsed() << ")" << std::endl;
+    // if (rank_ == ROOT) std::cout << "[STATUS] |- Build local contration graph (" << t.Elapsed() << ")" << std::endl;
     return BuildLocalContractionGraph();
   }
 
@@ -219,6 +219,7 @@ class Contraction {
     // Optimization for receiving largest component
     PEID num_adjacent_pes = g_.GetNumberOfAdjacentPEs();
     PEID recv_messages = 0;
+    // This might be too large
     std::vector<bool> relabled(g_.GetNumberOfVertices(), false);
     std::vector<VertexID> largest_components(size_, std::numeric_limits<VertexID>::max());
 

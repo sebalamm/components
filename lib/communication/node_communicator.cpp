@@ -49,7 +49,7 @@ void NodeCommunicator::ReceiveMessages() {
     if (message_length < 4) continue;
 
     for (int i = 0; i < message_length; i += 4) {
-    // if (rank_ == 0) std::cout 
+    // if (rank_ == 3) std::cout 
     //                   << message[i] 
     //                   << " "
     //                   << g_->IsGhostFromGlobal(message[i]) 

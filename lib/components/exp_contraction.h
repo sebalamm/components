@@ -18,8 +18,8 @@
  * this program.  If not, see <http://www.gnu.org/licenses/>.
  *****************************************************************************/
 
-#ifndef _COMPONENTS_H_
-#define _COMPONENTS_H_
+#ifndef _EXP_CONTRACTION_H_
+#define _EXP_CONTRACTION_H_
 
 #include <iostream>
 #include <unordered_set>
@@ -35,40 +35,39 @@
 #include "union_find.h"
 #include "propagation.h"
 
-class Components {
+class ExponentialContraction {
  public:
-  Components(const Config &conf, const PEID rank, const PEID size)
+  ExponentialContraction(const Config &conf, const PEID rank, const PEID size)
       : rank_(rank),
         size_(size),
         config_(conf),
         iteration_(0) {}
-  virtual ~Components() = default;
+  virtual ~ExponentialContraction() = default;
 
   void FindComponents(GraphAccess &g) {
     Timer t;
     t.Restart();
-    if (rank_ == ROOT) std::cout << "[STATUS] Find local components (" << t.Elapsed() << ")" << std::endl;
+    // if (rank_ == ROOT) std::cout << "[STATUS] Find local components (" << t.Elapsed() << ")" << std::endl;
     FindLocalComponents(g);
-    if (rank_ == ROOT) std::cout << "[STATUS] Contract local components (" << t.Elapsed() << ")" << std::endl;
+    // if (rank_ == ROOT) std::cout << "[STATUS] Contract local components (" << t.Elapsed() << ")" << std::endl;
     Contraction cont(g, rank_, size_);
     GraphAccess cag = cont.BuildComponentAdjacencyGraph();
-    // TODO: Do this more efficiently
-    if (rank_ == ROOT) std::cout << "[STATUS] Contract local components again? (" << t.Elapsed() << ")" << std::endl;
+    // if (rank_ == ROOT) std::cout << "[STATUS] Contract local components again? (" << t.Elapsed() << ")" << std::endl;
     FindLocalComponents(cag);
     Contraction ccont(cag, rank_, size_);
     GraphAccess ccag = ccont.BuildComponentAdjacencyGraph();
     rng_offset_ = ccag.GatherNumberOfGlobalVertices();
     // ccag.OutputLocal();
 
-    if (rank_ == ROOT) std::cout << "[STATUS] Perform main algorithm (" << t.Elapsed() << ")" << std::endl;
+    // if (rank_ == ROOT) std::cout << "[STATUS] Perform main algorithm (" << t.Elapsed() << ")" << std::endl;
     PerformDecomposition(ccag);
-    if (rank_ == ROOT) std::cout << "[STATUS] Apply labels (" << t.Elapsed() << ")" << std::endl;
+    // if (rank_ == ROOT) std::cout << "[STATUS] Apply labels (" << t.Elapsed() << ")" << std::endl;
     ApplyToLocalComponents(ccag, cag);
     ApplyToLocalComponents(cag, g);
   }
 
   void Output(GraphAccess &g) {
-    if (rank_ == ROOT) std::cout << "Component labels" << std::endl;
+    // if (rank_ == ROOT) std::cout << "Component labels" << std::endl;
     g.OutputLabels();
   }
 
@@ -87,24 +86,24 @@ class Components {
   std::vector<VertexID> parent_;
 
   void PerformDecomposition(GraphAccess &g) {
-    if (rank_ == ROOT) std::cout << "[STATUS] |- Start exponential BFS" << std::endl;
+    // if (rank_ == ROOT) std::cout << "[STATUS] |- Start exponential BFS" << std::endl;
     VertexID global_vertices = g.GatherNumberOfGlobalVertices();
     if (global_vertices > 0) {
       iteration_++;
       if (global_vertices < config_.sequential_limit) {
-        if (rank_ == ROOT) 
-          std::cout << "[STATUS] |-- Perform sequential computation (n=" 
-                    << global_vertices << ")" << std::endl;
+        // if (rank_ == ROOT) 
+        //   std::cout << "[STATUS] |-- Perform sequential computation (n=" 
+        //             << global_vertices << ")" << std::endl;
         RunSequentialCC(g);
       }
       else {
-        if (rank_ == ROOT) 
-          std::cout << "[STATUS] |-- Perform recursion (n=" 
-                    << global_vertices << ")" << std::endl;
-        RunExponentialBFS(g);
+        // if (rank_ == ROOT) 
+        //   std::cout << "[STATUS] |-- Perform recursion (n=" 
+        //             << global_vertices << ")" << std::endl;
+        RunContraction(g);
       }
     }
-    if (rank_ == ROOT) std::cout << "[STATUS] |- Propagate labels upward" << std::endl;
+    // if (rank_ == ROOT) std::cout << "[STATUS] |- Propagate labels upward" << std::endl;
     PropagateLabelsUp(g);
   }
 
@@ -164,32 +163,10 @@ class Components {
     MPI_Allgatherv(&local_degrees[0], num_local_vertices, MPI_LONG,
                    &global_degrees[0], &num_vertices[0], &displ[0], MPI_LONG,
                    MPI_COMM_WORLD);
-
-    if (rank_ == ROOT) {
-      for (VertexID i = 0; i < num_global_vertices; ++i) {
-        std::cout << "r " << rank_ << " v " << global_vertices[i] 
-                  << " d " << global_degrees[i] << std::endl;
-      }
-    }
   }
 
-  void RunExponentialBFS(GraphAccess &g) {
-    if (rank_ == ROOT) std::cout << "[STATUS] |-- Iteration " << iteration_ << std::endl;
-    // if (iteration_ == 2) g.OutputLocal();
-    MPI_Barrier(MPI_COMM_WORLD);
-
-    // bool stop = false;
-    // g.ForallLocalVertices([&](const VertexID v) {
-    //   g.ForallNeighbors(v, [&](const VertexID w) {
-    //     if (g.GetPE(v) == g.GetPE(w)) {
-    //       stop = true;
-    //     }
-    //   });
-    // });
-    // if (stop) {
-    //   g.OutputLocal();
-    //   exit(1);
-    // }
+  void RunContraction(GraphAccess &g) {
+    // if (rank_ == ROOT) std::cout << "[STATUS] |-- Iteration " << iteration_ << std::endl;
     // if (rank_ == ROOT) std::cout << "[STATUS] Find high degree" << std::endl;
     // FindHighDegreeVertices(g);
 
@@ -216,9 +193,6 @@ class Components {
 #endif
     });
 
-    // Map for neighbor labels
-    std::unordered_map<VertexID, std::vector<VertexID>> label_map;
-
     int converged_globally = 0;
     while (converged_globally == 0) {
       int converged_locally = 1;
@@ -228,7 +202,6 @@ class Components {
         auto smallest_payload = g.GetVertexMessage(v);
         g.ForallNeighbors(v, [&](VertexID w) {
           // Store neighbor label
-          label_map[g.GetVertexLabel(w)].push_back(v);
           if (g.GetVertexDeviate(w) + 1 < smallest_payload.deviate_ ||
               (g.GetVertexDeviate(w) + 1 == smallest_payload.deviate_ &&
                   g.GetVertexLabel(w) < smallest_payload.label_)) {
@@ -240,13 +213,6 @@ class Components {
         });
         g.SetVertexPayload(v, std::move(smallest_payload));
       });
-
-      // TODO: Implement merging of vertices
-      // for (const auto &label_bucket : label_map) {
-      //   if (label_bucket.second.size() > 1) 
-      //     std::cout << "r " << rank_ << " merge " << label_bucket.second.size() 
-      //               << " vertices" << std::endl;
-      // }
 
       // Check if all PEs are done
       MPI_Allreduce(&converged_locally,
@@ -261,22 +227,22 @@ class Components {
     }
 
     // Determine remaining active vertices
-    g.DetermineActiveVertices();
+    g.ContractExponential();
 
     // Count remaining number of vertices
     VertexID global_vertices = g.GatherNumberOfGlobalVertices();
     if (global_vertices > 0) {
       iteration_++;
       if (global_vertices < config_.sequential_limit) {
-        if (rank_ == ROOT) 
-          std::cout << "[STATUS] |-- Perform sequential computation (n=" 
-                    << global_vertices << ")" << std::endl;
+        // if (rank_ == ROOT) 
+        //   std::cout << "[STATUS] |-- Perform sequential computation (n=" 
+        //             << global_vertices << ")" << std::endl;
         RunSequentialCC(g);
       } else {
-        if (rank_ == ROOT) 
-          std::cout << "[STATUS] |-- Perform recursion (n=" 
-                    << global_vertices << ")" << std::endl;
-        RunExponentialBFS(g);
+        // if (rank_ == ROOT) 
+        //   std::cout << "[STATUS] |-- Perform recursion (n=" 
+        //             << global_vertices << ")" << std::endl;
+        RunContraction(g);
       }
     }
   }

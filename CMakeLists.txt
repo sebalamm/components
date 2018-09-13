@@ -3,8 +3,8 @@ project(components)
 
 find_package(MPI REQUIRED)
 
-set(OMPI_CC gcc-7)
-set(OMPI_CXX g++-7)
+set(OMPI_CC gcc-6)
+set(OMPI_CXX g++-6)
 set(CMAKE_EXPORT_COMPILE_COMMANDS ON)
 
 if (NOT CMAKE_BUILD_TYPE)
@@ -12,9 +12,7 @@ if (NOT CMAKE_BUILD_TYPE)
 endif (NOT CMAKE_BUILD_TYPE)
 
 include_directories(SYSTEM ${MPI_CXX_INCLUDE_PATH})
-# set(CMAKE_CXX_FLAGS "${CMAKE_CXX_FLAGS} ${MPI_COMPILE_FLAGS} -fsanitize=address -fno-omit-frame-pointer -Wall -g")
-# set(CMAKE_CXX_LINK_FLAGS "${CMAKE_CXX_LINK_FLAGS} ${MPI_LINK_FLAGS} -fsanitize=address")
-set(CMAKE_CXX_FLAGS "${CMAKE_CXX_FLAGS} ${MPI_COMPILE_FLAGS} -Wall -fno-omit-frame-pointer -g")
+set(CMAKE_CXX_FLAGS "${CMAKE_CXX_FLAGS} ${MPI_COMPILE_FLAGS} -Wall -fno-omit-frame-pointer -O3 -g")
 set(CMAKE_CXX_LINK_FLAGS "${CMAKE_CXX_LINK_FLAGS} ${MPI_LINK_FLAGS}")
 
 add_subdirectory(extern/kagen)
@@ -57,7 +55,8 @@ set(SOURCES
         lib/tools
         )
 
-add_executable(components ${SOURCES} "app/components.cpp")
+add_executable(exponential ${SOURCES} "app/exp_contraction.cpp")
+add_executable(local ${SOURCES} "app/local_contraction.cpp")
 add_executable(shortcuts ${SOURCES} "app/shortcuts.cpp")
 
 set(LIBS
@@ -67,5 +66,6 @@ set(LIBS
         ${MPI_LIBRARIES}
         )
 
-target_link_libraries(components LINK_PUBLIC ${LIBS})
+target_link_libraries(exponential LINK_PUBLIC ${LIBS})
+target_link_libraries(local LINK_PUBLIC ${LIBS})
 target_link_libraries(shortcuts LINK_PUBLIC ${LIBS})
