@@ -235,7 +235,6 @@ class GraphAccess {
         }
         removed_edges_[contraction_level_].emplace_back(v, GetGlobalID(w));
       });
-      RemoveAllEdges(v);
       vertex_payload_[contraction_level_ + 1][v] =
           {std::numeric_limits<VertexID>::max() - 1, GetVertexLabel(v), GetVertexRoot(v)};
       parent_[contraction_level_ + 1][v] = parent_[contraction_level_][v];
@@ -358,9 +357,7 @@ class GraphAccess {
     }
 
     // Insert edges and keep corresponding vertices
-    ForallLocalVertices([&](VertexID v) {
-        RemoveAllEdges(v);
-    });
+    ForallLocalVertices([&](VertexID v) { RemoveAllEdges(v); });
     contraction_level_++;
     std::fill(begin(active_vertices_[contraction_level_]), 
               end(active_vertices_[contraction_level_]), false);
@@ -574,9 +571,7 @@ class GraphAccess {
     }
 
     // Insert edges and keep corresponding vertices
-    ForallLocalVertices([&](VertexID v) {
-        RemoveAllEdges(v);
-    });
+    ForallLocalVertices([&](VertexID v) { RemoveAllEdges(v); });
     contraction_level_++;
     std::fill(begin(active_vertices_[contraction_level_]), 
               end(active_vertices_[contraction_level_]), false);

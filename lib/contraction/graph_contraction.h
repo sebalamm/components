@@ -143,7 +143,7 @@ class Contraction {
           component_sizes[cv] = 0;
         component_sizes[cv]++;
         g_.ForallNeighbors(v, [&](const VertexID w) {
-          if (g_.IsGhost(w)) {
+          if (!g_.IsLocal(w)) {
             PEID target_pe = g_.GetPE(w);
             if (component_sizes[cv] > largest_component_sizes[target_pe]) {
               largest_component_sizes[target_pe] = component_sizes[cv];
@@ -183,7 +183,7 @@ class Contraction {
           PEID target_pe = g_.GetPE(w);
           VertexID comp_pair = pair(w, g_.GetContractionVertex(v));
           auto dp = depair(comp_pair);
-          if (g_.IsGhost(w) 
+          if (!g_.IsLocal(w) 
                 && unique_neighbors.find(comp_pair) == end(unique_neighbors)
                 && g_.GetContractionVertex(v) != largest_component_ids[target_pe])
             unique_neighbors.insert(comp_pair);
@@ -260,7 +260,7 @@ class Contraction {
     g_.ForallLocalVertices([&](const VertexID v) {
       if (g_.IsInterface(v)) {
         g_.ForallNeighbors(v, [&](const VertexID w) {
-          if (g_.IsGhost(w)) {
+          if (!g_.IsLocal(w)) {
             if (components_for_pe[v][g_.GetPE(w)] != std::numeric_limits<VertexID>::max())
               g_.SetContractionVertex(w, components_for_pe[v][g_.GetPE(w)]);
             else 

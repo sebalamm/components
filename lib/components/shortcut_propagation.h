@@ -127,7 +127,7 @@ class ShortcutPropagation {
       // Request l(l'(v)) from l'(v)
       // Check for heavy hitter
       if (number_of_hitters_ == 0 || (number_of_hitters_ > 0 && heavy_hitters_.find(labels_[v]) != end(heavy_hitters_))) {
-        // CHeck for uniqueness
+        // Check for uniqueness
         if (request_set.find(labels_[v]) == end(request_set)) {
           request_set.emplace(labels_[v]);
           request_buffers[ranks_[v]].emplace_back(labels_[v]);
