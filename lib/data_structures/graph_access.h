@@ -386,6 +386,9 @@ class GraphAccess {
     active_vertices_[contraction_level_ + 1].resize(number_of_vertices_, false);
     vertex_payload_.resize(contraction_level_ + 2);
     vertex_payload_[contraction_level_ + 1].resize(number_of_vertices_);
+    MPI_Barrier(MPI_COMM_WORLD);
+    OutputLocal();
+    MPI_Barrier(MPI_COMM_WORLD);
 
     // Parent information
     parent_.resize(contraction_level_ + 2);

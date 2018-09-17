@@ -68,11 +68,31 @@ class LocalContraction {
   // Local components
   std::vector<VertexID> parent_;
 
+  void FindLocalComponents(GraphAccess &g) {
+    Timer t;
+    t.Restart();
+    std::vector<bool> marked(g.GetNumberOfVertices(), false);
+    parent_.resize(g.GetNumberOfVertices());
+
+    // Compute components
+    g.ForallLocalVertices([&](const VertexID v) {
+      if (!marked[v]) Utility::BFS(g, v, marked, parent_);
+    });
+
+    // Set vertex labels for contraction
+    g.ForallLocalVertices([&](const VertexID v) {
+      // g.SetVertexLabel(v, parent_[v]);
+      g.SetVertexPayload(v, {g.GetVertexDeviate(v), g.GetVertexLabel(parent_[v]), rank_});
+    });
+  }
+
   void PerformDecomposition(GraphAccess &g) {
     VertexID global_vertices = g.GatherNumberOfGlobalVertices();
     if (global_vertices > 0) {
       iteration_++;
-      RunContraction(g);
+      if (global_vertices < config_.sequential_limit) 
+        RunSequentialCC(g);
+      else RunContraction(g);
     }
     PropagateLabelsUp(g);
   }
@@ -153,12 +173,61 @@ class LocalContraction {
     VertexID global_vertices = g.GatherNumberOfGlobalVertices();
     if (global_vertices > 0) {
       iteration_++;
-      RunContraction(g);
+      if (global_vertices < config_.sequential_limit) 
+        RunSequentialCC(g);
+      else RunContraction(g);
     }
   }
 
   void PropagateLabelsUp(GraphAccess &g) {
     g.MoveUpContraction();
+  }
+
+  void RunSequentialCC(GraphAccess &g) {
+    // Perform gather of graph on root 
+    std::vector<VertexID> vertices;
+    std::vector<int> num_vertices_per_pe(size_);
+    std::vector<VertexID> labels;
+    std::vector<std::pair<VertexID, VertexID>> edges;
+    g.GatherGraphOnRoot(vertices, num_vertices_per_pe, labels, edges);
+
+    // Root computes labels
+    if (rank_ == ROOT) {
+      // Build vertex mapping 
+      std::unordered_map<VertexID, int> vertex_map;
+      std::unordered_map<int, VertexID> reverse_vertex_map;
+      int current_vertex = 0;
+      for (const VertexID &v : vertices) {
+        vertex_map[v] = current_vertex;
+        reverse_vertex_map[current_vertex++] = v;
+      }
+
+      // Build edge lists
+      std::vector<std::vector<int>> edge_lists(vertices.size());
+      for (const auto &e : edges) 
+        edge_lists[vertex_map[e.first]].push_back(vertex_map[e.second]);
+
+      // Construct temporary graph
+      GraphAccess sg(ROOT, 1);
+      sg.StartConstruct(vertices.size(), edges.size(), ROOT);
+      for (int i = 0; i < vertices.size(); ++i) {
+        VertexID v = sg.AddVertex();
+        sg.SetVertexPayload(v, {sg.GetVertexDeviate(v), labels[v], ROOT});
+
+        for (const int &e : edge_lists[v]) 
+          sg.AddEdge(v, e, 1);
+      }
+      sg.FinishConstruct();
+      FindLocalComponents(sg);
+
+      // Gather labels
+      sg.ForallLocalVertices([&](const VertexID &v) {
+        labels[v] = sg.GetVertexLabel(v);
+      });
+    }
+
+    // Distribute labels to other PEs
+    g.DistributeLabelsFromRoot(labels, num_vertices_per_pe);
   }
 };
 

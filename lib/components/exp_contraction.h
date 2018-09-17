@@ -90,18 +90,9 @@ class ExponentialContraction {
     VertexID global_vertices = g.GatherNumberOfGlobalVertices();
     if (global_vertices > 0) {
       iteration_++;
-      if (global_vertices < config_.sequential_limit) {
-        // if (rank_ == ROOT) 
-        //   std::cout << "[STATUS] |-- Perform sequential computation (n=" 
-        //             << global_vertices << ")" << std::endl;
+      if (global_vertices < config_.sequential_limit) 
         RunSequentialCC(g);
-      }
-      else {
-        // if (rank_ == ROOT) 
-        //   std::cout << "[STATUS] |-- Perform recursion (n=" 
-        //             << global_vertices << ")" << std::endl;
-        RunContraction(g);
-      }
+      else RunContraction(g);
     }
     // if (rank_ == ROOT) std::cout << "[STATUS] |- Propagate labels upward" << std::endl;
     PropagateLabelsUp(g);
@@ -233,17 +224,9 @@ class ExponentialContraction {
     VertexID global_vertices = g.GatherNumberOfGlobalVertices();
     if (global_vertices > 0) {
       iteration_++;
-      if (global_vertices < config_.sequential_limit) {
-        // if (rank_ == ROOT) 
-        //   std::cout << "[STATUS] |-- Perform sequential computation (n=" 
-        //             << global_vertices << ")" << std::endl;
+      if (global_vertices < config_.sequential_limit) 
         RunSequentialCC(g);
-      } else {
-        // if (rank_ == ROOT) 
-        //   std::cout << "[STATUS] |-- Perform recursion (n=" 
-        //             << global_vertices << ")" << std::endl;
-        RunContraction(g);
-      }
+      else RunContraction(g);
     }
   }
 
