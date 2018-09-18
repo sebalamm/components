@@ -38,6 +38,7 @@
 #include <google/sparse_hash_set>
 
 #include "config.h"
+#include "timer.h"
 
 struct Vertex {
   EdgeID first_edge_;
@@ -382,13 +383,12 @@ class GraphAccess {
   }
 
   void ContractLocal() {
+    Timer t;
+    t.Restart();
     active_vertices_.resize(contraction_level_ + 2);
     active_vertices_[contraction_level_ + 1].resize(number_of_vertices_, false);
     vertex_payload_.resize(contraction_level_ + 2);
     vertex_payload_[contraction_level_ + 1].resize(number_of_vertices_);
-    MPI_Barrier(MPI_COMM_WORLD);
-    OutputLocal();
-    MPI_Barrier(MPI_COMM_WORLD);
 
     // Parent information
     parent_.resize(contraction_level_ + 2);
@@ -433,6 +433,12 @@ class GraphAccess {
             (*current_send_buffers)[pe].emplace_back(wlabel);
             (*current_send_buffers)[pe].emplace_back(GetVertexRoot(w));
             (*current_send_buffers)[pe].emplace_back(parent.second);
+            // std::cout << "R" << rank_ << " send (" 
+            //                           << vlabel << "," 
+            //                           << wlabel << "," 
+            //                           << GetVertexRoot(w) << "," 
+            //                           << parent.second
+            //                           << ") to " << pe << std::endl;
           }
         }
         removed_edges_[contraction_level_].emplace_back(v, GetGlobalID(w));
@@ -459,8 +465,11 @@ class GraphAccess {
     // Propagate edge buffers until all vertices are converged
     std::vector<MPI_Request*> requests;
     requests.clear();
+    std::cout << "R" << rank_ << " time (before main loop): " << t.Elapsed() << std::endl;
+    VertexID iteration = 0;
     int converged_globally = 0;
     while (converged_globally == 0) {
+      if (rank_ == ROOT) std::cout << "LOOP iteration " << ++iteration << std::endl;
       int converged_locally = 1;
 
       // Send edges
@@ -517,6 +526,8 @@ class GraphAccess {
           VertexID link = receive_buffers[pe][i + 3];
           VertexID update_id = vlabel + offset * wlabel;
 
+          // if (send_ids.find(update_id) != end(send_ids)) continue;
+
           // Get link information
           PEID cv = GetLocalID(link);
           std::pair<PEID, VertexID> parent = GetParent(cv);
@@ -534,31 +545,35 @@ class GraphAccess {
             }
           } else {
             if (GetVertexLabel(cv) == vlabel) {
-              // Propagate to ghost parent
-              while (pe == rank_) {
-                cv = GetLocalID(parent.second);
-                parent = GetParent(cv);
-                pe = parent.first;
-              }
               // Send edge
               (*current_send_buffers)[pe].emplace_back(vlabel);
               (*current_send_buffers)[pe].emplace_back(wlabel);
               (*current_send_buffers)[pe].emplace_back(wroot);
               (*current_send_buffers)[pe].emplace_back(parent.second);
+              // std::cout << "R" << rank_ << " prop (" 
+              //                           << vlabel << "," 
+              //                           << wlabel << "," 
+              //                           << wroot << "," 
+              //                           << parent.second
+              //                           << ") to " << pe << std::endl;
               converged_locally = 0;
             } else {
               // Parent has to be connected to vlabel (N(N(v))
-              ForallNeighbors(cv, [&](VertexID cv_neighbor) {
-                if (GetGlobalID(cv_neighbor) == vlabel) {
-                  pe = GetPE(cv_neighbor);
-                  // Send edge
-                  (*current_send_buffers)[pe].emplace_back(vlabel);
-                  (*current_send_buffers)[pe].emplace_back(wlabel);
-                  (*current_send_buffers)[pe].emplace_back(wroot);
-                  (*current_send_buffers)[pe].emplace_back(GetGlobalID(cv_neighbor));
-                  converged_locally = 0;
-                }
-              });
+              VertexID local_vlabel = GetLocalID(vlabel);
+              pe = GetPE(local_vlabel);
+
+                // Send edge
+              (*current_send_buffers)[pe].emplace_back(vlabel);
+              (*current_send_buffers)[pe].emplace_back(wlabel);
+              (*current_send_buffers)[pe].emplace_back(wroot);
+              (*current_send_buffers)[pe].emplace_back(vlabel);
+              // std::cout << "R" << rank_ << " prop (" 
+              //                           << vlabel << "," 
+              //                           << wlabel << "," 
+              //                           << wroot << "," 
+              //                           << vlabel 
+              //                           << ") to " << pe << std::endl;
+              converged_locally = 0;
             }
           }
         }
@@ -573,6 +588,7 @@ class GraphAccess {
                     MPI_COMM_WORLD);
     }
 
+    std::cout << "R" << rank_ << " time (after main loop): " << t.Elapsed() << std::endl;
     // Insert edges and keep corresponding vertices
     ForallLocalVertices([&](VertexID v) { RemoveAllEdges(v); });
     contraction_level_++;
@@ -596,11 +612,11 @@ class GraphAccess {
             {std::numeric_limits<VertexID>::max() - 1, wlabel, pe};
       }
     }
+    std::cout << "R" << rank_ << " time (end): " << t.Elapsed() << std::endl;
   }
 
   void MoveUpContraction() {
     // TODO: Does not work if graph is completely empty
-    // OutputLocal();
     while (contraction_level_ > 0) {
       // Remove current edges from current level
       ForallLocalVertices([&](VertexID v) {
@@ -613,7 +629,6 @@ class GraphAccess {
       for (auto &e : removed_edges_[contraction_level_])
         AddEdge(std::get<0>(e), std::get<1>(e), GetPE(GetLocalID(std::get<1>(e))));
 
-      // OutputLocal();
       // Update local labels
       ForallLocalVertices([&](VertexID v) {
         if (vertex_payload_[contraction_level_][v].label_ !=

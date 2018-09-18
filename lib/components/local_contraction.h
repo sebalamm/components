@@ -47,7 +47,22 @@ class LocalContraction {
   void FindComponents(GraphAccess &g) {
     Timer t;
     t.Restart();
-    PerformDecomposition(g);
+
+    // Initial contraction
+    FindLocalComponents(g);
+    Contraction cont(g, rank_, size_);
+    GraphAccess cag = cont.BuildComponentAdjacencyGraph();
+    FindLocalComponents(cag);
+    Contraction ccont(cag, rank_, size_);
+    GraphAccess ccag = ccont.BuildComponentAdjacencyGraph();
+    rng_offset_ = ccag.GatherNumberOfGlobalVertices();
+
+    // Main algorithm
+    PerformDecomposition(ccag);
+
+    // Undo contraction
+    ApplyToLocalComponents(ccag, cag);
+    ApplyToLocalComponents(cag, g);
   }
 
   void Output(GraphAccess &g) {
@@ -181,6 +196,13 @@ class LocalContraction {
 
   void PropagateLabelsUp(GraphAccess &g) {
     g.MoveUpContraction();
+  }
+
+  void ApplyToLocalComponents(GraphAccess &cag, GraphAccess &g) {
+    g.ForallLocalVertices([&](const VertexID v) {
+      VertexID cv = g.GetContractionVertex(v);
+      g.SetVertexPayload(v, {0, cag.GetVertexLabel(cag.GetLocalID(cv)), rank_});
+    });
   }
 
   void RunSequentialCC(GraphAccess &g) {
