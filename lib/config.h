@@ -51,6 +51,8 @@ struct Config {
   unsigned int prop_iterations{};
   // Decomposition
   double beta{};
+  // Contraction
+  bool use_contraction;
   // Generator
   std::string gen;
   VertexID gen_n;

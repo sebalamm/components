@@ -47,23 +47,20 @@ class ExponentialContraction {
   void FindComponents(GraphAccess &g) {
     Timer t;
     t.Restart();
-    // if (rank_ == ROOT) std::cout << "[STATUS] Find local components (" << t.Elapsed() << ")" << std::endl;
-    FindLocalComponents(g);
-    // if (rank_ == ROOT) std::cout << "[STATUS] Contract local components (" << t.Elapsed() << ")" << std::endl;
-    Contraction cont(g, rank_, size_);
-    GraphAccess cag = cont.BuildComponentAdjacencyGraph();
-    // if (rank_ == ROOT) std::cout << "[STATUS] Contract local components again? (" << t.Elapsed() << ")" << std::endl;
-    FindLocalComponents(cag);
-    Contraction ccont(cag, rank_, size_);
-    GraphAccess ccag = ccont.BuildComponentAdjacencyGraph();
-    rng_offset_ = ccag.GatherNumberOfGlobalVertices();
-    // ccag.OutputLocal();
+    if (config_.use_contraction) {
+      FindLocalComponents(g);
+      Contraction cont(g, rank_, size_);
+      GraphAccess cag = cont.BuildComponentAdjacencyGraph();
+      FindLocalComponents(cag);
+      Contraction ccont(cag, rank_, size_);
+      GraphAccess ccag = ccont.BuildComponentAdjacencyGraph();
+      rng_offset_ = ccag.GatherNumberOfGlobalVertices();
 
-    // if (rank_ == ROOT) std::cout << "[STATUS] Perform main algorithm (" << t.Elapsed() << ")" << std::endl;
-    PerformDecomposition(ccag);
-    // if (rank_ == ROOT) std::cout << "[STATUS] Apply labels (" << t.Elapsed() << ")" << std::endl;
-    ApplyToLocalComponents(ccag, cag);
-    ApplyToLocalComponents(cag, g);
+      PerformDecomposition(ccag);
+
+      ApplyToLocalComponents(ccag, cag);
+      ApplyToLocalComponents(cag, g);
+    } else PerformDecomposition(g);
   }
 
   void Output(GraphAccess &g) {

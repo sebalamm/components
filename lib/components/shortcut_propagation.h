@@ -23,10 +23,16 @@
 #define _SHORTCUT_PROPAGATION_H_
 
 #include <iostream>
+#include <unordered_set>
+#include <random>
+#include <set>
 
 #include "config.h"
 #include "definitions.h"
 #include "graph_io.h"
+#include "graph_contraction.h"
+#include "utils.h"
+#include "union_find.h"
 #include "graph_access.h"
 
 class ShortcutPropagation {
@@ -40,19 +46,19 @@ class ShortcutPropagation {
   virtual ~ShortcutPropagation() = default;
 
   void FindComponents(GraphAccess &g) {
-    // Init 
-    labels_.resize(g.GetNumberOfLocalVertices());
-    g.ForallLocalVertices([&](const VertexID v) { labels_[v] = g.GetGlobalID(v); });
-    ranks_.resize(g.GetNumberOfLocalVertices(), rank_);
+    if (config_.use_contraction) {
+      FindLocalComponents(g);
+      Contraction cont(g, rank_, size_);
+      GraphAccess cag = cont.BuildComponentAdjacencyGraph();
+      FindLocalComponents(cag);
+      Contraction ccont(cag, rank_, size_);
+      GraphAccess ccag = ccont.BuildComponentAdjacencyGraph();
 
-    // Iterate until converged
-    do {
-      PropagateLabels(g);
-      if (number_of_hitters_ > 0) 
-        FindHeavyHitters(g);
-      Shortcut(g);
-      iteration_++;
-    } while (!CheckConvergence(g));
+      PerformShortcutting(ccag);
+
+      ApplyToLocalComponents(ccag, cag);
+      ApplyToLocalComponents(cag, g);
+    } else PerformShortcutting(g);
   }
 
   void Output(GraphAccess &g) {
@@ -74,9 +80,46 @@ class ShortcutPropagation {
   std::vector<VertexID> labels_;
   std::vector<PEID> ranks_;
 
+  // Local components
+  std::vector<VertexID> parent_;
+
   // Heavy hitters
   VertexID number_of_hitters_;
   std::unordered_set<VertexID> heavy_hitters_;
+
+  void PerformShortcutting(GraphAccess &g) {
+    // Init 
+    labels_.resize(g.GetNumberOfLocalVertices());
+    g.ForallLocalVertices([&](const VertexID v) { labels_[v] = g.GetGlobalID(v); });
+    ranks_.resize(g.GetNumberOfLocalVertices(), rank_);
+
+    // Iterate until converged
+    do {
+      PropagateLabels(g);
+      if (number_of_hitters_ > 0) 
+        FindHeavyHitters(g);
+      Shortcut(g);
+      iteration_++;
+    } while (!CheckConvergence(g));
+  }
+
+  void FindLocalComponents(GraphAccess &g) {
+    Timer t;
+    t.Restart();
+    std::vector<bool> marked(g.GetNumberOfVertices(), false);
+    parent_.resize(g.GetNumberOfVertices());
+
+    // Compute components
+    g.ForallLocalVertices([&](const VertexID v) {
+      if (!marked[v]) Utility::BFS(g, v, marked, parent_);
+    });
+
+    // Set vertex labels for contraction
+    g.ForallLocalVertices([&](const VertexID v) {
+      // g.SetVertexLabel(v, parent_[v]);
+      g.SetVertexPayload(v, {g.GetVertexDeviate(v), g.GetVertexLabel(parent_[v]), rank_});
+    });
+  }
 
   void PropagateLabels(GraphAccess &g) {
     g.ForallLocalVertices([&](const VertexID v) {
@@ -277,6 +320,13 @@ class ShortcutPropagation {
                   MPI_COMM_WORLD);
 
     return converged_globally;
+  }
+
+  void ApplyToLocalComponents(GraphAccess &cag, GraphAccess &g) {
+    g.ForallLocalVertices([&](const VertexID v) {
+      VertexID cv = g.GetContractionVertex(v);
+      g.SetVertexPayload(v, {0, cag.GetVertexLabel(cag.GetLocalID(cv)), rank_});
+    });
   }
 };
 
