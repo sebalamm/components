@@ -268,7 +268,7 @@ class GraphAccess {
           // if ((*current_send_buffers)[pe].size() == 0) 
           //   (*current_send_buffers)[pe].emplace_back(0);
           auto *req = new MPI_Request();
-          MPI_Isend((*current_send_buffers)[pe].data(), static_cast<int>((*current_send_buffers)[pe].size()), MPI_LONG, pe, 0, MPI_COMM_WORLD, req);
+          MPI_Isend((*current_send_buffers)[pe].data(), static_cast<int>((*current_send_buffers)[pe].size()), MPI_VERTEX, pe, 0, MPI_COMM_WORLD, req);
           requests.emplace_back(req);
         }
       }
@@ -281,12 +281,12 @@ class GraphAccess {
       while (messages_recv < num_adj) {
         MPI_Status st{};
         MPI_Probe(MPI_ANY_SOURCE, 0, MPI_COMM_WORLD, &st);
-        MPI_Get_count(&st, MPI_LONG, &message_length);
+        MPI_Get_count(&st, MPI_VERTEX, &message_length);
         messages_recv++;
 
         receive_buffers[st.MPI_SOURCE].resize(message_length);
         MPI_Status rst{};
-        MPI_Recv(&receive_buffers[st.MPI_SOURCE][0], message_length, MPI_LONG, st.MPI_SOURCE, 0, MPI_COMM_WORLD, &rst);
+        MPI_Recv(&receive_buffers[st.MPI_SOURCE][0], message_length, MPI_VERTEX, st.MPI_SOURCE, 0, MPI_COMM_WORLD, &rst);
       }
 
       // Clear buffers
@@ -478,7 +478,7 @@ class GraphAccess {
           if ((*current_send_buffers)[pe].size() == 0) 
             (*current_send_buffers)[pe].emplace_back(0);
           auto *req = new MPI_Request();
-          MPI_Isend((*current_send_buffers)[pe].data(), static_cast<int>((*current_send_buffers)[pe].size()), MPI_LONG, pe, 0, MPI_COMM_WORLD, req);
+          MPI_Isend((*current_send_buffers)[pe].data(), static_cast<int>((*current_send_buffers)[pe].size()), MPI_VERTEX, pe, 0, MPI_COMM_WORLD, req);
           requests.emplace_back(req);
         }
       }
@@ -492,12 +492,12 @@ class GraphAccess {
       while (messages_recv < num_adj) {
         MPI_Status st{};
         MPI_Probe(MPI_ANY_SOURCE, 0, MPI_COMM_WORLD, &st);
-        MPI_Get_count(&st, MPI_LONG, &message_length);
+        MPI_Get_count(&st, MPI_VERTEX, &message_length);
         messages_recv++;
 
         receive_buffers[st.MPI_SOURCE].resize(message_length);
         MPI_Status rst{};
-        MPI_Recv(&receive_buffers[st.MPI_SOURCE][0], message_length, MPI_LONG, st.MPI_SOURCE, 0, MPI_COMM_WORLD, &rst);
+        MPI_Recv(&receive_buffers[st.MPI_SOURCE][0], message_length, MPI_VERTEX, st.MPI_SOURCE, 0, MPI_COMM_WORLD, &rst);
       }
 
       // Clear buffers
@@ -750,7 +750,7 @@ class GraphAccess {
     MPI_Allreduce(&local_vertices,
                   &number_of_global_vertices_,
                   1,
-                  MPI_LONG,
+                  MPI_VERTEX,
                   MPI_SUM,
                   MPI_COMM_WORLD);
     return number_of_global_vertices_;
@@ -765,7 +765,7 @@ class GraphAccess {
     MPI_Allreduce(&local_edges,
                   &number_of_global_edges_,
                   1,
-                  MPI_LONG,
+                  MPI_VERTEX,
                   MPI_SUM,
                   MPI_COMM_WORLD);
     number_of_global_edges_ /= 2;
@@ -788,6 +788,7 @@ class GraphAccess {
     // local_components.reserve(local_component_sizes.size());
     for(auto &kv : local_component_sizes)
       local_components.emplace_back(kv.first, kv.second);
+    // TODO: Might be too small
     int num_local_components = local_components.size();
 
     // Exchange number of local components
@@ -796,6 +797,7 @@ class GraphAccess {
 
     // Compute diplacements
     std::vector<int> displ_components(size_, 0);
+    // TODO: Might be too small
     int num_global_components = 0;
     for (PEID i = 0; i < size_; ++i) {
       displ_components[i] = num_global_components;
@@ -804,7 +806,7 @@ class GraphAccess {
 
     // Add datatype
     MPI_Datatype MPI_COMP;
-    MPI_Type_vector(1, 2, 0, MPI_LONG, &MPI_COMP);
+    MPI_Type_vector(1, 2, 0, MPI_VERTEX, &MPI_COMP);
     MPI_Type_commit(&MPI_COMP);
 
     // Exchange components
@@ -973,7 +975,9 @@ class GraphAccess {
     std::vector<VertexID> local_vertices;
     std::vector<VertexID> local_labels;
     std::vector<std::pair<VertexID, VertexID>> local_edges;
+    // TODO: Might be too small
     int num_local_vertices = 0;
+    // TODO: Might be too small
     int num_local_edges = 0;
     ForallLocalVertices([&](const VertexID &v) {
       local_vertices.push_back(GetGlobalID(v));
@@ -993,7 +997,9 @@ class GraphAccess {
     // Compute displacements
     std::vector<int> displ_vertices(size_);
     std::vector<int> displ_edges(size_);
+    // TODO: Might be too small
     int num_global_vertices = 0;
+    // TODO: Might be too small
     int num_global_edges = 0;
     for (PEID i = 0; i < size_; ++i) {
       displ_vertices[i] = num_global_vertices;
@@ -1004,18 +1010,18 @@ class GraphAccess {
 
     // Build datatype for edge
     MPI_Datatype MPI_EDGE;
-    MPI_Type_vector(1, 2, 0, MPI_LONG, &MPI_EDGE);
+    MPI_Type_vector(1, 2, 0, MPI_VERTEX, &MPI_EDGE);
     MPI_Type_commit(&MPI_EDGE);
     
     // Gather vertices/edges and labels for each PE
     global_vertices.resize(num_global_vertices);
     global_labels.resize(num_global_vertices);
     global_edges.resize(num_global_edges);
-    MPI_Gatherv(&local_vertices[0], num_local_vertices, MPI_LONG,
-                &global_vertices[0], &num_vertices[0], &displ_vertices[0], MPI_LONG,
+    MPI_Gatherv(&local_vertices[0], num_local_vertices, MPI_VERTEX,
+                &global_vertices[0], &num_vertices[0], &displ_vertices[0], MPI_VERTEX,
                 ROOT, MPI_COMM_WORLD);
-    MPI_Gatherv(&local_labels[0], num_local_vertices, MPI_LONG,
-                &global_labels[0], &num_vertices[0], &displ_vertices[0], MPI_LONG,
+    MPI_Gatherv(&local_labels[0], num_local_vertices, MPI_VERTEX,
+                &global_labels[0], &num_vertices[0], &displ_vertices[0], MPI_VERTEX,
                 ROOT, MPI_COMM_WORLD);
     MPI_Gatherv(&local_edges[0], num_local_edges, MPI_EDGE,
                 &global_edges[0], &num_edges[0], &displ_edges[0], MPI_EDGE,
@@ -1026,6 +1032,7 @@ class GraphAccess {
                                 std::vector<int> &num_labels) {
     // Compute displacements
     std::vector<int> displ_labels(size_);
+    // TODO: Might be too small
     int num_global_labels = 0;
     for (PEID i = 0; i < size_; ++i) {
       displ_labels[i] = num_global_labels;
@@ -1034,6 +1041,7 @@ class GraphAccess {
 
     // Gather local vertices
     std::vector<VertexID> local_vertices;
+    // TODO: Might be too small
     int num_local_vertices = 0;
     ForallLocalVertices([&](const VertexID &v) {
       local_vertices.push_back(v);
@@ -1042,8 +1050,8 @@ class GraphAccess {
 
     // Scatter to other PEs
     std::vector<VertexID> local_labels(num_local_vertices);
-    MPI_Scatterv(&global_labels[0], &num_labels[0], &displ_labels[0], MPI_LONG, 
-                 &local_labels[0], num_local_vertices, MPI_LONG, 
+    MPI_Scatterv(&global_labels[0], &num_labels[0], &displ_labels[0], MPI_VERTEX, 
+                 &local_labels[0], num_local_vertices, MPI_VERTEX, 
                  ROOT, MPI_COMM_WORLD);
 
     for (int i = 0; i < num_local_vertices; ++i) {

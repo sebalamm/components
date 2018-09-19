@@ -22,6 +22,7 @@
 #ifndef _GRAPH_DEFINITIONS_H_
 #define _GRAPH_DEFINITIONS_H_
 
+#define MPI_VERTEX MPI_UNSIGNED_LONG_LONG
 
 // Constants
 typedef int PEID;
@@ -34,7 +35,7 @@ typedef long long LONG;
 typedef unsigned long long ULONG;
 
 // Graph access
-typedef unsigned long VertexID;
-typedef unsigned long EdgeID;
+typedef ULONG VertexID;
+typedef ULONG EdgeID;
 
 #endif

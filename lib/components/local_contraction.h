@@ -216,6 +216,7 @@ class LocalContraction {
       // Build vertex mapping 
       std::unordered_map<VertexID, int> vertex_map;
       std::unordered_map<int, VertexID> reverse_vertex_map;
+      // TODO: Might be too small
       int current_vertex = 0;
       for (const VertexID &v : vertices) {
         vertex_map[v] = current_vertex;
@@ -230,6 +231,7 @@ class LocalContraction {
       // Construct temporary graph
       GraphAccess sg(ROOT, 1);
       sg.StartConstruct(vertices.size(), edges.size(), ROOT);
+      // TODO: Might be too small
       for (int i = 0; i < vertices.size(); ++i) {
         VertexID v = sg.AddVertex();
         sg.SetVertexPayload(v, {sg.GetVertexDeviate(v), labels[v], ROOT});

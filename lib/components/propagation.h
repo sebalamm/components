@@ -85,10 +85,10 @@ class Propagation {
     std::vector<VertexID> num_components(static_cast<unsigned long>(size));
     MPI_Allgather(&num_local_components,
                   1,
-                  MPI_UNSIGNED_LONG,
+                  MPI_VERTEX,
                   &num_components[0],
                   1,
-                  MPI_UNSIGNED_LONG,
+                  MPI_VERTEX,
                   MPI_COMM_WORLD);
 
     VertexID num_total_components = 0;

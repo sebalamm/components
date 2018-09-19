@@ -107,7 +107,7 @@ class NodeCommunicator {
         auto *request = new MPI_Request();
         MPI_Isend(&(*current_send_buffers_)[pe][0],
                   static_cast<int>((*current_send_buffers_)[pe].size()),
-                  MPI_LONG, pe,
+                  MPI_VERTEX, pe,
                   send_tag_, communicator_, request);
 
 #ifndef NDEBUG

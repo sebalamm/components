@@ -36,13 +36,13 @@ void NodeCommunicator::ReceiveMessages() {
     MPI_Probe(MPI_ANY_SOURCE, recv_tag_, communicator_, &st);
 
     int message_length;
-    MPI_Get_count(&st, MPI_LONG, &message_length);
+    MPI_Get_count(&st, MPI_VERTEX, &message_length);
 
     // if (rank_ == 11) std::cout << "start recv " << messages_recv << " " << recv_tag_ << std::endl;
     std::vector<VertexID> message(static_cast<unsigned long>(message_length));
     MPI_Status rst{};
     MPI_Recv(&message[0], message_length,
-             MPI_LONG, st.MPI_SOURCE,
+             MPI_VERTEX, st.MPI_SOURCE,
              recv_tag_, communicator_, &rst);
     messages_recv++;
     // if (rank_ == 11) std::cout << "start ml " << message_length << std::endl;

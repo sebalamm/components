@@ -116,6 +116,7 @@ class ExponentialContraction {
   void FindHighDegreeVertices(GraphAccess &g) {
     std::vector<VertexID> local_vertices;
     std::vector<VertexID> local_degrees;
+    // TODO: Might be too small
     int num_local_vertices = 0;
 
     // Gather local high degree vertices
@@ -136,6 +137,7 @@ class ExponentialContraction {
 
     // Compute displacements
     std::vector<int> displ(size_);
+    // TODO: Might be too small
     int num_global_vertices = 0;
     for (PEID i = 0; i < size_; ++i) {
       displ[i] = num_global_vertices;
@@ -145,11 +147,11 @@ class ExponentialContraction {
     // Distribute vertices/degrees using all-gather
     std::vector<VertexID> global_vertices(num_global_vertices);
     std::vector<VertexID> global_degrees(num_global_vertices);
-    MPI_Allgatherv(&local_vertices[0], num_local_vertices, MPI_LONG,
-                   &global_vertices[0], &num_vertices[0], &displ[0], MPI_LONG,
+    MPI_Allgatherv(&local_vertices[0], num_local_vertices, MPI_VERTEX,
+                   &global_vertices[0], &num_vertices[0], &displ[0], MPI_VERTEX,
                    MPI_COMM_WORLD);
-    MPI_Allgatherv(&local_degrees[0], num_local_vertices, MPI_LONG,
-                   &global_degrees[0], &num_vertices[0], &displ[0], MPI_LONG,
+    MPI_Allgatherv(&local_degrees[0], num_local_vertices, MPI_VERTEX,
+                   &global_degrees[0], &num_vertices[0], &displ[0], MPI_VERTEX,
                    MPI_COMM_WORLD);
   }
 
@@ -159,7 +161,7 @@ class ExponentialContraction {
     // FindHighDegreeVertices(g);
 
     // Draw exponential deviate per local vertex
-    std::exponential_distribution<double> distribution(config_.beta);
+    std::exponential_distribution<LPFloat> distribution(config_.beta);
     g.ForallVertices([&](const VertexID v) {
       // Set preliminary deviate
       std::mt19937
@@ -169,8 +171,8 @@ class ExponentialContraction {
 
       // Weigh distribution towards high degree vertices
       // TODO: Test different weighing functions 
-      // float weight = static_cast<float>(log2(g.GetNumberOfGlobalVertices()) / g.GetVertexDegree(v));
-      float weight = 1.;
+      // LPFloat weight = static_cast<LPFloat>(log2(g.GetNumberOfGlobalVertices()) / g.GetVertexDegree(v));
+      LPFloat weight = 1.;
       g.SetVertexPayload(v, {static_cast<VertexID>(weight * distribution(generator)),
                              g.GetVertexLabel(v), g.GetVertexRoot(v)}, 
                          false);
@@ -251,6 +253,7 @@ class ExponentialContraction {
       // Build vertex mapping 
       std::unordered_map<VertexID, int> vertex_map;
       std::unordered_map<int, VertexID> reverse_vertex_map;
+      // TODO: Might be too small
       int current_vertex = 0;
       for (const VertexID &v : vertices) {
         vertex_map[v] = current_vertex;
@@ -265,6 +268,7 @@ class ExponentialContraction {
       // Construct temporary graph
       GraphAccess sg(ROOT, 1);
       sg.StartConstruct(vertices.size(), edges.size(), ROOT);
+      // TODO: Might be too small
       for (int i = 0; i < vertices.size(); ++i) {
         VertexID v = sg.AddVertex();
         sg.SetVertexPayload(v, {sg.GetVertexDeviate(v), labels[v], ROOT});

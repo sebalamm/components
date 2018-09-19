@@ -97,14 +97,14 @@ class Contraction {
     MPI_Scan(&num_local_components_,
              &component_prefix_sum,
              1,
-             MPI_UNSIGNED_LONG,
+             MPI_VERTEX,
              MPI_SUM,
              MPI_COMM_WORLD);
 
     num_global_components_ = component_prefix_sum;
     MPI_Bcast(&num_global_components_,
               1,
-              MPI_UNSIGNED_LONG,
+              MPI_VERTEX,
               size_ - 1,
               MPI_COMM_WORLD);
 
@@ -233,13 +233,13 @@ class Contraction {
       MPI_Probe(MPI_ANY_SOURCE, rank_ + 6 * size_, MPI_COMM_WORLD, &st);
 
       int message_length;
-      MPI_Get_count(&st, MPI_UNSIGNED_LONG, &message_length);
+      MPI_Get_count(&st, MPI_VERTEX, &message_length);
       std::vector<VertexID> message(static_cast<unsigned long>(message_length));
 
       MPI_Status rst{};
       MPI_Recv(&message[0],
                message_length,
-               MPI_UNSIGNED_LONG,
+               MPI_VERTEX,
                st.MPI_SOURCE,
                rank_ + 6 * size_,
                MPI_COMM_WORLD,
@@ -297,7 +297,7 @@ class Contraction {
         MPI_Request req;
         MPI_Isend(&edge_buffers_[i][0],
                   static_cast<int>(edge_buffers_[i].size()),
-                  MPI_UNSIGNED_LONG,
+                  MPI_VERTEX,
                   i,
                   i + 7 * size_,
                   MPI_COMM_WORLD,
@@ -313,13 +313,13 @@ class Contraction {
       MPI_Probe(MPI_ANY_SOURCE, rank_ + 7 * size_, MPI_COMM_WORLD, &st);
 
       int message_length;
-      MPI_Get_count(&st, MPI_UNSIGNED_LONG, &message_length);
+      MPI_Get_count(&st, MPI_VERTEX, &message_length);
       std::vector<VertexID> message(static_cast<unsigned long>(message_length));
 
       MPI_Status rst{};
       MPI_Recv(&message[0],
                message_length,
-               MPI_UNSIGNED_LONG,
+               MPI_VERTEX,
                st.MPI_SOURCE,
                rank_ + 7 * size_,
                MPI_COMM_WORLD,

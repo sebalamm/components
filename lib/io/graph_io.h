@@ -60,7 +60,7 @@ class GraphIO {
 
     // Add datatype
     MPI_Datatype MPI_COMP;
-    MPI_Type_vector(1, 2, 0, MPI_LONG, &MPI_COMP);
+    MPI_Type_vector(1, 2, 0, MPI_VERTEX, &MPI_COMP);
     MPI_Type_commit(&MPI_COMP);
 
     // Gather vertex distribution
@@ -126,7 +126,7 @@ class GraphIO {
 
     // Add datatype
     MPI_Datatype MPI_COMP;
-    MPI_Type_vector(1, 2, 0, MPI_LONG, &MPI_COMP);
+    MPI_Type_vector(1, 2, 0, MPI_VERTEX, &MPI_COMP);
     MPI_Type_commit(&MPI_COMP);
 
     // Gather vertex distribution
