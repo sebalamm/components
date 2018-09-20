@@ -36,6 +36,7 @@
 #include <unordered_set>
 #include <boost/functional/hash.hpp>
 #include <google/sparse_hash_set>
+#include <google/sparse_hash_map>
 
 #include "config.h"
 #include "timer.h"
@@ -134,8 +135,6 @@ class GraphAccess {
     }
   }
 
-  // TODO: If we decrease the contraction level, there more vertices than currently active
-  // Store number of vertices in each level
   template<typename F>
   void ForallVertices(F &&callback) {
     for (VertexID v = 0; v < GetNumberOfVertices(); ++v) {
@@ -178,6 +177,23 @@ class GraphAccess {
     return contraction_vertices_[v];
   }
 
+  void BuildLabelShortcuts() {
+    google::sparse_hash_map<VertexID, VertexID> smallest_deviate;
+    ForallLocalVertices([&](const VertexID v) {
+      auto payload = GetVertexMessage(v);
+      VertexID label = payload.label_;
+      VertexID deviate = payload.deviate_;
+      VertexID root = payload.root_;
+
+      // If not yet found insert deviate
+      if (smallest_deviate.find(label) == end(smallest_deviate) 
+            || smallest_deviate[label] > deviate) {
+        smallest_deviate[label] = deviate;
+        label_shortcut_[label] = GetParent(v);
+      }
+    });
+  }
+
   void ContractExponential() {
     active_vertices_.resize(contraction_level_ + 2);
     active_vertices_[contraction_level_ + 1].resize(number_of_vertices_, false);
@@ -207,7 +223,6 @@ class GraphAccess {
     }
 
     google::sparse_hash_set<VertexID> inserted_edges;
-    google::sparse_hash_set<VertexID> remaining_vertices;
     std::vector<std::vector<std::pair<VertexID, VertexID>>> edges_to_add(size_);
     ForallLocalVertices([&](VertexID v) {
       VertexID vlabel = GetVertexLabel(v);
@@ -215,23 +230,16 @@ class GraphAccess {
         VertexID wlabel = GetVertexLabel(w);
         if (vlabel != wlabel) {
           VertexID update_id = vlabel + offset * wlabel;
-          // TODO: Try to apply updates directly
           if (send_ids.find(update_id) == send_ids.end()) {
-            // Local propagation
-            PEID cv = v;
-            std::pair<PEID, VertexID> parent = GetParent(cv);
-            PEID pe = parent.first;
-            while (GetVertexRoot(v) != rank_ && pe == rank_) {
-              cv = GetLocalID(parent.second);
-              parent = GetParent(cv);
-              pe = parent.first;
-            }
+            // Local propagation with shortcuts
+            VertexID parent = label_shortcut_[vlabel];
+            PEID pe = GetPE(parent);
             // Send edge
             send_ids.insert(update_id);
             (*current_send_buffers)[pe].emplace_back(vlabel);
             (*current_send_buffers)[pe].emplace_back(wlabel);
             (*current_send_buffers)[pe].emplace_back(GetVertexRoot(w));
-            (*current_send_buffers)[pe].emplace_back(parent.second);
+            (*current_send_buffers)[pe].emplace_back(parent);
           }
         }
         removed_edges_[contraction_level_].emplace_back(v, GetGlobalID(w));
@@ -315,34 +323,30 @@ class GraphAccess {
           VertexID link = receive_buffers[pe][i + 3];
           VertexID update_id = vlabel + offset * wlabel;
 
-          // If link root is on same PE just jump to it
-          if (GetVertexRoot(GetLocalID(link)) == rank_ && inserted_edges.find(update_id) == end(inserted_edges)) {
-            // V -> W
+          // Continue if already inserted
+          if (inserted_edges.find(update_id) != end(inserted_edges)) continue;
+          if (send_ids.find(update_id) != end(send_ids)) continue;
+
+          // If vlabel is on same PE just insert the edge
+          if (IsLocalFromGlobal(vlabel)) {
             edges_to_add[wroot].emplace_back(vlabel, wlabel);
             inserted_edges.insert(update_id);
             send_ids.insert(update_id);
-            // W -> V
             if (wroot == rank_) {
               edges_to_add[rank_].emplace_back(wlabel, vlabel);
               inserted_edges.insert(wlabel + offset * vlabel);
               send_ids.insert(wlabel + offset * vlabel);
             }
-            converged_locally = 0;
-          } else if (GetVertexRoot(GetLocalID(link)) != rank_) {
-            // Local propagation
-            PEID cv = GetLocalID(link);
-            std::pair<PEID, VertexID> parent = GetParent(cv);
-            PEID pe = parent.first;
-            while (pe == rank_) {
-              cv = GetLocalID(parent.second);
-              parent = GetParent(cv);
-              pe = parent.first;
-            }
+          } else {
+            // Local propagation with shortcuts
+            VertexID parent = label_shortcut_[vlabel];
+            PEID pe = GetPE(parent);
             // Send edge
+            send_ids.insert(update_id);
             (*current_send_buffers)[pe].emplace_back(vlabel);
             (*current_send_buffers)[pe].emplace_back(wlabel);
             (*current_send_buffers)[pe].emplace_back(wroot);
-            (*current_send_buffers)[pe].emplace_back(parent.second);
+            (*current_send_buffers)[pe].emplace_back(parent);
             converged_locally = 0;
           }
         }
@@ -413,7 +417,6 @@ class GraphAccess {
     }
 
     google::sparse_hash_set<VertexID> inserted_edges;
-    google::sparse_hash_set<VertexID> remaining_vertices;
     std::vector<std::vector<std::pair<VertexID, VertexID>>> edges_to_add(size_);
     ForallLocalVertices([&](VertexID v) {
       VertexID vlabel = GetVertexLabel(v);
@@ -421,18 +424,16 @@ class GraphAccess {
         VertexID wlabel = GetVertexLabel(w);
         if (vlabel != wlabel) {
           VertexID update_id = vlabel + offset * wlabel;
-          // TODO: Try to apply updates directly
           if (send_ids.find(update_id) == send_ids.end()) {
             // Local propagation
-            PEID cv = v;
-            std::pair<PEID, VertexID> parent = GetParent(cv);
-            PEID pe = parent.first;
+            VertexID parent = GetParent(v);
+            PEID pe = GetPE(parent);
             // Send edge
             send_ids.insert(update_id);
             (*current_send_buffers)[pe].emplace_back(vlabel);
             (*current_send_buffers)[pe].emplace_back(wlabel);
             (*current_send_buffers)[pe].emplace_back(GetVertexRoot(w));
-            (*current_send_buffers)[pe].emplace_back(parent.second);
+            (*current_send_buffers)[pe].emplace_back(parent);
             // std::cout << "R" << rank_ << " send (" 
             //                           << vlabel << "," 
             //                           << wlabel << "," 
@@ -465,11 +466,9 @@ class GraphAccess {
     // Propagate edge buffers until all vertices are converged
     std::vector<MPI_Request*> requests;
     requests.clear();
-    std::cout << "R" << rank_ << " time (before main loop): " << t.Elapsed() << std::endl;
     VertexID iteration = 0;
     int converged_globally = 0;
     while (converged_globally == 0) {
-      if (rank_ == ROOT) std::cout << "LOOP iteration " << ++iteration << std::endl;
       int converged_locally = 1;
 
       // Send edges
@@ -482,7 +481,6 @@ class GraphAccess {
           requests.emplace_back(req);
         }
       }
-      // MPI_Barrier(MPI_COMM_WORLD);
 
       // Receive edges
       PEID messages_recv = 0;
@@ -526,30 +524,28 @@ class GraphAccess {
           VertexID link = receive_buffers[pe][i + 3];
           VertexID update_id = vlabel + offset * wlabel;
 
-          // if (send_ids.find(update_id) != end(send_ids)) continue;
+          // Continue if already inserted
+          if (inserted_edges.find(update_id) != end(inserted_edges)) continue;
+          if (send_ids.find(update_id) != end(send_ids)) continue;
 
           // Get link information
-          PEID cv = GetLocalID(link);
-          std::pair<PEID, VertexID> parent = GetParent(cv);
-          PEID pe = parent.first;
+          VertexID parent = GetParent(GetLocalID(link));
+          PEID pe = GetPE(parent);
 
           if (IsLocalFromGlobal(vlabel)) {
-            if (inserted_edges.find(update_id) != end(inserted_edges)) continue;
-            // V -> W
             edges_to_add[wroot].emplace_back(vlabel, wlabel);
             inserted_edges.insert(update_id);
-            // W -> V
             if (wroot == rank_) {
               edges_to_add[rank_].emplace_back(wlabel, vlabel);
               inserted_edges.insert(wlabel + offset * vlabel);
             }
           } else {
-            if (GetVertexLabel(cv) == vlabel) {
-              // Send edge
+            if (GetVertexLabel(GetLocalID(link)) == vlabel) {
+              send_ids.insert(update_id);
               (*current_send_buffers)[pe].emplace_back(vlabel);
               (*current_send_buffers)[pe].emplace_back(wlabel);
               (*current_send_buffers)[pe].emplace_back(wroot);
-              (*current_send_buffers)[pe].emplace_back(parent.second);
+              (*current_send_buffers)[pe].emplace_back(parent);
               // std::cout << "R" << rank_ << " prop (" 
               //                           << vlabel << "," 
               //                           << wlabel << "," 
@@ -562,7 +558,8 @@ class GraphAccess {
               VertexID local_vlabel = GetLocalID(vlabel);
               pe = GetPE(local_vlabel);
 
-                // Send edge
+              // Send edge
+              send_ids.insert(update_id);
               (*current_send_buffers)[pe].emplace_back(vlabel);
               (*current_send_buffers)[pe].emplace_back(wlabel);
               (*current_send_buffers)[pe].emplace_back(wroot);
@@ -588,7 +585,6 @@ class GraphAccess {
                     MPI_COMM_WORLD);
     }
 
-    std::cout << "R" << rank_ << " time (after main loop): " << t.Elapsed() << std::endl;
     // Insert edges and keep corresponding vertices
     ForallLocalVertices([&](VertexID v) { RemoveAllEdges(v); });
     contraction_level_++;
@@ -612,11 +608,10 @@ class GraphAccess {
             {std::numeric_limits<VertexID>::max() - 1, wlabel, pe};
       }
     }
-    std::cout << "R" << rank_ << " time (end): " << t.Elapsed() << std::endl;
   }
 
   void MoveUpContraction() {
-    // TODO: Does not work if graph is completely empty
+    // TODO [FIX]: Does not work if graph is completely empty
     while (contraction_level_ > 0) {
       // Remove current edges from current level
       ForallLocalVertices([&](VertexID v) {
@@ -648,9 +643,9 @@ class GraphAccess {
 
         // Send current label from root
         ForallLocalVertices([&](VertexID v) {
-          std::pair<PEID, VertexID> parent = GetParent(v);
-          if (GetVertexLabel(GetLocalID(parent.second)) != GetVertexLabel(v)) {
-            SetVertexPayload(v, {0, GetVertexLabel(GetLocalID(parent.second)), rank_});
+          VertexID parent = GetParent(v);
+          if (GetVertexLabel(GetLocalID(parent)) != GetVertexLabel(v)) {
+            SetVertexPayload(v, {0, GetVertexLabel(GetLocalID(parent)), rank_});
             converged_locally = 0;
           }
         });
@@ -788,7 +783,7 @@ class GraphAccess {
     // local_components.reserve(local_component_sizes.size());
     for(auto &kv : local_component_sizes)
       local_components.emplace_back(kv.first, kv.second);
-    // TODO: Might be too small
+    // TODO [MEMORY]: Might be too small
     int num_local_components = local_components.size();
 
     // Exchange number of local components
@@ -797,7 +792,7 @@ class GraphAccess {
 
     // Compute diplacements
     std::vector<int> displ_components(size_, 0);
-    // TODO: Might be too small
+    // TODO [MEMORY]: Might be too small
     int num_global_components = 0;
     for (PEID i = 0; i < size_; ++i) {
       displ_components[i] = num_global_components;
@@ -860,8 +855,8 @@ class GraphAccess {
     vertex_payload_[contraction_level_][v] = msg;
   }
 
-  void SetParent(const VertexID v, const PEID parent_pe, const VertexID parent_v) {
-    parent_[contraction_level_][v] = std::make_pair(parent_pe, parent_v);
+  void SetParent(const VertexID v, const VertexID parent_v) {
+    parent_[contraction_level_][v] = parent_v;
   }
 
   inline std::string GetVertexString(const VertexID v) {
@@ -884,7 +879,7 @@ class GraphAccess {
     return vertex_payload_[contraction_level_][v].root_;
   }
 
-  inline std::pair<PEID, VertexID> & GetParent(const VertexID v) {
+  inline VertexID GetParent(const VertexID v) {
     return parent_[contraction_level_][v];
   }
 
@@ -909,19 +904,6 @@ class GraphAccess {
 
   inline VertexID GetVertexDegree(const VertexID v) const {
     return edges_[v].size();
-  }
-
-  void AddSubgraph(std::vector<std::tuple<VertexID, VertexID, VertexID>> &vertices,
-                   std::vector<std::tuple<VertexID, VertexID, VertexID>> &edges) {
-    // TODO: This does not work yet
-    for (const auto &vp : vertices) {
-      VertexID v = AddVertex();
-      SetVertexPayload(v, {GetVertexDeviate(v), std::get<1>(vp), std::get<1>(vp)});
-    }
-
-    for (const auto &e : edges) {
-      AddEdge(GetLocalID(std::get<0>(e)), std::get<1>(e), std::get<2>(e));
-    }     
   }
 
   //////////////////////////////////////////////
@@ -975,9 +957,9 @@ class GraphAccess {
     std::vector<VertexID> local_vertices;
     std::vector<VertexID> local_labels;
     std::vector<std::pair<VertexID, VertexID>> local_edges;
-    // TODO: Might be too small
+    // TODO [MEMORY]: Might be too small
     int num_local_vertices = 0;
-    // TODO: Might be too small
+    // TODO [MEMORY]: Might be too small
     int num_local_edges = 0;
     ForallLocalVertices([&](const VertexID &v) {
       local_vertices.push_back(GetGlobalID(v));
@@ -997,9 +979,9 @@ class GraphAccess {
     // Compute displacements
     std::vector<int> displ_vertices(size_);
     std::vector<int> displ_edges(size_);
-    // TODO: Might be too small
+    // TODO [MEMORY]: Might be too small
     int num_global_vertices = 0;
-    // TODO: Might be too small
+    // TODO [MEMORY]: Might be too small
     int num_global_edges = 0;
     for (PEID i = 0; i < size_; ++i) {
       displ_vertices[i] = num_global_vertices;
@@ -1032,7 +1014,7 @@ class GraphAccess {
                                 std::vector<int> &num_labels) {
     // Compute displacements
     std::vector<int> displ_labels(size_);
-    // TODO: Might be too small
+    // TODO [MEMORY]: Might be too small
     int num_global_labels = 0;
     for (PEID i = 0; i < size_; ++i) {
       displ_labels[i] = num_global_labels;
@@ -1041,7 +1023,7 @@ class GraphAccess {
 
     // Gather local vertices
     std::vector<VertexID> local_vertices;
-    // TODO: Might be too small
+    // TODO [MEMORY]: Might be too small
     int num_local_vertices = 0;
     ForallLocalVertices([&](const VertexID &v) {
       local_vertices.push_back(v);
@@ -1084,7 +1066,10 @@ class GraphAccess {
   std::vector<LocalVertexData> local_vertices_data_;
   std::vector<GhostVertexData> ghost_vertices_data_;
   std::vector<std::vector<VertexPayload>> vertex_payload_;
-  std::vector<std::vector<std::pair<PEID, VertexID>>> parent_;
+
+  // Shortcutting
+  std::vector<std::vector<VertexID>> parent_;
+  google::sparse_hash_map<VertexID, VertexID> label_shortcut_;
 
   VertexID number_of_vertices_;
   VertexID number_of_local_vertices_;

@@ -167,7 +167,7 @@ class ExponentialContraction {
       std::mt19937
           generator(static_cast<unsigned int>(config_.seed + g.GetVertexLabel(v)
           + iteration_ * rng_offset_));
-      if (g.IsLocal(v)) g.SetParent(v, rank_, g.GetGlobalID(v));
+      if (g.IsLocal(v)) g.SetParent(v, g.GetGlobalID(v));
 
       // Weigh distribution towards high degree vertices
       // TODO: Test different weighing functions 
@@ -195,7 +195,7 @@ class ExponentialContraction {
           if (g.GetVertexDeviate(w) + 1 < smallest_payload.deviate_ ||
               (g.GetVertexDeviate(w) + 1 == smallest_payload.deviate_ &&
                   g.GetVertexLabel(w) < smallest_payload.label_)) {
-            g.SetParent(v, g.GetPE(w), g.GetGlobalID(w));
+            g.SetParent(v, g.GetGlobalID(w));
             smallest_payload = {g.GetVertexDeviate(w) + 1, g.GetVertexLabel(w),
                                 g.GetVertexRoot(w)};
             converged_locally = 0;
@@ -217,6 +217,7 @@ class ExponentialContraction {
     }
 
     // Determine remaining active vertices
+    g.BuildLabelShortcuts();
     g.ContractExponential();
 
     // Count remaining number of vertices

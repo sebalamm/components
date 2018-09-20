@@ -119,7 +119,7 @@ class LocalContraction {
       std::mt19937
           generator(static_cast<unsigned int>(config_.seed + g.GetVertexLabel(v)
           + iteration_ * rng_offset_));
-      if (g.IsLocal(v)) g.SetParent(v, rank_, g.GetGlobalID(v));
+      if (g.IsLocal(v)) g.SetParent(v, g.GetGlobalID(v));
 
       g.SetVertexPayload(v, {static_cast<VertexID>(distribution(generator)),
                              g.GetVertexLabel(v), g.GetVertexRoot(v)}, 
@@ -141,7 +141,7 @@ class LocalContraction {
         if (g.GetVertexDeviate(w) < n_smallest_neighbor[v].deviate_ ||
             (g.GetVertexDeviate(w) == n_smallest_neighbor[v].deviate_ &&
                 g.GetVertexLabel(w) < n_smallest_neighbor[v].label_)) {
-          g.SetParent(v, g.GetPE(w), g.GetGlobalID(w));
+          g.SetParent(v, g.GetGlobalID(w));
           n_smallest_neighbor[v] = {g.GetVertexDeviate(w), g.GetVertexLabel(w),
                                  g.GetVertexRoot(w)};
         }
@@ -165,7 +165,7 @@ class LocalContraction {
         if (g.GetVertexDeviate(w) < nn_smallest_neighbor[v].deviate_ ||
             (g.GetVertexDeviate(w) == nn_smallest_neighbor[v].deviate_ &&
                 g.GetVertexLabel(w) < nn_smallest_neighbor[v].label_)) {
-          g.SetParent(v, g.GetPE(w), g.GetGlobalID(w));
+          g.SetParent(v, g.GetGlobalID(w));
           nn_smallest_neighbor[v] = {g.GetVertexDeviate(w), g.GetVertexLabel(w),
                                  g.GetVertexRoot(w)};
         }
