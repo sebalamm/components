@@ -179,6 +179,7 @@ class GraphAccess {
 
   void BuildLabelShortcuts() {
     google::sparse_hash_map<VertexID, VertexID> smallest_deviate;
+    // std::unordered_map<VertexID, VertexID> smallest_deviate;
     ForallLocalVertices([&](const VertexID v) {
       auto payload = GetVertexMessage(v);
       VertexID label = payload.label_;
@@ -192,9 +193,16 @@ class GraphAccess {
         label_shortcut_[label] = GetParent(v);
       }
     });
+
+    // for (auto &kv : label_shortcut_) {
+    //   VertexID label = kv.first;
+    //   VertexID parent = kv.second;
+    //   std::cout << "R" << rank_ << " pe " << GetPE(parent) << " parent " << GetGlobalID(parent) << " is local " << IsLocal(parent) << " is ghost " << IsGhost(parent) << std::endl;
+    // }
   }
 
   void ContractExponential() {
+    MPI_Barrier(MPI_COMM_WORLD);
     active_vertices_.resize(contraction_level_ + 2);
     active_vertices_[contraction_level_ + 1].resize(number_of_vertices_, false);
     vertex_payload_.resize(contraction_level_ + 2);
@@ -233,7 +241,7 @@ class GraphAccess {
           if (send_ids.find(update_id) == send_ids.end()) {
             // Local propagation with shortcuts
             VertexID parent = label_shortcut_[vlabel];
-            PEID pe = GetPE(parent);
+            PEID pe = GetPE(GetLocalID(parent));
             // Send edge
             send_ids.insert(update_id);
             (*current_send_buffers)[pe].emplace_back(vlabel);
@@ -325,7 +333,7 @@ class GraphAccess {
 
           // Continue if already inserted
           if (inserted_edges.find(update_id) != end(inserted_edges)) continue;
-          if (send_ids.find(update_id) != end(send_ids)) continue;
+          // if (send_ids.find(update_id) != end(send_ids)) continue;
 
           // If vlabel is on same PE just insert the edge
           if (IsLocalFromGlobal(vlabel)) {
@@ -340,7 +348,7 @@ class GraphAccess {
           } else {
             // Local propagation with shortcuts
             VertexID parent = label_shortcut_[vlabel];
-            PEID pe = GetPE(parent);
+            PEID pe = GetPE(GetLocalID(parent));
             // Send edge
             send_ids.insert(update_id);
             (*current_send_buffers)[pe].emplace_back(vlabel);
@@ -427,7 +435,7 @@ class GraphAccess {
           if (send_ids.find(update_id) == send_ids.end()) {
             // Local propagation
             VertexID parent = GetParent(v);
-            PEID pe = GetPE(parent);
+            PEID pe = GetPE(GetLocalID(parent));
             // Send edge
             send_ids.insert(update_id);
             (*current_send_buffers)[pe].emplace_back(vlabel);
@@ -526,11 +534,11 @@ class GraphAccess {
 
           // Continue if already inserted
           if (inserted_edges.find(update_id) != end(inserted_edges)) continue;
-          if (send_ids.find(update_id) != end(send_ids)) continue;
+          // if (send_ids.find(update_id) != end(send_ids)) continue;
 
           // Get link information
           VertexID parent = GetParent(GetLocalID(link));
-          PEID pe = GetPE(parent);
+          PEID pe = GetPE(GetLocalID(parent));
 
           if (IsLocalFromGlobal(vlabel)) {
             edges_to_add[wroot].emplace_back(vlabel, wlabel);
@@ -1070,6 +1078,7 @@ class GraphAccess {
   // Shortcutting
   std::vector<std::vector<VertexID>> parent_;
   google::sparse_hash_map<VertexID, VertexID> label_shortcut_;
+  // std::unordered_map<VertexID, VertexID> label_shortcut_;
 
   VertexID number_of_vertices_;
   VertexID number_of_local_vertices_;
