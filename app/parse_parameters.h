@@ -46,7 +46,7 @@ void ParseParameters(int argn, char **argv,
   conf.prop_iterations = args.Get<unsigned int>("pi", 3);
 
   // Decomposition
-  conf.beta = args.Get<double>("beta", 0.2);
+  conf.beta = args.Get<double>("beta", 0.1);
 
   // Contraction
   conf.use_contraction = args.Get<bool>("contraction", true);

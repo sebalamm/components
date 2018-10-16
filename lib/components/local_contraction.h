@@ -47,6 +47,7 @@ class LocalContraction {
   void FindComponents(GraphAccess &g) {
     Timer t;
     t.Restart();
+    rng_offset_ = size_ + config_.seed;
     if (config_.use_contraction) {
       FindLocalComponents(g);
       Contraction cont(g, rank_, size_);
@@ -54,7 +55,6 @@ class LocalContraction {
       FindLocalComponents(cag);
       Contraction ccont(cag, rank_, size_);
       GraphAccess ccag = ccont.BuildComponentAdjacencyGraph();
-      rng_offset_ = ccag.GatherNumberOfGlobalVertices();
 
       PerformDecomposition(ccag);
 
@@ -81,6 +81,9 @@ class LocalContraction {
   // Local components
   std::vector<VertexID> parent_;
 
+  // Statistics
+  Timer iteration_timer_;
+
   void FindLocalComponents(GraphAccess &g) {
     Timer t;
     t.Restart();
@@ -102,6 +105,7 @@ class LocalContraction {
   void PerformDecomposition(GraphAccess &g) {
     VertexID global_vertices = g.GatherNumberOfGlobalVertices();
     if (global_vertices > 0) {
+      iteration_timer_.Restart();
       iteration_++;
       if (global_vertices < config_.sequential_limit) 
         RunSequentialCC(g);
@@ -111,25 +115,39 @@ class LocalContraction {
   }
 
   void RunContraction(GraphAccess &g) {
-    if (rank_ == ROOT) std::cout << "iteration " << iteration_ << std::endl;
+    VertexID global_vertices = g.GatherNumberOfGlobalVertices();
+    if (rank_ == ROOT) {
+      if (iteration_ == 1)
+        std::cout << "[STATUS] |-- Iteration " << iteration_ 
+                  << " [TIME] " << "-" 
+                  << " [ADD] " << global_vertices << std::endl;
+      else
+        std::cout << "[STATUS] |-- Iteration " << iteration_ 
+                  << " [TIME] " << iteration_timer_.Elapsed() 
+                  << " [ADD] " << global_vertices << std::endl;
+    }
+    iteration_timer_.Restart();
+
     // Draw exponential deviate per local vertex
     std::uniform_int_distribution<unsigned int> distribution(0, 99);
-    g.ForallVertices([&](const VertexID v) {
+    std::mt19937
+        generator(static_cast<unsigned int>(rank_ + config_.seed + iteration_ * rng_offset_));
+    g.ForallLocalVertices([&](const VertexID v) {
       // Set preliminary deviate
-      std::mt19937
-          generator(static_cast<unsigned int>(config_.seed + g.GetVertexLabel(v)
-          + iteration_ * rng_offset_));
-      if (g.IsLocal(v)) g.SetParent(v, g.GetGlobalID(v));
-
+      g.SetParent(v, g.GetGlobalID(v));
+      // g.SetVertexPayload(v, {static_cast<VertexID>(distribution(generator)),
+      //                        g.GetVertexLabel(v), g.GetVertexRoot(v)}, 
+      //                    false);
       g.SetVertexPayload(v, {static_cast<VertexID>(distribution(generator)),
                              g.GetVertexLabel(v), g.GetVertexRoot(v)}, 
-                         false);
+                         true);
 #ifndef NDEBUG
       std::cout << "[R" << rank_ << ":" << iteration_ << "] update deviate "
                 << g.GetGlobalID(v) << " -> " << g.GetVertexDeviate(v)
                 << std::endl;
 #endif
     });
+    g.SendAndReceiveGhostVertices();
 
     // Perform update for local vertices
     // Find smallest label in N(v)
@@ -183,7 +201,7 @@ class LocalContraction {
     g.ContractLocal();
 
     // Count remaining number of vertices
-    VertexID global_vertices = g.GatherNumberOfGlobalVertices();
+    global_vertices = g.GatherNumberOfGlobalVertices();
     if (global_vertices > 0) {
       iteration_++;
       if (global_vertices < config_.sequential_limit) 

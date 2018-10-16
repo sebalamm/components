@@ -193,16 +193,79 @@ class GraphAccess {
         label_shortcut_[label] = GetParent(v);
       }
     });
-
-    // for (auto &kv : label_shortcut_) {
-    //   VertexID label = kv.first;
-    //   VertexID parent = kv.second;
-    //   std::cout << "R" << rank_ << " pe " << GetPE(parent) << " parent " << GetGlobalID(parent) << " is local " << IsLocal(parent) << " is ghost " << IsGhost(parent) << std::endl;
-    // }
   }
 
   void ContractExponential() {
-    MPI_Barrier(MPI_COMM_WORLD);
+    // // How big are the "balls"
+    // std::vector<VertexID> vertices;
+    // std::vector<int> num_vertices_per_pe(size_);
+    // std::vector<VertexID> labels;
+    // std::vector<std::pair<VertexID, VertexID>> edges;
+    // GatherGraphOnRoot(vertices, num_vertices_per_pe, labels, edges);
+    // // Root computes labels
+    // if (rank_ == ROOT) {
+    //   // Build vertex mapping 
+    //   std::unordered_map<VertexID, int> vertex_map;
+    //   std::unordered_map<int, VertexID> reverse_vertex_map;
+    //   // TODO: Might be too small
+    //   int current_vertex = 0;
+    //   for (const VertexID &v : vertices) {
+    //     vertex_map[v] = current_vertex;
+    //     reverse_vertex_map[current_vertex++] = v;
+    //   }
+
+    //   // Build edge lists
+    //   std::vector<std::vector<int>> edge_lists(vertices.size());
+    //   for (const auto &e : edges) 
+    //     edge_lists[vertex_map[e.first]].push_back(vertex_map[e.second]);
+
+    //   // Construct temporary graph
+    //   GraphAccess sg(ROOT, 1);
+    //   sg.StartConstruct(vertices.size(), edges.size(), ROOT);
+    //   // TODO: Might be too small
+    //   for (int i = 0; i < vertices.size(); ++i) {
+    //     VertexID v = sg.AddVertex();
+    //     sg.SetVertexPayload(v, {sg.GetVertexDeviate(v), labels[v], ROOT});
+
+    //     for (const int &e : edge_lists[v]) 
+    //       sg.AddEdge(v, e, 1);
+    //   }
+    //   sg.FinishConstruct();
+    //   
+    //   google::sparse_hash_map<VertexID, VertexID> label_size;
+    //   sg.ForallLocalVertices([&](const VertexID v) {
+    //     VertexID ball_label = sg.GetVertexLabel(v); 
+    //     if (label_size.find(ball_label) == end(label_size))
+    //       label_size[ball_label] = 0;
+    //     label_size[ball_label]++;
+    //   });
+
+    //   google::sparse_hash_map<VertexID, VertexID> num_sizes;
+    //   for (auto &bucket : label_size) {
+    //     if (num_sizes.find(bucket.second) == end(num_sizes))
+    //       num_sizes[bucket.second] = 0;
+    //     num_sizes[bucket.second]++;
+    //   }
+
+    //   std::vector<std::pair<VertexID, VertexID>> balls;
+    //   balls.reserve(num_sizes.size());
+    //   for (auto &kv : num_sizes) {
+    //     balls.emplace_back(kv.first, kv.second);
+    //   }
+    //   std::sort(begin(balls), end(balls));
+
+    //   std::cout << "BALLS [ ";
+    //   for (auto &ball : balls)
+    //     std::cout << ball.first << "(" << ball.second << ") ";
+    //   std::cout << "]" << std::endl;
+    // }
+
+    // Statistics
+    Timer contract_timer;
+    contract_timer.Restart();
+    VertexID number_of_messages = 0;
+    VertexID self_messages = 0;
+
     active_vertices_.resize(contraction_level_ + 2);
     active_vertices_[contraction_level_ + 1].resize(number_of_vertices_, false);
     vertex_payload_.resize(contraction_level_ + 2);
@@ -226,8 +289,11 @@ class GraphAccess {
     std::vector<std::vector<VertexID>> receive_buffers(size_);
     for (int i = 0; i < size_; ++i) {
       send_buffers_a[i].clear();
+      send_buffers_a[i].reserve(number_of_vertices_);
       send_buffers_b[i].clear();
+      send_buffers_b[i].reserve(number_of_vertices_);
       receive_buffers[i].clear();
+      receive_buffers[i].reserve(number_of_vertices_);
     }
 
     google::sparse_hash_set<VertexID> inserted_edges;
@@ -238,29 +304,50 @@ class GraphAccess {
         VertexID wlabel = GetVertexLabel(w);
         if (vlabel != wlabel) {
           VertexID update_id = vlabel + offset * wlabel;
-          if (send_ids.find(update_id) == send_ids.end()) {
+          PEID wroot = GetVertexRoot(w);
+
+          if (inserted_edges.find(update_id) == end(inserted_edges) 
+                && IsLocalFromGlobal(vlabel)) {
+            edges_to_add[wroot].emplace_back(vlabel, wlabel);
+            inserted_edges.insert(update_id);
+            // std::cout << "R" << rank_ << " vlabel " << vlabel << " wlabel " << wlabel << " id " << update_id << std::endl;
+            send_ids.insert(update_id);
+            if (wroot == rank_) {
+              edges_to_add[rank_].emplace_back(wlabel, vlabel);
+              inserted_edges.insert(wlabel + offset * vlabel);
+              send_ids.insert(wlabel + offset * vlabel);
+            }
+          } else if (send_ids.find(update_id) == end(send_ids)) {
             // Local propagation with shortcuts
             VertexID parent = label_shortcut_[vlabel];
             PEID pe = GetPE(GetLocalID(parent));
             // Send edge
             send_ids.insert(update_id);
+            number_of_messages++;
+            if (pe == rank_) self_messages++;
             (*current_send_buffers)[pe].emplace_back(vlabel);
             (*current_send_buffers)[pe].emplace_back(wlabel);
-            (*current_send_buffers)[pe].emplace_back(GetVertexRoot(w));
+            (*current_send_buffers)[pe].emplace_back(wroot);
             (*current_send_buffers)[pe].emplace_back(parent);
           }
         }
         removed_edges_[contraction_level_].emplace_back(v, GetGlobalID(w));
       });
-      vertex_payload_[contraction_level_ + 1][v] =
-          {std::numeric_limits<VertexID>::max() - 1, GetVertexLabel(v), GetVertexRoot(v)};
+      // vertex_payload_[contraction_level_ + 1][v] =
+      //     {std::numeric_limits<VertexID>::max() - 1, GetVertexLabel(v), GetVertexRoot(v)};
+      vertex_payload_[contraction_level_ + 1][v].deviate_ = std::numeric_limits<VertexID>::max() - 1;
+      vertex_payload_[contraction_level_ + 1][v].label_ = GetVertexLabel(v);
+      vertex_payload_[contraction_level_ + 1][v].root_ = GetVertexRoot(v);
       parent_[contraction_level_ + 1][v] = parent_[contraction_level_][v];
       active_vertices_[contraction_level_ + 1][v] = true;
     });
 
     ForallGhostVertices([&](VertexID v) {
-      vertex_payload_[contraction_level_ + 1][v] =
-          {std::numeric_limits<VertexID>::max() - 1, GetVertexLabel(v), GetVertexRoot(v)};
+      // vertex_payload_[contraction_level_ + 1][v] =
+      //     {std::numeric_limits<VertexID>::max() - 1, GetVertexLabel(v), GetVertexRoot(v)};
+      vertex_payload_[contraction_level_ + 1][v].deviate_ = std::numeric_limits<VertexID>::max() - 1;
+      vertex_payload_[contraction_level_ + 1][v].label_ = GetVertexLabel(v);
+      vertex_payload_[contraction_level_ + 1][v].root_ = GetVertexRoot(v);
     });
 
     // Get adjacency (otherwise we get deadlocks with added edges)
@@ -271,10 +358,15 @@ class GraphAccess {
       if (is_adj[pe]) num_adj++;
     }
 
+    // if (rank_ == ROOT) 
+    //   std::cout << "[STATUS] |--- Send done " 
+    //             << "[TIME] " << contract_timer.Elapsed() << std::endl;
+
     // Propagate edge buffers until all vertices are converged
     std::vector<MPI_Request*> requests;
     requests.clear();
     int converged_globally = 0;
+    int local_iterations = 0;
     while (converged_globally == 0) {
       int converged_locally = 1;
 
@@ -305,6 +397,8 @@ class GraphAccess {
         MPI_Recv(&receive_buffers[st.MPI_SOURCE][0], message_length, MPI_VERTEX, st.MPI_SOURCE, 0, MPI_COMM_WORLD, &rst);
       }
 
+      MPI_Barrier(MPI_COMM_WORLD);
+
       // Clear buffers
       if (current_send_buffers == &send_buffers_a) {
         for (int i = 0; i < size_; ++i) send_buffers_b[i].clear();
@@ -333,12 +427,13 @@ class GraphAccess {
 
           // Continue if already inserted
           if (inserted_edges.find(update_id) != end(inserted_edges)) continue;
-          // if (send_ids.find(update_id) != end(send_ids)) continue;
+          if (send_ids.find(update_id) != end(send_ids)) continue;
 
           // If vlabel is on same PE just insert the edge
           if (IsLocalFromGlobal(vlabel)) {
             edges_to_add[wroot].emplace_back(vlabel, wlabel);
             inserted_edges.insert(update_id);
+            // std::cout << "R" << rank_ << " vlabel " << vlabel << " wlabel " << wlabel << " id " << update_id << std::endl;
             send_ids.insert(update_id);
             if (wroot == rank_) {
               edges_to_add[rank_].emplace_back(wlabel, vlabel);
@@ -350,7 +445,10 @@ class GraphAccess {
             VertexID parent = label_shortcut_[vlabel];
             PEID pe = GetPE(GetLocalID(parent));
             // Send edge
+            // std::cout << "R" << rank_ << " vlabel " << vlabel << " wlabel " << wlabel << " id " << update_id << std::endl;
             send_ids.insert(update_id);
+            number_of_messages++;
+            if (pe == rank_) self_messages++;
             (*current_send_buffers)[pe].emplace_back(vlabel);
             (*current_send_buffers)[pe].emplace_back(wlabel);
             (*current_send_buffers)[pe].emplace_back(wroot);
@@ -361,13 +459,21 @@ class GraphAccess {
       }
 
       // Check if all PEs are done
-      MPI_Allreduce(&converged_locally,
-                    &converged_globally,
-                    1,
-                    MPI_INT,
-                    MPI_MIN,
-                    MPI_COMM_WORLD);
+      if (++local_iterations % 6 == 0) {
+        MPI_Allreduce(&converged_locally,
+                      &converged_globally,
+                      1,
+                      MPI_INT,
+                      MPI_MIN,
+                      MPI_COMM_WORLD);
+      } 
     }
+    // if (rank_ == ROOT) 
+    //   std::cout << "[STATUS] |--- Propagation done " 
+    //             << "[TIME] " << contract_timer.Elapsed() << std::endl;
+    //   std::cout << "[STATUS] |--- Rank " << rank_ 
+    //             << " Messages sent " << number_of_messages 
+    //             << " (own) " << self_messages << std::endl;
 
     // Insert edges and keep corresponding vertices
     ForallLocalVertices([&](VertexID v) { RemoveAllEdges(v); });
@@ -392,11 +498,18 @@ class GraphAccess {
             {std::numeric_limits<VertexID>::max() - 1, wlabel, pe};
       }
     }
+    // if (rank_ == ROOT) 
+    //   std::cout << "[STATUS] |--- Insertion done " 
+    //             << "[TIME] " << contract_timer.Elapsed() << std::endl;
   }
 
   void ContractLocal() {
-    Timer t;
-    t.Restart();
+    // Statistics
+    Timer contract_timer;
+    contract_timer.Restart();
+    VertexID number_of_messages = 0;
+    VertexID self_messages = 0;
+
     active_vertices_.resize(contraction_level_ + 2);
     active_vertices_[contraction_level_ + 1].resize(number_of_vertices_, false);
     vertex_payload_.resize(contraction_level_ + 2);
@@ -438,6 +551,8 @@ class GraphAccess {
             PEID pe = GetPE(GetLocalID(parent));
             // Send edge
             send_ids.insert(update_id);
+            number_of_messages++;
+            if (pe == rank_) self_messages++;
             (*current_send_buffers)[pe].emplace_back(vlabel);
             (*current_send_buffers)[pe].emplace_back(wlabel);
             (*current_send_buffers)[pe].emplace_back(GetVertexRoot(w));
@@ -470,6 +585,10 @@ class GraphAccess {
       is_adj[pe] = IsAdjacentPE(pe);
       if (is_adj[pe]) num_adj++;
     }
+
+    // if (rank_ == ROOT) 
+    //   std::cout << "[STATUS] |--- Send done " 
+    //             << "[TIME] " << contract_timer.Elapsed() << std::endl;
 
     // Propagate edge buffers until all vertices are converged
     std::vector<MPI_Request*> requests;
@@ -505,6 +624,8 @@ class GraphAccess {
         MPI_Status rst{};
         MPI_Recv(&receive_buffers[st.MPI_SOURCE][0], message_length, MPI_VERTEX, st.MPI_SOURCE, 0, MPI_COMM_WORLD, &rst);
       }
+
+      MPI_Barrier(MPI_COMM_WORLD);
 
       // Clear buffers
       if (current_send_buffers == &send_buffers_a) {
@@ -550,6 +671,8 @@ class GraphAccess {
           } else {
             if (GetVertexLabel(GetLocalID(link)) == vlabel) {
               send_ids.insert(update_id);
+              number_of_messages++;
+              if (pe == rank_) self_messages++;
               (*current_send_buffers)[pe].emplace_back(vlabel);
               (*current_send_buffers)[pe].emplace_back(wlabel);
               (*current_send_buffers)[pe].emplace_back(wroot);
@@ -592,6 +715,12 @@ class GraphAccess {
                     MPI_MIN,
                     MPI_COMM_WORLD);
     }
+    // if (rank_ == ROOT) 
+    //   std::cout << "[STATUS] |--- Propagation done " 
+    //             << "[TIME] " << contract_timer.Elapsed() << std::endl;
+    //   std::cout << "[STATUS] |--- Rank " << rank_ 
+    //             << " Messages sent " << number_of_messages 
+    //             << " (own) " << self_messages << std::endl;
 
     // Insert edges and keep corresponding vertices
     ForallLocalVertices([&](VertexID v) { RemoveAllEdges(v); });
@@ -616,6 +745,9 @@ class GraphAccess {
             {std::numeric_limits<VertexID>::max() - 1, wlabel, pe};
       }
     }
+    // if (rank_ == ROOT) 
+    //   std::cout << "[STATUS] |--- Insertion done " 
+    //             << "[TIME] " << contract_timer.Elapsed() << std::endl;
   }
 
   void MoveUpContraction() {

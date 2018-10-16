@@ -54,6 +54,8 @@ int main(int argn, char **argv) {
     MPI_Finalize();
     exit(1);
   }
+  if (rank == ROOT) 
+    std::cout << "Graph generated" << std::endl;
   GraphAccess G = GraphIO::ReadDistributedEdgeList(conf, rank, size, MPI_COMM_WORLD, edge_list);
 
   VertexID n = G.GatherNumberOfGlobalVertices();

@@ -3,8 +3,8 @@ project(components)
 
 find_package(MPI REQUIRED)
 
-set(OMPI_CC gcc-6)
-set(OMPI_CXX g++-6)
+set(OMPI_CC gcc-7)
+set(OMPI_CXX g++-7)
 set(CMAKE_EXPORT_COMPILE_COMMANDS ON)
 
 if (NOT CMAKE_BUILD_TYPE)

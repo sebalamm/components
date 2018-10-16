@@ -47,6 +47,7 @@ class ExponentialContraction {
   void FindComponents(GraphAccess &g) {
     Timer t;
     t.Restart();
+    rng_offset_ = size_ + config_.seed;
     if (config_.use_contraction) {
       FindLocalComponents(g);
       Contraction cont(g, rank_, size_);
@@ -54,7 +55,7 @@ class ExponentialContraction {
       FindLocalComponents(cag);
       Contraction ccont(cag, rank_, size_);
       GraphAccess ccag = ccont.BuildComponentAdjacencyGraph();
-      rng_offset_ = ccag.GatherNumberOfGlobalVertices();
+      // rng_offset_ = ccag.GatherNumberOfGlobalVertices();
 
       PerformDecomposition(ccag);
 
@@ -82,10 +83,14 @@ class ExponentialContraction {
   // Local components
   std::vector<VertexID> parent_;
 
+  // Statistics
+  Timer iteration_timer_;
+
   void PerformDecomposition(GraphAccess &g) {
     // if (rank_ == ROOT) std::cout << "[STATUS] |- Start exponential BFS" << std::endl;
     VertexID global_vertices = g.GatherNumberOfGlobalVertices();
     if (global_vertices > 0) {
+      iteration_timer_.Restart();
       iteration_++;
       if (global_vertices < config_.sequential_limit) 
         RunSequentialCC(g);
@@ -156,35 +161,75 @@ class ExponentialContraction {
   }
 
   void RunContraction(GraphAccess &g) {
-    // if (rank_ == ROOT) std::cout << "[STATUS] |-- Iteration " << iteration_ << std::endl;
+    VertexID global_vertices = g.GatherNumberOfGlobalVertices();
+    if (rank_ == ROOT) {
+      if (iteration_ == 1)
+        std::cout << "[STATUS] |-- Iteration " << iteration_ 
+                  << " [TIME] " << "-" 
+                  << " [ADD] " << global_vertices << std::endl;
+      else
+        std::cout << "[STATUS] |-- Iteration " << iteration_ 
+                  << " [TIME] " << iteration_timer_.Elapsed() 
+                  << " [ADD] " << global_vertices << std::endl;
+    }
+    iteration_timer_.Restart();
+
     // if (rank_ == ROOT) std::cout << "[STATUS] Find high degree" << std::endl;
     // FindHighDegreeVertices(g);
-
-    // Draw exponential deviate per local vertex
+    
+    // TODO: Alternative deviates
     std::exponential_distribution<LPFloat> distribution(config_.beta);
-    g.ForallVertices([&](const VertexID v) {
+    std::mt19937
+        generator(static_cast<unsigned int>(rank_ + config_.seed + iteration_ * rng_offset_));
+    // g.ForallVertices([&](const VertexID v) {
+    g.ForallLocalVertices([&](const VertexID v) {
       // Set preliminary deviate
-      std::mt19937
-          generator(static_cast<unsigned int>(config_.seed + g.GetVertexLabel(v)
-          + iteration_ * rng_offset_));
-      if (g.IsLocal(v)) g.SetParent(v, g.GetGlobalID(v));
-
-      // Weigh distribution towards high degree vertices
-      // TODO: Test different weighing functions 
-      // LPFloat weight = static_cast<LPFloat>(log2(g.GetNumberOfGlobalVertices()) / g.GetVertexDegree(v));
-      LPFloat weight = 1.;
+      g.SetParent(v, g.GetGlobalID(v));
+      LPFloat weight = static_cast<LPFloat>(log2(global_vertices) / g.GetVertexDegree(v));
       g.SetVertexPayload(v, {static_cast<VertexID>(weight * distribution(generator)),
                              g.GetVertexLabel(v), g.GetVertexRoot(v)}, 
-                         false);
+                         true);
 #ifndef NDEBUG
       std::cout << "[R" << rank_ << ":" << iteration_ << "] update deviate "
                 << g.GetGlobalID(v) << " -> " << g.GetVertexDeviate(v)
                 << std::endl;
 #endif
     });
+    g.SendAndReceiveGhostVertices();
 
+    // // Draw exponential deviate per local vertex
+    // std::exponential_distribution<LPFloat> distribution(config_.beta);
+    // g.ForallVertices([&](const VertexID v) {
+    //   // Set preliminary deviate
+    //   std::mt19937
+    //       generator(static_cast<unsigned int>(config_.seed + g.GetVertexLabel(v)
+    //       + iteration_ * rng_offset_));
+    //   if (g.IsLocal(v)) g.SetParent(v, g.GetGlobalID(v));
+
+    //   // Weigh distribution towards high degree vertices
+    //   // TODO: Test different weighing functions 
+    //   // LPFloat weight = static_cast<LPFloat>(log2(g.GetNumberOfGlobalVertices()) / g.GetVertexDegree(v));
+    //   LPFloat weight = 1.;
+    //   g.SetVertexPayload(v, {static_cast<VertexID>(weight * distribution(generator)),
+    //                          g.GetVertexLabel(v), g.GetVertexRoot(v)}, 
+    //                      false);
+    // #ifndef NDEBUG
+    //   std::cout << "[R" << rank_ << ":" << iteration_ << "] update deviate "
+    //             << g.GetGlobalID(v) << " -> " << g.GetVertexDeviate(v)
+    //             << std::endl;
+    // #endif
+    // });
+
+    // if (rank_ == ROOT)
+    //   std::cout << "[STATUS] |-- Pick deviates " 
+    //             << "[TIME] " << iteration_timer_.Elapsed() << std::endl;
+
+    VertexID exchange_rounds = 0;
     int converged_globally = 0;
+    int local_iterations = 0;
+    Timer round_timer;
     while (converged_globally == 0) {
+      round_timer.Restart();
       int converged_locally = 1;
 
       // Perform update for local vertices
@@ -205,15 +250,22 @@ class ExponentialContraction {
       });
 
       // Check if all PEs are done
-      MPI_Allreduce(&converged_locally,
-                    &converged_globally,
-                    1,
-                    MPI_INT,
-                    MPI_MIN,
-                    MPI_COMM_WORLD);
+      if (++local_iterations % 6 == 0) {
+        MPI_Allreduce(&converged_locally,
+                      &converged_globally,
+                      1,
+                      MPI_INT,
+                      MPI_MIN,
+                      MPI_COMM_WORLD);
+        exchange_rounds++;
 
-      // Receive variates
-      g.SendAndReceiveGhostVertices();
+        // Receive variates
+        g.SendAndReceiveGhostVertices();
+      } 
+
+      // if (rank_ == ROOT) 
+      //   std::cout << "[STATUS] |--- Round finished " 
+      //             << "[TIME] " << round_timer.Elapsed() << std::endl;
     }
 
     // Determine remaining active vertices
@@ -221,7 +273,7 @@ class ExponentialContraction {
     g.ContractExponential();
 
     // Count remaining number of vertices
-    VertexID global_vertices = g.GatherNumberOfGlobalVertices();
+    global_vertices = g.GatherNumberOfGlobalVertices();
     if (global_vertices > 0) {
       iteration_++;
       if (global_vertices < config_.sequential_limit) 
