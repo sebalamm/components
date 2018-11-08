@@ -103,5 +103,6 @@ int main(int argn, char **argv) {
   }
 
   // Finalize MPI
+  MPI_Barrier(MPI_COMM_WORLD);
   MPI_Finalize();
 }

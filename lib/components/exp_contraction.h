@@ -250,7 +250,7 @@ class ExponentialContraction {
       });
 
       // Check if all PEs are done
-      if (++local_iterations % 6 == 0) {
+      // if (++local_iterations % 6 == 0) {
         MPI_Allreduce(&converged_locally,
                       &converged_globally,
                       1,
@@ -261,7 +261,7 @@ class ExponentialContraction {
 
         // Receive variates
         g.SendAndReceiveGhostVertices();
-      } 
+      // } 
 
       // if (rank_ == ROOT) 
       //   std::cout << "[STATUS] |--- Round finished " 

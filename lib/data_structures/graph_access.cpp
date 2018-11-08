@@ -15,8 +15,6 @@ GraphAccess::GraphAccess(const PEID rank, const PEID size)
       local_offset_(0),
       ghost_offset_(0),
       contraction_level_(0),
-      max_contraction_level_(0),
-      edge_buffers_(size),
       ghost_comm_(nullptr),
       vertex_counter_(0),
       edge_counter_(0) {
@@ -44,14 +42,8 @@ void GraphAccess::StartConstruct(const VertexID local_n,
   local_offset_ = local_offset;
   ghost_offset_ = local_n;
 
-  active_vertices_.resize(local_n);
-  active_vertices_[0].resize(local_n, true);
-
+  inactive_level_.resize(local_n, -1);
   parent_.resize(local_n);
-  parent_[0].resize(local_n);
-
-  added_edges_.resize(local_n);
-  removed_edges_.resize(local_n);
 
   adjacent_pes_.resize(static_cast<unsigned long>(size_), false);
 }
@@ -84,7 +76,8 @@ EdgeID GraphAccess::AddEdge(VertexID from, VertexID to, PEID rank) {
     if (IsGhostFromGlobal(to)) { // true if ghost already in map, otherwise false
       edges_[from].emplace_back(global_to_local_map_[to]);
       edges_[global_to_local_map_[to]].emplace_back(from);
-      active_vertices_[contraction_level_][global_to_local_map_[to]] = true;
+      // active_vertices_[contraction_level_][global_to_local_map_[to]] = true;
+      inactive_level_[global_to_local_map_[to]] = -1;
       vertex_payload_[contraction_level_][global_to_local_map_[to]] = 
       // TODO: This caused the last segfaults
           {std::numeric_limits<VertexID>::max() - 1, GetVertexLabel(global_to_local_map_[to]), neighbor};
@@ -94,8 +87,10 @@ EdgeID GraphAccess::AddEdge(VertexID from, VertexID to, PEID rank) {
       edges_[from].emplace_back(global_to_local_map_[to]);
       edges_.resize(number_of_vertices_);
       edges_[global_to_local_map_[to]].emplace_back(from);
-      active_vertices_[contraction_level_].resize(number_of_vertices_);
-      active_vertices_[contraction_level_][global_to_local_map_[to]] = true;
+      // active_vertices_[contraction_level_].resize(number_of_vertices_);
+      // active_vertices_[contraction_level_][global_to_local_map_[to]] = true;
+      inactive_level_.resize(number_of_vertices_);
+      inactive_level_[global_to_local_map_[to]] = -1;
       local_vertices_data_.emplace_back(to, false);
       ghost_vertices_data_.emplace_back(neighbor, to);
       SetAdjacentPE(neighbor, true);
