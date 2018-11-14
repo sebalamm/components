@@ -37,7 +37,6 @@ void GraphAccess::StartConstruct(const VertexID local_n,
   edges_.resize(local_n);
   local_vertices_data_.resize(local_n);
   vertex_payload_.resize(local_n);
-  vertex_payload_[0].resize(local_n);
 
   local_offset_ = local_offset;
   ghost_offset_ = local_n;
@@ -66,6 +65,13 @@ void GraphAccess::SetVertexPayload(const VertexID v,
   SetVertexMessage(v, std::move(msg));
 }
 
+void GraphAccess::ForceVertexPayload(const VertexID v,
+                                     VertexPayload &&msg) {
+  if (local_vertices_data_[v].is_interface_vertex_)
+    ghost_comm_->AddMessage(v, msg);
+  SetVertexMessage(v, std::move(msg));
+}
+
 // Local ID, Global ID, target rank
 EdgeID GraphAccess::AddEdge(VertexID from, VertexID to, PEID rank) {
   if (IsLocalFromGlobal(to)) {
@@ -78,10 +84,8 @@ EdgeID GraphAccess::AddEdge(VertexID from, VertexID to, PEID rank) {
       edges_[global_to_local_map_[to]].emplace_back(from);
       // active_vertices_[contraction_level_][global_to_local_map_[to]] = true;
       inactive_level_[global_to_local_map_[to]] = -1;
-      vertex_payload_[contraction_level_][global_to_local_map_[to]] = 
-      // TODO: This caused the last segfaults
-          {std::numeric_limits<VertexID>::max() - 1, GetVertexLabel(global_to_local_map_[to]), neighbor};
-          // {std::numeric_limits<VertexID>::max() - 1, to, neighbor};
+      vertex_payload_[global_to_local_map_[to]] = 
+        {std::numeric_limits<VertexID>::max() - 1, GetVertexLabel(global_to_local_map_[to]), neighbor};
     } else {
       global_to_local_map_[to] = number_of_vertices_++;
       edges_[from].emplace_back(global_to_local_map_[to]);
@@ -96,8 +100,7 @@ EdgeID GraphAccess::AddEdge(VertexID from, VertexID to, PEID rank) {
       SetAdjacentPE(neighbor, true);
       ghost_comm_->SetAdjacentPE(neighbor, true);
       // Contraction additions
-      vertex_payload_[contraction_level_].emplace_back(
-          std::numeric_limits<VertexID>::max() - 1, to, neighbor);
+      vertex_payload_.emplace_back(std::numeric_limits<VertexID>::max() - 1, to, neighbor);
     }
   }
 
@@ -144,7 +147,7 @@ void GraphAccess::OutputLabels() {
     std::stringstream out;
     out << "[R" << rank << ":" << contraction_level_ << "] [V] "
         << GetGlobalID(v) << " label="
-        << vertex_payload_[contraction_level_][v].label_;
+        << vertex_payload_[v].label_;
     std::cout << out.str() << std::endl;
   });
 }

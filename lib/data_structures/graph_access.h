@@ -267,9 +267,6 @@ class GraphAccess {
     VertexID number_of_messages = 0;
     VertexID self_messages = 0;
 
-    vertex_payload_.resize(contraction_level_ + 2);
-    vertex_payload_[contraction_level_ + 1].resize(number_of_vertices_);
-
     // Determine edges to communicate
     // Gather labels to communicate
     VertexID offset = GatherNumberOfGlobalVertices();
@@ -325,21 +322,8 @@ class GraphAccess {
         }
         removed_edges_.emplace(v, GetGlobalID(w));
       });
-      // vertex_payload_[contraction_level_ + 1][v] =
-      //     {std::numeric_limits<VertexID>::max() - 1, GetVertexLabel(v), GetVertexRoot(v)};
-      vertex_payload_[contraction_level_ + 1][v].deviate_ = std::numeric_limits<VertexID>::max() - 1;
-      vertex_payload_[contraction_level_ + 1][v].label_ = GetVertexLabel(v);
-      vertex_payload_[contraction_level_ + 1][v].root_ = GetVertexRoot(v);
     });
     removed_edges_.emplace(std::numeric_limits<VertexID>::max(), std::numeric_limits<VertexID>::max());
-
-    ForallGhostVertices([&](VertexID v) {
-      // vertex_payload_[contraction_level_ + 1][v] =
-      //     {std::numeric_limits<VertexID>::max() - 1, GetVertexLabel(v), GetVertexRoot(v)};
-      vertex_payload_[contraction_level_ + 1][v].deviate_ = std::numeric_limits<VertexID>::max() - 1;
-      vertex_payload_[contraction_level_ + 1][v].label_ = GetVertexLabel(v);
-      vertex_payload_[contraction_level_ + 1][v].root_ = GetVertexRoot(v);
-    });
 
     // Get adjacency (otherwise we get deadlocks with added edges)
     std::vector<bool> is_adj(size_);
@@ -484,11 +468,8 @@ class GraphAccess {
         // Vertices remain active
         inactive_level_[vlocal] = -1;
         inactive_level_[wlocal] = -1;
-
-        vertex_payload_[contraction_level_][vlocal] =
-            {std::numeric_limits<VertexID>::max() - 1, vlabel, rank_};
-        vertex_payload_[contraction_level_][wlocal] =
-            {std::numeric_limits<VertexID>::max() - 1, wlabel, pe};
+        vertex_payload_[vlocal] = {std::numeric_limits<VertexID>::max() - 1, vlabel, rank_};
+        vertex_payload_[wlocal] = {std::numeric_limits<VertexID>::max() - 1, wlabel, pe};
       }
     }
     // if (rank_ == ROOT) 
@@ -502,9 +483,6 @@ class GraphAccess {
     contract_timer.Restart();
     VertexID number_of_messages = 0;
     VertexID self_messages = 0;
-
-    vertex_payload_.resize(contraction_level_ + 2);
-    vertex_payload_[contraction_level_ + 1].resize(number_of_vertices_);
 
     // Determine edges to communicate
     // Gather labels to communicate
@@ -550,15 +528,8 @@ class GraphAccess {
         }
         removed_edges_.emplace(v, GetGlobalID(w));
       });
-      vertex_payload_[contraction_level_ + 1][v] =
-          {std::numeric_limits<VertexID>::max() - 1, GetVertexLabel(v), GetVertexRoot(v)};
     });
     removed_edges_.emplace(std::numeric_limits<VertexID>::max(), std::numeric_limits<VertexID>::max());
-
-    ForallGhostVertices([&](VertexID v) {
-      vertex_payload_[contraction_level_ + 1][v] =
-          {std::numeric_limits<VertexID>::max() - 1, GetVertexLabel(v), GetVertexRoot(v)};
-    });
 
     // Get adjacency (otherwise we get deadlocks with added edges)
     std::vector<bool> is_adj(size_);
@@ -721,10 +692,8 @@ class GraphAccess {
         // Vertices remain active
         inactive_level_[vlocal] = -1;
         inactive_level_[wlocal] = -1;
-        vertex_payload_[contraction_level_][vlocal] =
-            {std::numeric_limits<VertexID>::max() - 1, vlabel, rank_};
-        vertex_payload_[contraction_level_][wlocal] =
-            {std::numeric_limits<VertexID>::max() - 1, wlabel, pe};
+        vertex_payload_[vlocal] = {std::numeric_limits<VertexID>::max() - 1, vlabel, rank_};
+        vertex_payload_[wlocal] = {std::numeric_limits<VertexID>::max() - 1, wlabel, pe};
       }
     }
     // if (rank_ == ROOT) 
@@ -757,17 +726,13 @@ class GraphAccess {
         removed_edges_.pop();
         if (std::get<0>(e) == std::numeric_limits<VertexID>::max())
           break;
+        VertexID prev_num_ghosts = GetNumberOfGhostVertices();
         AddEdge(std::get<0>(e), std::get<1>(e), GetPE(GetLocalID(std::get<1>(e))));
       }
 
       // Update local labels
       ForallLocalVertices([&](VertexID v) {
-        if (vertex_payload_[contraction_level_][v].label_ !=
-            vertex_payload_[contraction_level_ + 1][v].label_)
-          SetVertexPayload(v,
-                           {0,
-                            vertex_payload_[contraction_level_ + 1][v].label_,
-                            rank_});
+        ForceVertexPayload(v, {0, GetVertexLabel(v), rank_});
       });
 
       // Propagate labels
@@ -795,6 +760,7 @@ class GraphAccess {
                       MPI_COMM_WORLD);
       }
 
+      // Vertices at current level are roots at previous one
       ForallLocalVertices([&](VertexID v) {
         SetParent(v, GetGlobalID(v));
       });
@@ -987,12 +953,14 @@ class GraphAccess {
 
   void SetVertexPayload(VertexID v, VertexPayload &&msg, bool propagate = true);
 
+  void ForceVertexPayload(VertexID v, VertexPayload &&msg);
+
   inline VertexPayload &GetVertexMessage(const VertexID v) {
-    return vertex_payload_[contraction_level_][v];
+    return vertex_payload_[v];
   }
 
   void SetVertexMessage(const VertexID v, VertexPayload &&msg) {
-    vertex_payload_[contraction_level_][v] = msg;
+    vertex_payload_[v] = msg;
   }
 
   void SetParent(const VertexID v, const VertexID parent_v) {
@@ -1008,15 +976,15 @@ class GraphAccess {
   }
 
   inline VertexID GetVertexDeviate(const VertexID v) const {
-    return vertex_payload_[contraction_level_][v].deviate_;
+    return vertex_payload_[v].deviate_;
   }
 
   inline VertexID GetVertexLabel(const VertexID v) const {
-    return vertex_payload_[contraction_level_][v].label_;
+    return vertex_payload_[v].label_;
   }
 
   inline PEID GetVertexRoot(const VertexID v) const {
-    return vertex_payload_[contraction_level_][v].root_;
+    return vertex_payload_[v].root_;
   }
 
   inline VertexID GetParent(const VertexID v) {
@@ -1205,7 +1173,7 @@ class GraphAccess {
 
   std::vector<LocalVertexData> local_vertices_data_;
   std::vector<GhostVertexData> ghost_vertices_data_;
-  std::vector<std::vector<VertexPayload>> vertex_payload_;
+  std::vector<VertexPayload> vertex_payload_;
 
   // Shortcutting
   std::vector<VertexID> parent_;
