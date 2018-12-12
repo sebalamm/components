@@ -12,7 +12,7 @@ if (NOT CMAKE_BUILD_TYPE)
 endif (NOT CMAKE_BUILD_TYPE)
 
 include_directories(SYSTEM ${MPI_CXX_INCLUDE_PATH})
-set(CMAKE_CXX_FLAGS "${CMAKE_CXX_FLAGS} ${MPI_COMPILE_FLAGS} -Wall -fno-omit-frame-pointer -O3 -g")
+set(CMAKE_CXX_FLAGS "${CMAKE_CXX_FLAGS} ${MPI_COMPILE_FLAGS} -std=c++14 -march=native -DNDEBUG -Wall -fPIC -O3 -g")
 set(CMAKE_CXX_LINK_FLAGS "${CMAKE_CXX_LINK_FLAGS} ${MPI_LINK_FLAGS}")
 
 add_subdirectory(extern/kagen)
@@ -60,7 +60,6 @@ add_executable(local ${SOURCES} "app/local_contraction.cpp")
 add_executable(shortcuts ${SOURCES} "app/shortcuts.cpp")
 
 set(LIBS
-        gmp
         spooky
         sampling
         ${MPI_LIBRARIES}
