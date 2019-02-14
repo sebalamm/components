@@ -49,24 +49,24 @@ void NodeCommunicator::ReceiveMessages() {
     if (message_length < 4) continue;
 
     for (int i = 0; i < message_length; i += 4) {
-    // if (rank_ == 3) std::cout 
+    // if (rank_ == 0) std::cout 
     //                   << message[i] 
     //                   << " "
     //                   << g_->IsGhostFromGlobal(message[i]) 
     //                   << " "
     //                   << st.MPI_SOURCE 
     //                   << std::endl;
-    // if (rank_ == 3 && message[i] == 6) {
-    //   g_->OutputLocal();
-    //   std::cout << st.MPI_SOURCE << std::endl;
-    //   std::cout << g_->IsGhostFromGlobal(message[i]) << std::endl;
-    // }
+    if (rank_ == 0 && message[i] == 443) {
+      // g_->OutputLocal();
+      std::cout << st.MPI_SOURCE << std::endl;
+      std::cout << g_->IsGhostFromGlobal(message[i]) << std::endl;
+    }
       VertexID local_id = g_->GetLocalID(message[i]);
       VertexID deviate = message[i + 1];
       VertexID label = message[i + 2];
       PEID root = static_cast<PEID>(message[i + 3]);
 // #ifndef NDEBUG
-// if (rank_ == 11) {
+// if (rank_ == 0) {
 //       std::cout << "[R" << rank_ << "] recv [" << local_id << "]("
 //                 << deviate << "," << label
 //                 << "," << root << ") from pe "

@@ -348,8 +348,8 @@ class GraphAccess {
       // Send edges
       for (PEID pe = 0; pe < size_; ++pe) {
         if (is_adj[pe]) {
-          // if ((*current_send_buffers)[pe].size() == 0) 
-          //   (*current_send_buffers)[pe].emplace_back(0);
+          if ((*current_send_buffers)[pe].size() == 0) 
+            (*current_send_buffers)[pe].emplace_back(0);
           auto *req = new MPI_Request();
           MPI_Isend((*current_send_buffers)[pe].data(), static_cast<int>((*current_send_buffers)[pe].size()), MPI_VERTEX, pe, 0, MPI_COMM_WORLD, req);
           requests.emplace_back(req);
@@ -483,6 +483,8 @@ class GraphAccess {
     contract_timer.Restart();
     VertexID number_of_messages = 0;
     VertexID self_messages = 0;
+    
+    if (rank_ == 0) OutputLocal();
 
     // Determine edges to communicate
     // Gather labels to communicate
@@ -494,8 +496,11 @@ class GraphAccess {
     std::vector<std::vector<VertexID>> receive_buffers(size_);
     for (int i = 0; i < size_; ++i) {
       send_buffers_a[i].clear();
+      send_buffers_a[i].reserve(number_of_vertices_);
       send_buffers_b[i].clear();
+      send_buffers_b[i].reserve(number_of_vertices_);
       receive_buffers[i].clear();
+      receive_buffers[i].reserve(number_of_vertices_);
     }
 
     google::sparse_hash_set<VertexID> inserted_edges;
@@ -518,12 +523,12 @@ class GraphAccess {
             (*current_send_buffers)[pe].emplace_back(wlabel);
             (*current_send_buffers)[pe].emplace_back(GetVertexRoot(w));
             (*current_send_buffers)[pe].emplace_back(parent);
-            // std::cout << "R" << rank_ << " send (" 
-            //                           << vlabel << "," 
-            //                           << wlabel << "," 
-            //                           << GetVertexRoot(w) << "," 
-            //                           << parent.second
-            //                           << ") to " << pe << std::endl;
+            std::cout << "R" << rank_ << " send (" 
+                                      << vlabel << "," 
+                                      << wlabel << "," 
+                                      << GetVertexRoot(w) << "," 
+                                      << parent
+                                      << ") to " << pe << std::endl;
           }
         }
         removed_edges_.emplace(v, GetGlobalID(w));
@@ -553,7 +558,7 @@ class GraphAccess {
 
       // Send edges
       for (PEID pe = 0; pe < size_; ++pe) {
-        if (is_adj[pe]) {
+        if (is_adj[pe] && pe != rank_) {
           if ((*current_send_buffers)[pe].size() == 0) 
             (*current_send_buffers)[pe].emplace_back(0);
           auto *req = new MPI_Request();
@@ -566,7 +571,9 @@ class GraphAccess {
       PEID messages_recv = 0;
       int message_length = 0;
       for (int i = 0; i < size_; ++i) receive_buffers[i].clear();
-      receive_buffers[rank_] = (*current_send_buffers)[rank_];
+      for (int i = 0; i < (*current_send_buffers)[rank_].size(); i++) {
+        receive_buffers[rank_].emplace_back((*current_send_buffers)[rank_][i]);
+      }
       while (messages_recv < num_adj) {
         MPI_Status st{};
         MPI_Probe(MPI_ANY_SOURCE, 0, MPI_COMM_WORLD, &st);
@@ -598,6 +605,7 @@ class GraphAccess {
 
       // Receive edges and apply updates
       for (PEID pe = 0; pe < size_; ++pe) {
+        // if (pe == rank_ && rank_ == 0) std::cout << "recv size " << receive_buffers[pe].size() << std::endl;
         if (receive_buffers[pe].size() < 4) continue;
         for (int i = 0; i < receive_buffers[pe].size(); i += 4) {
           VertexID vlabel = receive_buffers[pe][i];
@@ -608,20 +616,58 @@ class GraphAccess {
 
           // Continue if already inserted
           if (inserted_edges.find(update_id) != end(inserted_edges)) continue;
-          if (send_ids.find(update_id) != end(send_ids)) continue;
+          if (send_ids.find(update_id) != end(send_ids) && pe != rank_) continue;
+
+          std::cout << "R" << rank_ << " recv (" 
+                                    << vlabel << "," 
+                                    << wlabel << "," 
+                                    << wroot << "," 
+                                    << link << "," 
+                                    << ") from " << pe << std::endl;
+
+          std::cout << "R" << rank_ << " recv (" 
+                                    << vlabel << "," 
+                                    << wlabel << "," 
+                                    << wroot << "," 
+                                    << link << "," 
+                                    << GetLocalID(link)
+                                    << ") from " << pe << std::endl;
 
           // Get link information
           VertexID parent = GetParent(GetLocalID(link));
           PEID pe = GetPE(GetLocalID(parent));
 
+          std::cout << "R" << rank_ << " par (" 
+                                    << link << "," 
+                                    << parent
+                                    << ") from " << pe << std::endl;
+
           if (IsLocalFromGlobal(vlabel)) {
             edges_to_add[wroot].emplace_back(vlabel, wlabel);
             inserted_edges.insert(update_id);
+            send_ids.insert(update_id);
             if (wroot == rank_) {
               edges_to_add[rank_].emplace_back(wlabel, vlabel);
               inserted_edges.insert(wlabel + offset * vlabel);
+              send_ids.insert(wlabel + offset * vlabel);
             }
           } else {
+            // Naive propagation
+            // send_ids.insert(update_id);
+            // number_of_messages++;
+            // if (pe == rank_) self_messages++;
+            // (*current_send_buffers)[pe].emplace_back(vlabel);
+            // (*current_send_buffers)[pe].emplace_back(wlabel);
+            // (*current_send_buffers)[pe].emplace_back(wroot);
+            // (*current_send_buffers)[pe].emplace_back(parent);
+            // // std::cout << "R" << rank_ << " prop (" 
+            // //                           << vlabel << "," 
+            // //                           << wlabel << "," 
+            // //                           << wroot << "," 
+            // //                           << parent.second
+            // //                           << ") to " << pe << std::endl;
+            // converged_locally = 0;
+            // Advanced
             if (GetVertexLabel(GetLocalID(link)) == vlabel) {
               send_ids.insert(update_id);
               number_of_messages++;
@@ -629,7 +675,7 @@ class GraphAccess {
               (*current_send_buffers)[pe].emplace_back(vlabel);
               (*current_send_buffers)[pe].emplace_back(wlabel);
               (*current_send_buffers)[pe].emplace_back(wroot);
-              (*current_send_buffers)[pe].emplace_back(parent);
+              (*current_send_buffers)[pe].emplace_back(link);
               // std::cout << "R" << rank_ << " prop (" 
               //                           << vlabel << "," 
               //                           << wlabel << "," 
@@ -639,6 +685,12 @@ class GraphAccess {
               converged_locally = 0;
             } else {
               // Parent has to be connected to vlabel (N(N(v))
+              std::cout << "R" << rank_ << " prop (" 
+                                        << vlabel << "," 
+                                        << wlabel << "," 
+                                        << wroot << "," 
+                                        << parent 
+                                        << ") to " << pe << std::endl;
               VertexID local_vlabel = GetLocalID(vlabel);
               pe = GetPE(local_vlabel);
 
@@ -669,8 +721,8 @@ class GraphAccess {
                     MPI_COMM_WORLD);
     }
     // if (rank_ == ROOT) 
-    //   std::cout << "[STATUS] |--- Propagation done " 
-    //             << "[TIME] " << contract_timer.Elapsed() << std::endl;
+    std::cout << "[STATUS] |--- Propagation done " 
+              << "[TIME] " << contract_timer.Elapsed() << std::endl;
     //   std::cout << "[STATUS] |--- Rank " << rank_ 
     //             << " Messages sent " << number_of_messages 
     //             << " (own) " << self_messages << std::endl;

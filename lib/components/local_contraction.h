@@ -147,27 +147,35 @@ class LocalContraction {
                 << std::endl;
 #endif
     });
+    MPI_Barrier(MPI_COMM_WORLD);
+    std::cout << "DEV UPDATE" << std::endl;
+    MPI_Barrier(MPI_COMM_WORLD);
     g.SendAndReceiveGhostVertices();
+    MPI_Barrier(MPI_COMM_WORLD);
+    std::cout << "END" << std::endl;
+    MPI_Barrier(MPI_COMM_WORLD);
 
     // Perform update for local vertices
     // Find smallest label in N(v)
     std::vector<VertexPayload> n_smallest_neighbor(g.GetNumberOfVertices());
+    std::vector<VertexPayload> n_smallest_update(g.GetNumberOfVertices());
     g.ForallLocalVertices([&](VertexID v) {
       n_smallest_neighbor[v] = g.GetVertexMessage(v);
+      n_smallest_update[v] = g.GetVertexMessage(v);
       g.ForallNeighbors(v, [&](VertexID w) {
         // Store neighbor label
         if (g.GetVertexDeviate(w) < n_smallest_neighbor[v].deviate_ ||
             (g.GetVertexDeviate(w) == n_smallest_neighbor[v].deviate_ &&
                 g.GetVertexLabel(w) < n_smallest_neighbor[v].label_)) {
           g.SetParent(v, g.GetGlobalID(w));
-          n_smallest_neighbor[v] = {g.GetVertexDeviate(w), g.GetVertexLabel(w),
+          n_smallest_update[v] = {g.GetVertexDeviate(w), g.GetVertexLabel(w),
                                  g.GetVertexRoot(w)};
         }
       });
     });
 
     g.ForallLocalVertices([&](VertexID v) {
-      g.SetVertexPayload(v, std::move(n_smallest_neighbor[v]));
+      g.SetVertexPayload(v, std::move(n_smallest_update[v]));
     });
 
     // Receive variates
@@ -176,29 +184,41 @@ class LocalContraction {
     // Perform update for local vertices
     // Find smallest label in N(N(v))
     std::vector<VertexPayload> nn_smallest_neighbor(g.GetNumberOfVertices());
+    std::vector<VertexPayload> nn_smallest_update(g.GetNumberOfVertices());
     g.ForallLocalVertices([&](VertexID v) {
       nn_smallest_neighbor[v] = g.GetVertexMessage(v);
+      nn_smallest_update[v] = g.GetVertexMessage(v);
       g.ForallNeighbors(v, [&](VertexID w) {
         // Store neighbor label
         if (g.GetVertexDeviate(w) < nn_smallest_neighbor[v].deviate_ ||
             (g.GetVertexDeviate(w) == nn_smallest_neighbor[v].deviate_ &&
                 g.GetVertexLabel(w) < nn_smallest_neighbor[v].label_)) {
           g.SetParent(v, g.GetGlobalID(w));
-          nn_smallest_neighbor[v] = {g.GetVertexDeviate(w), g.GetVertexLabel(w),
+          nn_smallest_update[v] = {g.GetVertexDeviate(w), g.GetVertexLabel(w),
                                  g.GetVertexRoot(w)};
         }
       });
     });
 
     g.ForallLocalVertices([&](VertexID v) {
-      g.SetVertexPayload(v, std::move(nn_smallest_neighbor[v]));
+      g.SetVertexPayload(v, std::move(nn_smallest_update[v]));
     });
 
     // Receive variates
     g.SendAndReceiveGhostVertices();
 
+    // if (iteration_ == 1) g.OutputLocal();
+
     // Determine remaining active vertices
+    MPI_Barrier(MPI_COMM_WORLD);
+    std::cout << "CONTRACT" << std::endl;
+    MPI_Barrier(MPI_COMM_WORLD);
     g.ContractLocal();
+    MPI_Barrier(MPI_COMM_WORLD);
+    std::cout << "END" << std::endl;
+    MPI_Barrier(MPI_COMM_WORLD);
+
+    // if (iteration_ == 1) g.OutputLocal();
 
     // Count remaining number of vertices
     global_vertices = g.GatherNumberOfGlobalVertices();
