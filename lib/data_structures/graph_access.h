@@ -484,7 +484,7 @@ class GraphAccess {
     VertexID number_of_messages = 0;
     VertexID self_messages = 0;
     
-    if (rank_ == 0) OutputLocal();
+    // if (rank_ == 0) OutputLocal();
 
     // Determine edges to communicate
     // Gather labels to communicate
@@ -523,12 +523,6 @@ class GraphAccess {
             (*current_send_buffers)[pe].emplace_back(wlabel);
             (*current_send_buffers)[pe].emplace_back(GetVertexRoot(w));
             (*current_send_buffers)[pe].emplace_back(parent);
-            std::cout << "R" << rank_ << " send (" 
-                                      << vlabel << "," 
-                                      << wlabel << "," 
-                                      << GetVertexRoot(w) << "," 
-                                      << parent
-                                      << ") to " << pe << std::endl;
           }
         }
         removed_edges_.emplace(v, GetGlobalID(w));
@@ -616,31 +610,11 @@ class GraphAccess {
 
           // Continue if already inserted
           if (inserted_edges.find(update_id) != end(inserted_edges)) continue;
-          if (send_ids.find(update_id) != end(send_ids) && pe != rank_) continue;
-
-          std::cout << "R" << rank_ << " recv (" 
-                                    << vlabel << "," 
-                                    << wlabel << "," 
-                                    << wroot << "," 
-                                    << link << "," 
-                                    << ") from " << pe << std::endl;
-
-          std::cout << "R" << rank_ << " recv (" 
-                                    << vlabel << "," 
-                                    << wlabel << "," 
-                                    << wroot << "," 
-                                    << link << "," 
-                                    << GetLocalID(link)
-                                    << ") from " << pe << std::endl;
+          // if (send_ids.find(update_id) != end(send_ids) && pe != rank_) continue;
 
           // Get link information
           VertexID parent = GetParent(GetLocalID(link));
           PEID pe = GetPE(GetLocalID(parent));
-
-          std::cout << "R" << rank_ << " par (" 
-                                    << link << "," 
-                                    << parent
-                                    << ") from " << pe << std::endl;
 
           if (IsLocalFromGlobal(vlabel)) {
             edges_to_add[wroot].emplace_back(vlabel, wlabel);
@@ -652,22 +626,6 @@ class GraphAccess {
               send_ids.insert(wlabel + offset * vlabel);
             }
           } else {
-            // Naive propagation
-            // send_ids.insert(update_id);
-            // number_of_messages++;
-            // if (pe == rank_) self_messages++;
-            // (*current_send_buffers)[pe].emplace_back(vlabel);
-            // (*current_send_buffers)[pe].emplace_back(wlabel);
-            // (*current_send_buffers)[pe].emplace_back(wroot);
-            // (*current_send_buffers)[pe].emplace_back(parent);
-            // // std::cout << "R" << rank_ << " prop (" 
-            // //                           << vlabel << "," 
-            // //                           << wlabel << "," 
-            // //                           << wroot << "," 
-            // //                           << parent.second
-            // //                           << ") to " << pe << std::endl;
-            // converged_locally = 0;
-            // Advanced
             if (GetVertexLabel(GetLocalID(link)) == vlabel) {
               send_ids.insert(update_id);
               number_of_messages++;
@@ -675,22 +633,10 @@ class GraphAccess {
               (*current_send_buffers)[pe].emplace_back(vlabel);
               (*current_send_buffers)[pe].emplace_back(wlabel);
               (*current_send_buffers)[pe].emplace_back(wroot);
-              (*current_send_buffers)[pe].emplace_back(link);
-              // std::cout << "R" << rank_ << " prop (" 
-              //                           << vlabel << "," 
-              //                           << wlabel << "," 
-              //                           << wroot << "," 
-              //                           << parent.second
-              //                           << ") to " << pe << std::endl;
+              (*current_send_buffers)[pe].emplace_back(parent);
               converged_locally = 0;
             } else {
               // Parent has to be connected to vlabel (N(N(v))
-              std::cout << "R" << rank_ << " prop (" 
-                                        << vlabel << "," 
-                                        << wlabel << "," 
-                                        << wroot << "," 
-                                        << parent 
-                                        << ") to " << pe << std::endl;
               VertexID local_vlabel = GetLocalID(vlabel);
               pe = GetPE(local_vlabel);
 
@@ -700,12 +646,6 @@ class GraphAccess {
               (*current_send_buffers)[pe].emplace_back(wlabel);
               (*current_send_buffers)[pe].emplace_back(wroot);
               (*current_send_buffers)[pe].emplace_back(vlabel);
-              // std::cout << "R" << rank_ << " prop (" 
-              //                           << vlabel << "," 
-              //                           << wlabel << "," 
-              //                           << wroot << "," 
-              //                           << vlabel 
-              //                           << ") to " << pe << std::endl;
               converged_locally = 0;
             }
           }

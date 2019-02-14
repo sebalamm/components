@@ -147,13 +147,7 @@ class LocalContraction {
                 << std::endl;
 #endif
     });
-    MPI_Barrier(MPI_COMM_WORLD);
-    std::cout << "DEV UPDATE" << std::endl;
-    MPI_Barrier(MPI_COMM_WORLD);
     g.SendAndReceiveGhostVertices();
-    MPI_Barrier(MPI_COMM_WORLD);
-    std::cout << "END" << std::endl;
-    MPI_Barrier(MPI_COMM_WORLD);
 
     // Perform update for local vertices
     // Find smallest label in N(v)
@@ -210,13 +204,7 @@ class LocalContraction {
     // if (iteration_ == 1) g.OutputLocal();
 
     // Determine remaining active vertices
-    MPI_Barrier(MPI_COMM_WORLD);
-    std::cout << "CONTRACT" << std::endl;
-    MPI_Barrier(MPI_COMM_WORLD);
     g.ContractLocal();
-    MPI_Barrier(MPI_COMM_WORLD);
-    std::cout << "END" << std::endl;
-    MPI_Barrier(MPI_COMM_WORLD);
 
     // if (iteration_ == 1) g.OutputLocal();
 
