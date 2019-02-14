@@ -56,11 +56,6 @@ void NodeCommunicator::ReceiveMessages() {
     //                   << " "
     //                   << st.MPI_SOURCE 
     //                   << std::endl;
-    if (rank_ == 0 && message[i] == 443) {
-      // g_->OutputLocal();
-      std::cout << st.MPI_SOURCE << std::endl;
-      std::cout << g_->IsGhostFromGlobal(message[i]) << std::endl;
-    }
       VertexID local_id = g_->GetLocalID(message[i]);
       VertexID deviate = message[i + 1];
       VertexID label = message[i + 2];
