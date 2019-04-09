@@ -183,15 +183,12 @@ class GraphAccess {
     // std::unordered_map<VertexID, VertexID> smallest_deviate;
     ForallLocalVertices([&](const VertexID v) {
       auto payload = GetVertexMessage(v);
-      VertexID label = payload.label_;
-      VertexID deviate = payload.deviate_;
-      VertexID root = payload.root_;
 
       // If not yet found insert deviate
-      if (smallest_deviate.find(label) == end(smallest_deviate) 
-            || smallest_deviate[label] > deviate) {
-        smallest_deviate[label] = deviate;
-        label_shortcut_[label] = GetParent(v);
+      if (smallest_deviate.find(payload.label_) == end(smallest_deviate) 
+            || smallest_deviate[payload.label_] > payload.deviate_) {
+        smallest_deviate[payload.label_] = payload.deviate_;
+        label_shortcut_[payload.label_] = GetParent(v);
       }
     });
   }
@@ -270,18 +267,18 @@ class GraphAccess {
     // Determine edges to communicate
     // Gather labels to communicate
     VertexID offset = GatherNumberOfGlobalVertices();
-    google::sparse_hash_set<VertexID> send_ids(size_);
+    google::sparse_hash_set<VertexID> send_ids;
     std::vector<std::vector<VertexID>> send_buffers_a(size_);
     std::vector<std::vector<VertexID>> send_buffers_b(size_);
     std::vector<std::vector<VertexID>>* current_send_buffers = &send_buffers_a;
     std::vector<std::vector<VertexID>> receive_buffers(size_);
     for (int i = 0; i < size_; ++i) {
       send_buffers_a[i].clear();
-      send_buffers_a[i].reserve(number_of_vertices_);
+      // send_buffers_a[i].reserve(number_of_vertices_);
       send_buffers_b[i].clear();
-      send_buffers_b[i].reserve(number_of_vertices_);
+      // send_buffers_b[i].reserve(number_of_vertices_);
       receive_buffers[i].clear();
-      receive_buffers[i].reserve(number_of_vertices_);
+      // receive_buffers[i].reserve(number_of_vertices_);
     }
 
     google::sparse_hash_set<VertexID> inserted_edges;
@@ -372,7 +369,12 @@ class GraphAccess {
         MPI_Recv(&receive_buffers[st.MPI_SOURCE][0], message_length, MPI_VERTEX, st.MPI_SOURCE, 0, MPI_COMM_WORLD, &rst);
       }
 
-      MPI_Barrier(MPI_COMM_WORLD);
+      for (unsigned int i = 0; i < requests.size(); ++i) {
+        MPI_Status st;
+        MPI_Wait(requests[i], &st);
+        delete requests[i];
+      }
+      requests.clear();
 
       // Clear buffers
       if (current_send_buffers == &send_buffers_a) {
@@ -382,13 +384,6 @@ class GraphAccess {
         for (int i = 0; i < size_; ++i) send_buffers_a[i].clear();
         current_send_buffers = &send_buffers_a;
       }
-
-      for (unsigned int i = 0; i < requests.size(); ++i) {
-        MPI_Status st;
-        MPI_Wait(requests[i], &st);
-        delete requests[i];
-      }
-      requests.clear();
 
       // Receive edges and apply updates
       for (PEID pe = 0; pe < size_; ++pe) {
@@ -579,7 +574,12 @@ class GraphAccess {
         MPI_Recv(&receive_buffers[st.MPI_SOURCE][0], message_length, MPI_VERTEX, st.MPI_SOURCE, 0, MPI_COMM_WORLD, &rst);
       }
 
-      MPI_Barrier(MPI_COMM_WORLD);
+      for (unsigned int i = 0; i < requests.size(); ++i) {
+        MPI_Status st;
+        MPI_Wait(requests[i], &st);
+        delete requests[i];
+      }
+      requests.clear();
 
       // Clear buffers
       if (current_send_buffers == &send_buffers_a) {
@@ -589,13 +589,6 @@ class GraphAccess {
         for (int i = 0; i < size_; ++i) send_buffers_a[i].clear();
         current_send_buffers = &send_buffers_a;
       }
-
-      for (unsigned int i = 0; i < requests.size(); ++i) {
-        MPI_Status st;
-        MPI_Wait(requests[i], &st);
-        delete requests[i];
-      }
-      requests.clear();
 
       // Receive edges and apply updates
       for (PEID pe = 0; pe < size_; ++pe) {
@@ -718,7 +711,7 @@ class GraphAccess {
         removed_edges_.pop();
         if (std::get<0>(e) == std::numeric_limits<VertexID>::max())
           break;
-        VertexID prev_num_ghosts = GetNumberOfGhostVertices();
+        // VertexID prev_num_ghosts = GetNumberOfGhostVertices();
         AddEdge(std::get<0>(e), std::get<1>(e), GetPE(GetLocalID(std::get<1>(e))));
       }
 
@@ -1122,11 +1115,10 @@ class GraphAccess {
     }
 
     // Gather local vertices
-    std::vector<VertexID> local_vertices;
-    // TODO [MEMORY]: Might be too small
+    // std::vector<VertexID> local_vertices;
     int num_local_vertices = 0;
     ForallLocalVertices([&](const VertexID &v) {
-      local_vertices.push_back(v);
+      // local_vertices.push_back(v);
       num_local_vertices++;
     });
 
@@ -1137,12 +1129,13 @@ class GraphAccess {
                  ROOT, MPI_COMM_WORLD);
 
     for (int i = 0; i < num_local_vertices; ++i) {
-      VertexID v = local_vertices[i];
-      SetVertexPayload(v, {GetVertexDeviate(v), 
+      // VertexID v = local_vertices[i];
+      // std::cout << "R"  << rank_ << " i " << i << " v " << v << std::endl;
+      SetVertexPayload(i, {GetVertexDeviate(i), 
                            local_labels[i], 
-                           GetVertexRoot(v)});
+                           GetVertexRoot(i)});
     }
-    SendAndReceiveGhostVertices();
+    // SendAndReceiveGhostVertices();
   }
 
   //////////////////////////////////////////////

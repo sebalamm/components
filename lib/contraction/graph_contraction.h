@@ -56,7 +56,7 @@ class Contraction {
     // if (rank_ == ROOT) std::cout << "[STATUS] |- Generate local contraction edges (" << t.Elapsed() << ")" << std::endl;
     GenerateLocalContractionEdges();
     // if (rank_ == ROOT) std::cout << "[STATUS] |- Exchange ghost contraction edges (" << t.Elapsed() << ")" << std::endl;
-    ExchangeGhostContractionEdges();
+    // ExchangeGhostContractionEdges();
 
     // if (rank_ == ROOT) std::cout << "[STATUS] |- Build local contration graph (" << t.Elapsed() << ")" << std::endl;
     return BuildLocalContractionGraph();
@@ -166,13 +166,13 @@ class Contraction {
       return static_cast<VertexID>((0.5 * ((x + y) * (x + y + 1))) + y);
     };
 
-    auto depair = [&](VertexID z) {
-      VertexID w = static_cast<VertexID>(0.5 * (sqrt(8 * z + 1) - 1));
-      VertexID t = 0.5 * ((w * w) + w);
-      VertexID y = z - t;
-      VertexID x = w - y;
-      return std::make_pair(x, y);
-    };
+    // auto depair = [&](VertexID z) {
+    //   VertexID w = static_cast<VertexID>(0.5 * (sqrt(8 * z + 1) - 1));
+    //   VertexID t = 0.5 * ((w * w) + w);
+    //   VertexID y = z - t;
+    //   VertexID x = w - y;
+    //   return std::make_pair(x, y);
+    // };
 
     // Gather components with the same neighbor
     google::sparse_hash_set<VertexID> unique_neighbors;
@@ -180,30 +180,27 @@ class Contraction {
       if (g_.IsInterface(v)) {
         g_.ForallNeighbors(v, [&](const VertexID w) {
           // unique_neighbors[w][g_.GetContractionVertex(v)];   
-          PEID target_pe = g_.GetPE(w);
-          VertexID comp_pair = pair(w, g_.GetContractionVertex(v));
-          auto dp = depair(comp_pair);
-          if (!g_.IsLocal(w) 
-                && unique_neighbors.find(comp_pair) == end(unique_neighbors)
-                && g_.GetContractionVertex(v) != largest_component_ids[target_pe])
-            unique_neighbors.insert(comp_pair);
+          if (!g_.IsLocal(w)) {
+            PEID target_pe = g_.GetPE(w);
+            VertexID contraction_vertex = g_.GetContractionVertex(v);
+            if (contraction_vertex != largest_component_ids[target_pe]) {
+              VertexID comp_pair = pair(w, g_.GetContractionVertex(v));
+              if (unique_neighbors.find(comp_pair) == end(unique_neighbors)) {
+                unique_neighbors.insert(comp_pair);
+                node_buffers_[target_pe].push_back(g_.GetGlobalID(w));
+                node_buffers_[target_pe].push_back(contraction_vertex);
+              }
+            }
+          }
         });
       }
     });
 
-    for (const VertexID m : unique_neighbors) {
-      auto dp = depair(m);
-      VertexID ghost = dp.first;
-      VertexID contraction_vertex = dp.second;
-      PEID target_pe = g_.GetPE(ghost);
-      node_buffers_[target_pe].push_back(g_.GetGlobalID(ghost));
-      node_buffers_[target_pe].push_back(contraction_vertex);
-    }
-
     // Send ghost vertex updates O(cut size) (communication)
     for (PEID i = 0; i < size_; ++i) {
       if (g_.IsAdjacentPE(i)) {
-        if (node_buffers_[i].empty()) node_buffers_[i].push_back(0);
+        if (node_buffers_[i].empty()) 
+          node_buffers_[i].push_back(0);
         MPI_Request req;
         MPI_Isend(&node_buffers_[i][0],
                   static_cast<int>(node_buffers_[i].size()),
@@ -216,11 +213,10 @@ class Contraction {
     }
 
     // Receive updates O(cut size)
-    // Optimization for receiving largest component
     PEID num_adjacent_pes = g_.GetNumberOfAdjacentPEs();
     PEID recv_messages = 0;
-    // This might be too large
-    std::vector<bool> relabled(g_.GetNumberOfVertices(), false);
+
+    // Optimization for receiving largest component
     std::vector<VertexID> largest_components(size_, std::numeric_limits<VertexID>::max());
 
     std::unordered_map<VertexID, std::vector<VertexID>> components_for_pe;
@@ -271,25 +267,26 @@ class Contraction {
     });
   }
 
+  // TODO: Do we need this and the next step?
   void GenerateLocalContractionEdges() {
     // Gather local edges (there shouldn't be any) O(m/P)
     g_.ForallLocalVertices([&](const VertexID v) {
       VertexID cv = g_.GetContractionVertex(v);
       g_.ForallNeighbors(v, [&](const VertexID w) {
         VertexID cw = g_.GetContractionVertex(w);
-        if (cv != cw)
-          local_edges_.insert(HashedEdge{num_global_components_, cv, cw, g_.GetPE(w)});
+        if (cv != cw) {
+          auto h_edge = HashedEdge{num_global_components_, cv, cw, g_.GetPE(w)};
+          if (local_edges_.find(h_edge) == end(local_edges_)) {
+            local_edges_.insert(h_edge);
+            edge_buffers_[g_.GetPE(w)].push_back(cw);
+            edge_buffers_[g_.GetPE(w)].push_back(cv);
+          }
+        }
       });
     });
   }
 
   void ExchangeGhostContractionEdges() {
-    // Determine edge targets O(cut size)
-    for (const auto &e : local_edges_) {
-      edge_buffers_[e.rank].push_back(e.target);
-      edge_buffers_[e.rank].push_back(e.source);
-    }
-
     // Send edges O(cut size) (communication)
     for (PEID i = 0; i < size_; ++i) {
       if (g_.IsAdjacentPE(i)) {
@@ -340,21 +337,25 @@ class Contraction {
     VertexID from = num_smaller_components_;
     VertexID to = num_smaller_components_ + num_local_components_ - 1;
 
+    // TODO: Can we do this without communicating?
     EdgeID edge_counter = 0;
     std::vector<std::vector<std::pair<VertexID, VertexID>>>
         local_edge_lists(num_local_components_);
     for (const auto &e : local_edges_) {
+      // Edge runs between local vertices
       if (from <= e.target && e.target < to) {
         local_edge_lists[e.source - from].emplace_back(e.target - from, rank_);
         local_edge_lists[e.target - from].emplace_back(e.source - from, rank_);
         edge_counter += 2;
-      } else {
+      }
+      // Edge runs between interface and ghost vertices
+      else {
         local_edge_lists[e.source - from].emplace_back(e.target, e.rank);
         edge_counter++;
       }
     }
 
-    // TODO: We need to fill range array. Alternatively send pe with edges.
+
     GraphAccess cg(rank_, size_);
     cg.StartConstruct(num_local_components_,
                       edge_counter,
