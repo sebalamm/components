@@ -220,9 +220,9 @@ class ExponentialContraction {
     // #endif
     // });
 
-    // if (rank_ == ROOT)
-    //   std::cout << "[STATUS] |-- Pick deviates " 
-    //             << "[TIME] " << iteration_timer_.Elapsed() << std::endl;
+    if (rank_ == ROOT)
+      std::cout << "[STATUS] |-- Pick deviates " 
+                << "[TIME] " << iteration_timer_.Elapsed() << std::endl;
 
     VertexID exchange_rounds = 0;
     int converged_globally = 0;
@@ -263,9 +263,9 @@ class ExponentialContraction {
         g.SendAndReceiveGhostVertices();
       // } 
 
-      // if (rank_ == ROOT) 
-      //   std::cout << "[STATUS] |--- Round finished " 
-      //             << "[TIME] " << round_timer.Elapsed() << std::endl;
+      if (rank_ == ROOT) 
+        std::cout << "[STATUS] |--- Round finished " 
+                  << "[TIME] " << round_timer.Elapsed() << std::endl;
     }
 
     // Determine remaining active vertices

@@ -20,6 +20,8 @@ GraphAccess::GraphAccess(const PEID rank, const PEID size)
       edge_counter_(0) {
   ghost_comm_ = new NodeCommunicator(rank_, size_, MPI_COMM_WORLD);
   ghost_comm_->SetGraph(this);
+  label_shortcut_.set_empty_key(-1);
+  global_to_local_map_.set_empty_key(-1);
 }
 
 GraphAccess::~GraphAccess() {
@@ -82,7 +84,6 @@ EdgeID GraphAccess::AddEdge(VertexID from, VertexID to, PEID rank) {
     if (IsGhostFromGlobal(to)) { // true if ghost already in map, otherwise false
       edges_[from].emplace_back(global_to_local_map_[to]);
       edges_[global_to_local_map_[to]].emplace_back(from);
-      // active_vertices_[contraction_level_][global_to_local_map_[to]] = true;
       inactive_level_[global_to_local_map_[to]] = -1;
       vertex_payload_[global_to_local_map_[to]] = 
         {std::numeric_limits<VertexID>::max() - 1, GetVertexLabel(global_to_local_map_[to]), neighbor};
@@ -111,6 +112,21 @@ void GraphAccess::RemoveAllEdges(const VertexID from) {
   edges_[from].clear();
 }
 
+bool GraphAccess::CheckDuplicates() {
+  // google::dense_hash_set<VertexID> neighbors;
+  ForallLocalVertices([&](const VertexID v) {
+    std::unordered_set<VertexID> neighbors;
+    ForallNeighbors(v, [&](const VertexID w) {
+      if (neighbors.find(w) != end(neighbors)) {
+        std::cout << "[R" << rank_ << ":0] DUPL (" << GetGlobalID(v) << "," << GetGlobalID(w) << "[" << GetPE(w) << "])" << std::endl;
+        return true;
+      }
+      neighbors.insert(w);
+    });
+  });
+  return false;
+}
+
 void GraphAccess::OutputLocal() {
   PEID rank, size;
   MPI_Comm_rank(MPI_COMM_WORLD, &rank);
@@ -130,6 +146,7 @@ void GraphAccess::OutputLocal() {
     out << "[R" << rank << ":" << contraction_level_ << "] [N] "
         << GetGlobalID(v) << " -> ";
     ForallNeighbors(v, [&](VertexID u) {
+      // out << GetGlobalID(u) << " ";
       out << GetGlobalID(u) << " (local_id=" << u << ", msg="
           << GetVertexString(u) << ", pe="
           << GetPE(u) << ") ";

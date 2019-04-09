@@ -42,25 +42,35 @@ int main(int argn, char **argv) {
   ParseParameters(argn, argv, conf);
 
   // Parse for kagen input
-  kagen::KaGen gen(rank, size);
-  kagen::EdgeList edge_list;
-  if (conf.gen == "gnm_undirected")
-      edge_list = gen.GenerateUndirectedGNM(conf.gen_n, conf.gen_m, conf.gen_k);
-  else if (conf.gen == "rgg_2d")
-      edge_list = gen.Generate2DRGG(conf.gen_n, conf.gen_r, conf.gen_k);
-  else {
-    if (rank == ROOT) 
-      std::cout << "generator not supported" << std::endl;
-    MPI_Finalize();
-    exit(1);
-  }
-  if (rank == ROOT) 
-    std::cout << "Graph generated" << std::endl;
-  GraphAccess G = GraphIO::ReadDistributedEdgeList(conf, rank, size, MPI_COMM_WORLD, edge_list);
+//   kagen::KaGen gen(rank, size);
+//   kagen::EdgeList edge_list;
+//   if (conf.gen == "gnm_undirected")
+//       edge_list = gen.GenerateUndirectedGNM(conf.gen_n, conf.gen_m, conf.gen_k);
+//   else if (conf.gen == "rdg_2d")
+//       edge_list = gen.Generate2DRDG(conf.gen_n, conf.gen_k);
+//   else if (conf.gen == "rdg_3d")
+//       edge_list = gen.Generate3DRDG(conf.gen_n, conf.gen_k);
+//   else if (conf.gen == "rgg_2d")
+//       edge_list = gen.Generate2DRGG(conf.gen_n, conf.gen_r, conf.gen_k);
+//   else if (conf.gen == "rgg_3d")
+//       edge_list = gen.Generate3DRGG(conf.gen_n, conf.gen_r, conf.gen_k);
+//   else if (conf.gen == "rhg")
+//       edge_list = gen.GenerateRHG(conf.gen_n, conf.gen_gamma, conf.gen_d, conf.gen_k);
+//   else if (conf.gen == "ba")
+//       edge_list = gen.GenerateBA(conf.gen_n, conf.gen_d, conf.gen_k);
+//   else {
+//     if (rank == ROOT) 
+//       std::cout << "generator not supported" << std::endl;
+//     MPI_Finalize();
+//     exit(1);
+//   }
+//   if (rank == ROOT) 
+//     std::cout << "Graph generated" << std::endl;
+//   GraphAccess G = GraphIO::ReadDistributedEdgeList(conf, rank, size, MPI_COMM_WORLD, edge_list);
+  GraphAccess G = GraphIO::ReadDistributedGraph(conf, rank, size, MPI_COMM_WORLD);
 
   VertexID n = G.GatherNumberOfGlobalVertices();
   EdgeID m = G.GatherNumberOfGlobalEdges();
-  // G.OutputLocal();
   if (rank == ROOT) {
     std::cout << "INPUT "
               << "s=" << conf.seed << ", "
@@ -68,6 +78,7 @@ int main(int argn, char **argv) {
               << "n=" << n << ", "
               << "m=" << m << std::endl;
   }
+  if (G.CheckDuplicates()) exit(1);
 
   // Timers
   Timer t;
@@ -90,7 +101,7 @@ int main(int argn, char **argv) {
     local_time = t.Elapsed();
     MPI_Reduce(&local_time, &total_time, 1, MPI_DOUBLE, MPI_MAX, ROOT,
                MPI_COMM_WORLD);
-    if (rank == ROOT) stats.Push(total_time);
+    if (rank == ROOT) stats.Push(1000.0 * total_time);
     
     // Print labels
     G.OutputComponents();

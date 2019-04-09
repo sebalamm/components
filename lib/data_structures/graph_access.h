@@ -37,7 +37,9 @@
 #include <unordered_set>
 #include <boost/functional/hash.hpp>
 #include <google/sparse_hash_set>
+#include <google/dense_hash_set>
 #include <google/sparse_hash_map>
+#include <google/dense_hash_map>
 
 #include "config.h"
 #include "timer.h"
@@ -179,85 +181,34 @@ class GraphAccess {
   }
 
   void BuildLabelShortcuts() {
-    google::sparse_hash_map<VertexID, VertexID> smallest_deviate;
-    // std::unordered_map<VertexID, VertexID> smallest_deviate;
+    // Gather labels
+    google::dense_hash_set<VertexID> labels; labels.set_empty_key(-1);
+    ForallLocalVertices([&](const VertexID v) {
+        labels.insert(GetVertexLabel(v));
+    });
+
+    // Init shortcuts
+    // std::unordered_map<VertexID, std::pair<VertexID, VertexID>> smallest_deviate;
+    google::dense_hash_map<VertexID, std::pair<VertexID, VertexID>> smallest_deviate; smallest_deviate.set_empty_key(-1);
+    for (auto &v : labels) 
+      smallest_deviate[v] = std::make_pair(std::numeric_limits<VertexID>::max(), 0);
     ForallLocalVertices([&](const VertexID v) {
       auto payload = GetVertexMessage(v);
-
-      // If not yet found insert deviate
-      if (smallest_deviate.find(payload.label_) == end(smallest_deviate) 
-            || smallest_deviate[payload.label_] > payload.deviate_) {
-        smallest_deviate[payload.label_] = payload.deviate_;
-        label_shortcut_[payload.label_] = GetParent(v);
+      VertexID label = payload.label_;
+      VertexID deviate = payload.deviate_;
+      VertexID root = payload.root_;
+      if (smallest_deviate[label].first > deviate) {
+        smallest_deviate[label].first = deviate;
+        smallest_deviate[label].second = GetParent(v);
       }
     });
+
+    // Set actual shortcuts
+    for (auto &kv : smallest_deviate) 
+      label_shortcut_[kv.first] = kv.second.second;
   }
 
   void ContractExponential() {
-    // // How big are the "balls"
-    // std::vector<VertexID> vertices;
-    // std::vector<int> num_vertices_per_pe(size_);
-    // std::vector<VertexID> labels;
-    // std::vector<std::pair<VertexID, VertexID>> edges;
-    // GatherGraphOnRoot(vertices, num_vertices_per_pe, labels, edges);
-    // // Root computes labels
-    // if (rank_ == ROOT) {
-    //   // Build vertex mapping 
-    //   std::unordered_map<VertexID, int> vertex_map;
-    //   std::unordered_map<int, VertexID> reverse_vertex_map;
-    //   // TODO: Might be too small
-    //   int current_vertex = 0;
-    //   for (const VertexID &v : vertices) {
-    //     vertex_map[v] = current_vertex;
-    //     reverse_vertex_map[current_vertex++] = v;
-    //   }
-
-    //   // Build edge lists
-    //   std::vector<std::vector<int>> edge_lists(vertices.size());
-    //   for (const auto &e : edges) 
-    //     edge_lists[vertex_map[e.first]].push_back(vertex_map[e.second]);
-
-    //   // Construct temporary graph
-    //   GraphAccess sg(ROOT, 1);
-    //   sg.StartConstruct(vertices.size(), edges.size(), ROOT);
-    //   // TODO: Might be too small
-    //   for (int i = 0; i < vertices.size(); ++i) {
-    //     VertexID v = sg.AddVertex();
-    //     sg.SetVertexPayload(v, {sg.GetVertexDeviate(v), labels[v], ROOT});
-
-    //     for (const int &e : edge_lists[v]) 
-    //       sg.AddEdge(v, e, 1);
-    //   }
-    //   sg.FinishConstruct();
-    //   
-    //   google::sparse_hash_map<VertexID, VertexID> label_size;
-    //   sg.ForallLocalVertices([&](const VertexID v) {
-    //     VertexID ball_label = sg.GetVertexLabel(v); 
-    //     if (label_size.find(ball_label) == end(label_size))
-    //       label_size[ball_label] = 0;
-    //     label_size[ball_label]++;
-    //   });
-
-    //   google::sparse_hash_map<VertexID, VertexID> num_sizes;
-    //   for (auto &bucket : label_size) {
-    //     if (num_sizes.find(bucket.second) == end(num_sizes))
-    //       num_sizes[bucket.second] = 0;
-    //     num_sizes[bucket.second]++;
-    //   }
-
-    //   std::vector<std::pair<VertexID, VertexID>> balls;
-    //   balls.reserve(num_sizes.size());
-    //   for (auto &kv : num_sizes) {
-    //     balls.emplace_back(kv.first, kv.second);
-    //   }
-    //   std::sort(begin(balls), end(balls));
-
-    //   std::cout << "BALLS [ ";
-    //   for (auto &ball : balls)
-    //     std::cout << ball.first << "(" << ball.second << ") ";
-    //   std::cout << "]" << std::endl;
-    // }
-
     // Statistics
     Timer contract_timer;
     contract_timer.Restart();
@@ -267,21 +218,18 @@ class GraphAccess {
     // Determine edges to communicate
     // Gather labels to communicate
     VertexID offset = GatherNumberOfGlobalVertices();
-    google::sparse_hash_set<VertexID> send_ids;
+    google::dense_hash_set<VertexID> send_ids(size_); send_ids.set_empty_key(-1);
     std::vector<std::vector<VertexID>> send_buffers_a(size_);
     std::vector<std::vector<VertexID>> send_buffers_b(size_);
     std::vector<std::vector<VertexID>>* current_send_buffers = &send_buffers_a;
     std::vector<std::vector<VertexID>> receive_buffers(size_);
     for (int i = 0; i < size_; ++i) {
       send_buffers_a[i].clear();
-      // send_buffers_a[i].reserve(number_of_vertices_);
       send_buffers_b[i].clear();
-      // send_buffers_b[i].reserve(number_of_vertices_);
       receive_buffers[i].clear();
-      // receive_buffers[i].reserve(number_of_vertices_);
     }
 
-    google::sparse_hash_set<VertexID> inserted_edges;
+    google::dense_hash_set<VertexID> inserted_edges; inserted_edges.set_empty_key(-1);
     std::vector<std::vector<std::pair<VertexID, VertexID>>> edges_to_add(size_);
     ForallLocalVertices([&](VertexID v) {
       VertexID vlabel = GetVertexLabel(v);
@@ -295,7 +243,6 @@ class GraphAccess {
                 && IsLocalFromGlobal(vlabel)) {
             edges_to_add[wroot].emplace_back(vlabel, wlabel);
             inserted_edges.insert(update_id);
-            // std::cout << "R" << rank_ << " vlabel " << vlabel << " wlabel " << wlabel << " id " << update_id << std::endl;
             send_ids.insert(update_id);
             if (wroot == rank_) {
               edges_to_add[rank_].emplace_back(wlabel, vlabel);
@@ -320,6 +267,7 @@ class GraphAccess {
         removed_edges_.emplace(v, GetGlobalID(w));
       });
     });
+    // Sentinel
     removed_edges_.emplace(std::numeric_limits<VertexID>::max(), std::numeric_limits<VertexID>::max());
 
     // Get adjacency (otherwise we get deadlocks with added edges)
@@ -330,15 +278,17 @@ class GraphAccess {
       if (is_adj[pe]) num_adj++;
     }
 
-    // if (rank_ == ROOT) 
-    //   std::cout << "[STATUS] |--- Send done " 
-    //             << "[TIME] " << contract_timer.Elapsed() << std::endl;
+    if (rank_ == ROOT) 
+      std::cout << "[STATUS] |--- Send done " 
+                << "[INFO] messages "  << number_of_messages << " "
+                << "[TIME] " << contract_timer.Elapsed() << std::endl;
 
     // Propagate edge buffers until all vertices are converged
     std::vector<MPI_Request*> requests;
     requests.clear();
     int converged_globally = 0;
     int local_iterations = 0;
+    int exchanges = 0;
     while (converged_globally == 0) {
       int converged_locally = 1;
 
@@ -350,6 +300,7 @@ class GraphAccess {
           auto *req = new MPI_Request();
           MPI_Isend((*current_send_buffers)[pe].data(), static_cast<int>((*current_send_buffers)[pe].size()), MPI_VERTEX, pe, 0, MPI_COMM_WORLD, req);
           requests.emplace_back(req);
+          exchanges++;
         }
       }
 
@@ -438,13 +389,15 @@ class GraphAccess {
                       MPI_MIN,
                       MPI_COMM_WORLD);
       // } 
+      local_iterations++;
     }
-    // if (rank_ == ROOT) 
-    //   std::cout << "[STATUS] |--- Propagation done " 
-    //             << "[TIME] " << contract_timer.Elapsed() << std::endl;
-    //   std::cout << "[STATUS] |--- Rank " << rank_ 
-    //             << " Messages sent " << number_of_messages 
-    //             << " (own) " << self_messages << std::endl;
+
+    if (rank_ == ROOT) 
+      std::cout << "[STATUS] |--- Propagation done " 
+                << "[INFO] rounds "  << local_iterations << " "
+                << "[INFO] messages "  << number_of_messages << " "
+                << "[INFO] exchanges "  << exchanges << " "
+                << "[TIME] " << contract_timer.Elapsed() << std::endl;
 
     // Insert edges and keep corresponding vertices
     ForallLocalVertices([&](VertexID v) { RemoveAllEdges(v); });
@@ -479,12 +432,11 @@ class GraphAccess {
     VertexID number_of_messages = 0;
     VertexID self_messages = 0;
     
-    // if (rank_ == 0) OutputLocal();
-
     // Determine edges to communicate
     // Gather labels to communicate
     VertexID offset = GatherNumberOfGlobalVertices();
-    google::sparse_hash_set<VertexID> send_ids(size_);
+    // std::unordered_set<VertexID> send_ids(size_);
+    google::dense_hash_set<VertexID> send_ids(size_); send_ids.set_empty_key(-1);
     std::vector<std::vector<VertexID>> send_buffers_a(size_);
     std::vector<std::vector<VertexID>> send_buffers_b(size_);
     std::vector<std::vector<VertexID>>* current_send_buffers = &send_buffers_a;
@@ -498,7 +450,8 @@ class GraphAccess {
       receive_buffers[i].reserve(number_of_vertices_);
     }
 
-    google::sparse_hash_set<VertexID> inserted_edges;
+    // std::unordered_set<VertexID> inserted_edges;
+    google::dense_hash_set<VertexID> inserted_edges; inserted_edges.set_empty_key(-1);
     std::vector<std::vector<std::pair<VertexID, VertexID>>> edges_to_add(size_);
     ForallLocalVertices([&](VertexID v) {
       VertexID vlabel = GetVertexLabel(v);
@@ -533,9 +486,9 @@ class GraphAccess {
       if (is_adj[pe]) num_adj++;
     }
 
-    // if (rank_ == ROOT) 
-    //   std::cout << "[STATUS] |--- Send done " 
-    //             << "[TIME] " << contract_timer.Elapsed() << std::endl;
+    if (rank_ == ROOT) 
+      std::cout << "[STATUS] |--- Send done " 
+                << "[TIME] " << contract_timer.Elapsed() << std::endl;
 
     // Propagate edge buffers until all vertices are converged
     std::vector<MPI_Request*> requests;
@@ -653,12 +606,9 @@ class GraphAccess {
                     MPI_MIN,
                     MPI_COMM_WORLD);
     }
-    // if (rank_ == ROOT) 
+    if (rank_ == ROOT) 
     std::cout << "[STATUS] |--- Propagation done " 
               << "[TIME] " << contract_timer.Elapsed() << std::endl;
-    //   std::cout << "[STATUS] |--- Rank " << rank_ 
-    //             << " Messages sent " << number_of_messages 
-    //             << " (own) " << self_messages << std::endl;
 
     // Insert edges and keep corresponding vertices
     ForallLocalVertices([&](VertexID v) { RemoveAllEdges(v); });
@@ -681,9 +631,9 @@ class GraphAccess {
         vertex_payload_[wlocal] = {std::numeric_limits<VertexID>::max() - 1, wlabel, pe};
       }
     }
-    // if (rank_ == ROOT) 
-    //   std::cout << "[STATUS] |--- Insertion done " 
-    //             << "[TIME] " << contract_timer.Elapsed() << std::endl;
+    if (rank_ == ROOT) 
+      std::cout << "[STATUS] |--- Insertion done " 
+                << "[TIME] " << contract_timer.Elapsed() << std::endl;
   }
 
   void MoveUpContraction() {
@@ -692,7 +642,7 @@ class GraphAccess {
     removed_edges_.pop();
     while (contraction_level_ > 0) {
       // Remove current edges from current level
-      std::unordered_map<VertexID, VertexID> current_components;
+      google::dense_hash_map<VertexID, VertexID> current_components; current_components.set_empty_key(-1);
       ForallLocalVertices([&](VertexID v) {
         RemoveAllEdges(v);
       });
@@ -861,7 +811,7 @@ class GraphAccess {
   void OutputComponents() {
     VertexID global_num_vertices = GatherNumberOfGlobalVertices();
     // Gather component sizes
-    std::unordered_map<VertexID, VertexID> local_component_sizes;
+    google::dense_hash_map<VertexID, VertexID> local_component_sizes; local_component_sizes.set_empty_key(-1);
     ForallLocalVertices([&](const VertexID v) {
       VertexID c = GetVertexLabel(v);
       if (local_component_sizes.find(c) == end(local_component_sizes))
@@ -902,7 +852,7 @@ class GraphAccess {
                 ROOT, MPI_COMM_WORLD);
 
     if (rank_ == ROOT) {
-      std::unordered_map<VertexID, VertexID> global_component_sizes;
+      google::dense_hash_map<VertexID, VertexID> global_component_sizes; global_component_sizes.set_empty_key(-1);
       for (auto &comp : global_components) {
         VertexID c = comp.first;
         VertexID size = comp.second;
@@ -911,7 +861,7 @@ class GraphAccess {
         global_component_sizes[c] += size;
       }
 
-      std::unordered_map<VertexID, VertexID> condensed_component_sizes;
+      google::dense_hash_map<VertexID, VertexID> condensed_component_sizes; condensed_component_sizes.set_empty_key(-1);
       for (auto &cs : global_component_sizes) {
         VertexID c = cs.first;
         VertexID size = cs.second;
@@ -1115,10 +1065,10 @@ class GraphAccess {
     }
 
     // Gather local vertices
-    // std::vector<VertexID> local_vertices;
+    std::vector<VertexID> local_vertices;
     int num_local_vertices = 0;
     ForallLocalVertices([&](const VertexID &v) {
-      // local_vertices.push_back(v);
+      local_vertices.push_back(v);
       num_local_vertices++;
     });
 
@@ -1129,18 +1079,18 @@ class GraphAccess {
                  ROOT, MPI_COMM_WORLD);
 
     for (int i = 0; i < num_local_vertices; ++i) {
-      // VertexID v = local_vertices[i];
-      // std::cout << "R"  << rank_ << " i " << i << " v " << v << std::endl;
-      SetVertexPayload(i, {GetVertexDeviate(i), 
+      VertexID v = local_vertices[i];
+      SetVertexPayload(v, {GetVertexDeviate(v), 
                            local_labels[i], 
-                           GetVertexRoot(i)});
+                           GetVertexRoot(v)});
     }
-    // SendAndReceiveGhostVertices();
   }
 
   //////////////////////////////////////////////
   // I/O
   //////////////////////////////////////////////
+  bool CheckDuplicates();
+
   void OutputLocal();
 
   void OutputLabels();
@@ -1162,7 +1112,7 @@ class GraphAccess {
 
   // Shortcutting
   std::vector<VertexID> parent_;
-  google::sparse_hash_map<VertexID, VertexID> label_shortcut_;
+  google::dense_hash_map<VertexID, VertexID> label_shortcut_;
 
   VertexID number_of_vertices_;
   VertexID number_of_local_vertices_;
@@ -1176,7 +1126,7 @@ class GraphAccess {
   std::vector<std::pair<VertexID, VertexID>> offset_array_;
 
   VertexID ghost_offset_;
-  std::unordered_map<VertexID, VertexID> global_to_local_map_;
+  google::dense_hash_map<VertexID, VertexID> global_to_local_map_;
 
   // Contraction
   VertexID contraction_level_;

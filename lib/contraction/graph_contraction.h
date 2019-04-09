@@ -40,6 +40,7 @@ class Contraction {
         node_buffers_(size),
         edge_buffers_(size) {
     // local_edges_.set_empty_key(HashedEdge{0, 0, 0, 0});
+    local_components_.set_empty_key(-1);
   }
   virtual ~Contraction() = default;
 
@@ -72,7 +73,7 @@ class Contraction {
   // Component information
   VertexID num_smaller_components_, num_local_components_,
       num_global_components_;
-  std::unordered_set<VertexID> local_components_{};
+  google::dense_hash_set<VertexID> local_components_; 
 
   // Local edges
   EdgeHash local_edges_{};
@@ -113,7 +114,7 @@ class Contraction {
 
   void ComputeLocalContractionMapping() {
     // Map local components to contraction vertices O(n/P)
-    std::unordered_map<VertexID, VertexID> label_map;
+    google::dense_hash_map<VertexID, VertexID> label_map; label_map.set_empty_key(-1);
     VertexID current_component = num_smaller_components_;
     for (const VertexID c : local_components_) {
       label_map[c] = current_component++;
@@ -219,7 +220,7 @@ class Contraction {
     // Optimization for receiving largest component
     std::vector<VertexID> largest_components(size_, std::numeric_limits<VertexID>::max());
 
-    std::unordered_map<VertexID, std::vector<VertexID>> components_for_pe;
+    google::dense_hash_map<VertexID, std::vector<VertexID>> components_for_pe; components_for_pe.set_empty_key(-1);
     g_.ForallLocalVertices([&](const VertexID v) {
       if (g_.IsInterface(v)) components_for_pe[v].resize(size_, std::numeric_limits<VertexID>::max());
     });

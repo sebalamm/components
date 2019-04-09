@@ -59,6 +59,8 @@ struct Config {
   EdgeID gen_m;
   float gen_r;
   PEID gen_k;
+  float gen_gamma;
+  float gen_d;
 };
 
 #endif
