@@ -59,10 +59,12 @@ void ParseParameters(int argn, char **argv,
 
   // Generator
   conf.gen = args.Get<std::string>("gen", "gnm_undirected");
+  conf.gen_k = args.Get<PEID>("k", 0);
   conf.gen_n = 1 << args.Get<unsigned int>("n", 18);
   conf.gen_m = 1 << args.Get<unsigned int>("m", 20);
   conf.gen_r = args.Get<float>("r", 0.001);
-  conf.gen_k = args.Get<PEID>("k", 0);
+  conf.gen_gamma = args.Get<float>("gamma", 2.2);
+  conf.gen_d = args.Get<float>("d", 16.0);
 }
 
 #endif
