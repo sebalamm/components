@@ -117,14 +117,24 @@ class ShortcutPropagation {
     // Set vertex labels for contraction
     g.ForallLocalVertices([&](const VertexID v) {
       // g.SetVertexLabel(v, parent_[v]);
-      g.SetVertexPayload(v, {g.GetVertexDeviate(v), g.GetVertexLabel(parent_[v]), rank_});
+      g.SetVertexPayload(v, {g.GetVertexDeviate(v), 
+                             g.GetVertexLabel(parent_[v]), 
+#ifdef TIEBREAK_DEGREE
+                             0,
+#endif
+                             rank_});
     });
   }
 
   void PropagateLabels(GraphAccess &g) {
     g.ForallLocalVertices([&](const VertexID v) {
       if (labels_[v] < g.GetVertexLabel(v))
-        g.SetVertexPayload(v, {g.GetVertexDeviate(v), labels_[v], ranks_[v]});
+        g.SetVertexPayload(v, {g.GetVertexDeviate(v), 
+                               labels_[v], 
+#ifdef TIEBREAK_DEGREE
+                               0,
+#endif
+                               ranks_[v]});
       // std::cout << "[R" << rank_ << ":" << iteration_ << "]" << " v (" << g.GetGlobalID(v) << "," << labels_[v] << "," << ranks_[v] << ")" << std::endl;
     });
     g.SendAndReceiveGhostVertices();
@@ -325,7 +335,12 @@ class ShortcutPropagation {
   void ApplyToLocalComponents(GraphAccess &cag, GraphAccess &g) {
     g.ForallLocalVertices([&](const VertexID v) {
       VertexID cv = g.GetContractionVertex(v);
-      g.SetVertexPayload(v, {0, cag.GetVertexLabel(cag.GetLocalID(cv)), rank_});
+      g.SetVertexPayload(v, {0, 
+                             cag.GetVertexLabel(cag.GetLocalID(cv)), 
+#ifdef TIEBREAK_DEGREE
+                             0,
+#endif
+                             rank_});
     });
   }
 };

@@ -114,7 +114,12 @@ class ExponentialContraction {
     // Set vertex labels for contraction
     g.ForallLocalVertices([&](const VertexID v) {
       // g.SetVertexLabel(v, parent_[v]);
-      g.SetVertexPayload(v, {g.GetVertexDeviate(v), g.GetVertexLabel(parent_[v]), rank_});
+      g.SetVertexPayload(v, {g.GetVertexDeviate(v), 
+                             g.GetVertexLabel(parent_[v]), 
+#ifdef TIEBREAK_DEGREE
+                             0,
+#endif
+                             rank_});
     });
   }
 
@@ -185,9 +190,20 @@ class ExponentialContraction {
     g.ForallLocalVertices([&](const VertexID v) {
       // Set preliminary deviate
       g.SetParent(v, g.GetGlobalID(v));
-      LPFloat weight = static_cast<LPFloat>(log2(global_vertices) / g.GetVertexDegree(v));
+      LPFloat weight = 
+#ifdef TIEBREAK_DEGREE
+        static_cast<LPFloat>(g.GetVertexDegree(v) / g.GetMaxDegree());
+        // static_cast<LPFloat>(log2(g.GetNumberOfVertices()) / g.GetVertexDegree(v));
+        // 1.0;
+#else
+        1.0;
+#endif
       g.SetVertexPayload(v, {static_cast<VertexID>(weight * distribution(generator)),
-                             g.GetVertexLabel(v), g.GetVertexRoot(v)}, 
+                             g.GetVertexLabel(v), 
+#ifdef TIEBREAK_DEGREE
+                             g.GetVertexDegree(v),
+#endif
+                             g.GetVertexRoot(v)}, 
                          true);
 #ifndef NDEBUG
       std::cout << "[R" << rank_ << ":" << iteration_ << "] update deviate "
@@ -239,9 +255,18 @@ class ExponentialContraction {
           // Store neighbor label
           if (g.GetVertexDeviate(w) + 1 < smallest_payload.deviate_ ||
               (g.GetVertexDeviate(w) + 1 == smallest_payload.deviate_ &&
+#ifdef TIEBREAK_DEGREE
+                  g.GetVertexDegree(w) < smallest_payload.degree_)) {
+#else 
                   g.GetVertexLabel(w) < smallest_payload.label_)) {
+#endif
             g.SetParent(v, g.GetGlobalID(w));
-            smallest_payload = {g.GetVertexDeviate(w) + 1, g.GetVertexLabel(w),
+            smallest_payload = {g.GetVertexDeviate(w) + 1, 
+                                g.GetVertexLabel(w),
+#ifdef TIEBREAK_DEGREE
+                                // TODO: Retrieve degree from non-local vertices
+                                g.GetVertexDegree(w),
+#endif
                                 g.GetVertexRoot(w)};
             converged_locally = 0;
           }
@@ -289,7 +314,12 @@ class ExponentialContraction {
   void ApplyToLocalComponents(GraphAccess &cag, GraphAccess &g) {
     g.ForallLocalVertices([&](const VertexID v) {
       VertexID cv = g.GetContractionVertex(v);
-      g.SetVertexPayload(v, {0, cag.GetVertexLabel(cag.GetLocalID(cv)), rank_});
+      g.SetVertexPayload(v, {0, 
+                             cag.GetVertexLabel(cag.GetLocalID(cv)), 
+#ifdef TIEBREAK_DEGREE
+                             0,
+#endif
+                             rank_});
     });
   }
 
@@ -324,7 +354,12 @@ class ExponentialContraction {
       // TODO: Might be too small
       for (int i = 0; i < vertices.size(); ++i) {
         VertexID v = sg.AddVertex();
-        sg.SetVertexPayload(v, {sg.GetVertexDeviate(v), labels[v], ROOT});
+        sg.SetVertexPayload(v, {sg.GetVertexDeviate(v), 
+                                labels[v], 
+#ifdef TIEBREAK_DEGREE
+                                0,
+#endif
+                                ROOT});
 
         for (const int &e : edge_lists[v]) 
           sg.AddEdge(v, e, 1);

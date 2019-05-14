@@ -3,7 +3,7 @@
 #include "node_communicator.h"
 
 void NodeCommunicator::AddMessage(const VertexID v,
-                                      const VertexPayload &msg) {
+                                  const VertexPayload &msg) {
   g_->ForallNeighbors(v, [&](const VertexID u) {
     if (!g_->IsLocal(u)) {
       PEID neighbor = g_->GetPE(u);
@@ -13,6 +13,9 @@ void NodeCommunicator::AddMessage(const VertexID v,
         (*current_send_buffers_)[neighbor].emplace_back(msg.deviate_);
         (*current_send_buffers_)[neighbor].emplace_back(msg.label_);
         (*current_send_buffers_)[neighbor].emplace_back(msg.root_);
+#ifdef TIEBREAK_DEGREE
+        (*current_send_buffers_)[neighbor].emplace_back(msg.degree_);
+#endif
         packed_pes_[neighbor] = true;
 
         // if (g_->GetGlobalID(v) == 6) {
@@ -46,9 +49,14 @@ void NodeCommunicator::ReceiveMessages() {
              recv_tag_, communicator_, &rst);
     messages_recv++;
     // if (rank_ == 11) std::cout << "start ml " << message_length << std::endl;
-    if (message_length < 4) continue;
 
+#ifdef TIEBREAK_DEGREE
+    if (message_length < 5) continue;
+    for (int i = 0; i < message_length; i += 5) {
+#else 
+    if (message_length < 4) continue;
     for (int i = 0; i < message_length; i += 4) {
+#endif
     // if (rank_ == 0) std::cout 
     //                   << message[i] 
     //                   << " "
@@ -60,6 +68,9 @@ void NodeCommunicator::ReceiveMessages() {
       VertexID deviate = message[i + 1];
       VertexID label = message[i + 2];
       PEID root = static_cast<PEID>(message[i + 3]);
+#ifdef TIEBREAK_DEGREE
+      VertexID degree = message[i + 4];
+#endif
 // #ifndef NDEBUG
 // if (rank_ == 0) {
 //       std::cout << "[R" << rank_ << "] recv [" << local_id << "]("
@@ -71,7 +82,13 @@ void NodeCommunicator::ReceiveMessages() {
 //                 << std::endl;
 //     }
 // #endif
-      g_->HandleGhostUpdate(local_id, label, deviate, root);
+      g_->HandleGhostUpdate(local_id, 
+                            label, 
+                            deviate, 
+#ifdef TIEBREAK_DEGREE
+                            degree,
+#endif
+                            root);
     }
     // if (rank_ == 11) std::cout << "done" << std::endl;
   }

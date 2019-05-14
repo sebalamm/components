@@ -63,23 +63,45 @@ struct LocalVertexData {
 struct VertexPayload {
   VertexID deviate_;
   VertexID label_;
+#ifdef TIEBREAK_DEGREE
+  VertexID degree_;
+#endif
   PEID root_;
 
   VertexPayload()
       : deviate_(std::numeric_limits<VertexID>::max() - 1),
         label_(0),
+#ifdef TIEBREAK_DEGREE
+        degree_(0),
+#endif
         root_(0) {}
 
   VertexPayload(VertexID deviate,
                 VertexID label,
+#ifdef TIEBREAK_DEGREE
+                VertexID degree,
+#endif
                 PEID root)
       : deviate_(deviate),
         label_(label),
+#ifdef TIEBREAK_DEGREE
+        degree_(degree),
+#endif
         root_(root) {}
 
   bool operator==(const VertexPayload &rhs) const {
-    return std::tie(deviate_, label_, root_)
-        == std::tie(rhs.deviate_, rhs.label_, rhs.root_);
+    return std::tie(deviate_, 
+                    label_, 
+#ifdef TIEBREAK_DEGREE
+                    rhs.degree_,
+#endif
+                    root_)
+        == std::tie(rhs.deviate_, 
+                    rhs.label_, 
+#ifdef TIEBREAK_DEGREE
+                    rhs.degree_,
+#endif
+                    rhs.root_);
   }
 
   bool operator!=(const VertexPayload &rhs) const {
@@ -196,6 +218,9 @@ class GraphAccess {
       auto payload = GetVertexMessage(v);
       VertexID label = payload.label_;
       VertexID deviate = payload.deviate_;
+#ifdef TIEBREAK_DEGREE
+      VertexID degree = payload.degree_;
+#endif
       VertexID root = payload.root_;
       if (smallest_deviate[label].first > deviate) {
         smallest_deviate[label].first = deviate;
@@ -416,10 +441,21 @@ class GraphAccess {
         // Vertices remain active
         inactive_level_[vlocal] = -1;
         inactive_level_[wlocal] = -1;
-        vertex_payload_[vlocal] = {std::numeric_limits<VertexID>::max() - 1, vlabel, rank_};
-        vertex_payload_[wlocal] = {std::numeric_limits<VertexID>::max() - 1, wlabel, pe};
+        vertex_payload_[vlocal] = {std::numeric_limits<VertexID>::max() - 1, 
+                                   vlabel, 
+#ifdef TIEBREAK_DEGREE
+                                   0,
+#endif
+                                   rank_};
+        vertex_payload_[wlocal] = {std::numeric_limits<VertexID>::max() - 1, 
+                                   wlabel, 
+#ifdef TIEBREAK_DEGREE
+                                   0,
+#endif
+                                   pe};
       }
     }
+    max_degree_computed_ = false;
     // if (rank_ == ROOT) 
     //   std::cout << "[STATUS] |--- Insertion done " 
     //             << "[TIME] " << contract_timer.Elapsed() << std::endl;
@@ -627,8 +663,18 @@ class GraphAccess {
         // Vertices remain active
         inactive_level_[vlocal] = -1;
         inactive_level_[wlocal] = -1;
-        vertex_payload_[vlocal] = {std::numeric_limits<VertexID>::max() - 1, vlabel, rank_};
-        vertex_payload_[wlocal] = {std::numeric_limits<VertexID>::max() - 1, wlabel, pe};
+        vertex_payload_[vlocal] = {std::numeric_limits<VertexID>::max() - 1, 
+                                   vlabel, 
+#ifdef TIEBREAK_DEGREE
+                                   0,
+#endif
+                                   rank_};
+        vertex_payload_[wlocal] = {std::numeric_limits<VertexID>::max() - 1, 
+                                   wlabel, 
+#ifdef TIEBREAK_DEGREE
+                                   0,
+#endif
+                                   pe};
       }
     }
     if (rank_ == ROOT) 
@@ -667,7 +713,12 @@ class GraphAccess {
 
       // Update local labels
       ForallLocalVertices([&](VertexID v) {
-        ForceVertexPayload(v, {0, GetVertexLabel(v), rank_});
+        ForceVertexPayload(v, {0, 
+                               GetVertexLabel(v), 
+#ifdef TIEBREAK_DEGREE
+                               0,
+#endif
+                               rank_});
       });
 
       // Propagate labels
@@ -681,7 +732,12 @@ class GraphAccess {
         ForallLocalVertices([&](VertexID v) {
           VertexID parent = GetParent(v);
           if (GetVertexLabel(GetLocalID(parent)) != GetVertexLabel(v)) {
-            SetVertexPayload(v, {0, GetVertexLabel(GetLocalID(parent)), rank_});
+            SetVertexPayload(v, {0, 
+                                 GetVertexLabel(GetLocalID(parent)), 
+#ifdef TIEBREAK_DEGREE
+                                 0,
+#endif
+                                 rank_});
             converged_locally = 0;
           }
         });
@@ -949,6 +1005,18 @@ class GraphAccess {
     return edges_[v].size();
   }
 
+  VertexID GetMaxDegree() {
+    if (!max_degree_computed_) {
+      max_degree_ = 0;
+      ForallVertices([&](const VertexID v) {
+          if (GetVertexDegree(v) > max_degree_) 
+            max_degree_ = GetVertexDegree(v);
+      });
+      max_degree_computed_ = true;
+    }
+    return max_degree_;
+  }
+
   //////////////////////////////////////////////
   // Manage ghost vertices
   //////////////////////////////////////////////
@@ -959,8 +1027,16 @@ class GraphAccess {
   inline void HandleGhostUpdate(const VertexID v,
                                 const VertexID label,
                                 const VertexID deviate,
+#ifdef TIEBREAK_DEGREE
+                                const VertexID degree,
+#endif
                                 const PEID root) {
-    SetVertexPayload(v, {deviate, label, root});
+    SetVertexPayload(v, {deviate, 
+                         label, 
+#ifdef TIEBREAK_DEGREE
+                         degree,
+#endif
+                         root});
   }
 
   //////////////////////////////////////////////
@@ -1082,6 +1158,9 @@ class GraphAccess {
       VertexID v = local_vertices[i];
       SetVertexPayload(v, {GetVertexDeviate(v), 
                            local_labels[i], 
+#ifdef TIEBREAK_DEGREE
+                           0,
+#endif
                            GetVertexRoot(v)});
     }
   }
@@ -1120,6 +1199,9 @@ class GraphAccess {
 
   EdgeID number_of_edges_;
   EdgeID number_of_global_edges_;
+
+  VertexID max_degree_;
+  bool max_degree_computed_;
 
   // Vertex mapping
   VertexID local_offset_;

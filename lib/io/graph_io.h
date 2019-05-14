@@ -79,7 +79,12 @@ class GraphIO {
 
     for (VertexID i = 0; i < number_of_local_vertices; ++i) {
       VertexID v = G.AddVertex();
-      G.SetVertexPayload(v, {G.GetVertexDeviate(v), from + v, rank});
+      G.SetVertexPayload(v, {G.GetVertexDeviate(v), 
+                             from + v, 
+#ifdef TIEBREAK_DEGREE
+                             0,
+#endif
+                             rank});
 
       for (VertexID w : local_edge_lists[v]) 
           G.AddEdge(v, w, size);
@@ -182,7 +187,12 @@ class GraphIO {
     for (VertexID i = 0; i < number_of_local_vertices; ++i) {
       VertexID v = G.AddVertex();
       // G.SetVertexLabel(v, from + v);
-      G.SetVertexPayload(v, {G.GetVertexDeviate(v), from + v, rank});
+      G.SetVertexPayload(v, {G.GetVertexDeviate(v), 
+                             from + v, 
+#ifdef TIEBREAK_DEGREE
+                             0,
+#endif
+                             rank});
 
       for (VertexID j : local_edge_lists[i])
         G.AddEdge(v, j - 1, size);

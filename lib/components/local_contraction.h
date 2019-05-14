@@ -98,7 +98,12 @@ class LocalContraction {
     // Set vertex labels for contraction
     g.ForallLocalVertices([&](const VertexID v) {
       // g.SetVertexLabel(v, parent_[v]);
-      g.SetVertexPayload(v, {g.GetVertexDeviate(v), g.GetVertexLabel(parent_[v]), rank_});
+      g.SetVertexPayload(v, {g.GetVertexDeviate(v), 
+                             g.GetVertexLabel(parent_[v]), 
+#ifdef TIEBREAK_DEGREE
+                             g.GetVertexDegree(v),
+#endif
+                             rank_});
     });
   }
 
@@ -139,7 +144,11 @@ class LocalContraction {
       //                        g.GetVertexLabel(v), g.GetVertexRoot(v)}, 
       //                    false);
       g.SetVertexPayload(v, {static_cast<VertexID>(distribution(generator)),
-                             g.GetVertexLabel(v), g.GetVertexRoot(v)}, 
+                             g.GetVertexLabel(v), 
+#ifdef TIEBREAK_DEGREE
+                             g.GetVertexDegree(v),
+#endif
+                             g.GetVertexRoot(v)}, 
                          true);
 #ifndef NDEBUG
       std::cout << "[R" << rank_ << ":" << iteration_ << "] update deviate "
@@ -162,8 +171,12 @@ class LocalContraction {
             (g.GetVertexDeviate(w) == n_smallest_neighbor[v].deviate_ &&
                 g.GetVertexLabel(w) < n_smallest_neighbor[v].label_)) {
           g.SetParent(v, g.GetGlobalID(w));
-          n_smallest_update[v] = {g.GetVertexDeviate(w), g.GetVertexLabel(w),
-                                 g.GetVertexRoot(w)};
+          n_smallest_update[v] = {g.GetVertexDeviate(w), 
+                                  g.GetVertexLabel(w),
+#ifdef TIEBREAK_DEGREE
+                                  g.GetVertexDegree(w),
+#endif
+                                  g.GetVertexRoot(w)};
         }
       });
     });
@@ -188,8 +201,12 @@ class LocalContraction {
             (g.GetVertexDeviate(w) == nn_smallest_neighbor[v].deviate_ &&
                 g.GetVertexLabel(w) < nn_smallest_neighbor[v].label_)) {
           g.SetParent(v, g.GetGlobalID(w));
-          nn_smallest_update[v] = {g.GetVertexDeviate(w), g.GetVertexLabel(w),
-                                 g.GetVertexRoot(w)};
+          nn_smallest_update[v] = {g.GetVertexDeviate(w), 
+                                   g.GetVertexLabel(w),
+#ifdef TIEBREAK_DEGREE
+                                   g.GetVertexDegree(w),
+#endif
+                                   g.GetVertexRoot(w)};
         }
       });
     });
@@ -225,7 +242,12 @@ class LocalContraction {
   void ApplyToLocalComponents(GraphAccess &cag, GraphAccess &g) {
     g.ForallLocalVertices([&](const VertexID v) {
       VertexID cv = g.GetContractionVertex(v);
-      g.SetVertexPayload(v, {0, cag.GetVertexLabel(cag.GetLocalID(cv)), rank_});
+      g.SetVertexPayload(v, {0, 
+                             cag.GetVertexLabel(cag.GetLocalID(cv)), 
+#ifdef TIEBREAK_DEGREE
+                             0,
+#endif
+                             rank_});
     });
   }
 
@@ -260,7 +282,12 @@ class LocalContraction {
       // TODO: Might be too small
       for (int i = 0; i < vertices.size(); ++i) {
         VertexID v = sg.AddVertex();
-        sg.SetVertexPayload(v, {sg.GetVertexDeviate(v), labels[v], ROOT});
+        sg.SetVertexPayload(v, {sg.GetVertexDeviate(v), 
+                                labels[v], 
+#ifdef TIEBREAK_DEGREE
+                                0,
+#endif
+                                ROOT});
 
         for (const int &e : edge_lists[v]) 
           sg.AddEdge(v, e, 1);

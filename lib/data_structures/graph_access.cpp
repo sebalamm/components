@@ -12,6 +12,8 @@ GraphAccess::GraphAccess(const PEID rank, const PEID size)
       number_of_global_vertices_(0),
       number_of_edges_(0),
       number_of_global_edges_(0),
+      max_degree_(0),
+      max_degree_computed_(false),
       local_offset_(0),
       ghost_offset_(0),
       contraction_level_(0),
@@ -85,8 +87,12 @@ EdgeID GraphAccess::AddEdge(VertexID from, VertexID to, PEID rank) {
       edges_[from].emplace_back(global_to_local_map_[to]);
       edges_[global_to_local_map_[to]].emplace_back(from);
       inactive_level_[global_to_local_map_[to]] = -1;
-      vertex_payload_[global_to_local_map_[to]] = 
-        {std::numeric_limits<VertexID>::max() - 1, GetVertexLabel(global_to_local_map_[to]), neighbor};
+      vertex_payload_[global_to_local_map_[to]] = {std::numeric_limits<VertexID>::max() - 1, 
+                                                   GetVertexLabel(global_to_local_map_[to]), 
+#ifdef TIEBREAK_DEGREE
+                                                   0,
+#endif
+                                                   neighbor};
     } else {
       global_to_local_map_[to] = number_of_vertices_++;
       edges_[from].emplace_back(global_to_local_map_[to]);
@@ -101,7 +107,12 @@ EdgeID GraphAccess::AddEdge(VertexID from, VertexID to, PEID rank) {
       SetAdjacentPE(neighbor, true);
       ghost_comm_->SetAdjacentPE(neighbor, true);
       // Contraction additions
-      vertex_payload_.emplace_back(std::numeric_limits<VertexID>::max() - 1, to, neighbor);
+      vertex_payload_.emplace_back(std::numeric_limits<VertexID>::max() - 1, 
+                                   to, 
+#ifdef TIEBREAK_DEGREE
+                                   0,
+#endif
+                                   neighbor);
     }
   }
 

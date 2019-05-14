@@ -110,6 +110,7 @@ class Contraction {
               MPI_COMM_WORLD);
 
     num_smaller_components_ = component_prefix_sum - num_local_components_;
+    // std::cout << "num small " << num_smaller_components_ << std::endl;
   }
 
   void ComputeLocalContractionMapping() {
@@ -198,18 +199,21 @@ class Contraction {
     });
 
     // Send ghost vertex updates O(cut size) (communication)
+    std::vector<MPI_Request*> requests;
+    requests.clear();
     for (PEID i = 0; i < size_; ++i) {
       if (g_.IsAdjacentPE(i)) {
         if (node_buffers_[i].empty()) 
           node_buffers_[i].push_back(0);
-        MPI_Request req;
+        auto *req = new MPI_Request();
         MPI_Isend(&node_buffers_[i][0],
                   static_cast<int>(node_buffers_[i].size()),
                   MPI_UNSIGNED_LONG,
                   i,
                   i + 6 * size_,
                   MPI_COMM_WORLD,
-                  &req);
+                  req);
+        requests.emplace_back(req);
       };
     }
 
@@ -266,6 +270,12 @@ class Contraction {
         });
       }
     });
+
+    for (unsigned int i = 0; i < requests.size(); ++i) {
+      MPI_Status st;
+      MPI_Wait(requests[i], &st);
+      delete requests[i];
+    }
   }
 
   // TODO: Do we need this and the next step?
@@ -289,17 +299,20 @@ class Contraction {
 
   void ExchangeGhostContractionEdges() {
     // Send edges O(cut size) (communication)
+    std::vector<MPI_Request*> requests;
+    requests.clear();
     for (PEID i = 0; i < size_; ++i) {
       if (g_.IsAdjacentPE(i)) {
         if (edge_buffers_[i].empty()) edge_buffers_[i].push_back(0);
-        MPI_Request req;
+        auto *req = new MPI_Request();
         MPI_Isend(&edge_buffers_[i][0],
                   static_cast<int>(edge_buffers_[i].size()),
                   MPI_VERTEX,
                   i,
                   i + 7 * size_,
                   MPI_COMM_WORLD,
-                  &req);
+                  req);
+        requests.emplace_back(req);
       }
     }
 
@@ -332,13 +345,18 @@ class Contraction {
                                         st.MPI_SOURCE});
       }
     }
+
+    for (unsigned int i = 0; i < requests.size(); ++i) {
+      MPI_Status st;
+      MPI_Wait(requests[i], &st);
+      delete requests[i];
+    }
   }
 
   GraphAccess BuildLocalContractionGraph() {
     VertexID from = num_smaller_components_;
     VertexID to = num_smaller_components_ + num_local_components_ - 1;
 
-    // TODO: Can we do this without communicating?
     EdgeID edge_counter = 0;
     std::vector<std::vector<std::pair<VertexID, VertexID>>>
         local_edge_lists(num_local_components_);
@@ -365,7 +383,12 @@ class Contraction {
     for (VertexID i = 0; i < num_local_components_; ++i) {
       VertexID v = cg.AddVertex();
       // cg.SetVertexLabel(v, from + v);
-      cg.SetVertexPayload(v, {cg.GetVertexDeviate(v), from + v, rank_});
+      cg.SetVertexPayload(v, {cg.GetVertexDeviate(v), 
+                              from + v, 
+#ifdef TIEBREAK_DEGREE
+                              0,
+#endif
+                              rank_});
 
       for (auto &j : local_edge_lists[i]) {
         VertexID target = j.first;

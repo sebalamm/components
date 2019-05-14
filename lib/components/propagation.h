@@ -59,7 +59,11 @@ class Propagation {
       });
       // g.SetVertexLabel(v, min_label);
       g.SetVertexPayload(v,
-                         {g.GetVertexDeviate(v), min_label,
+                         {g.GetVertexDeviate(v), 
+                          min_label,
+#ifdef TIEBREAK_DEGREE
+                          0,
+#endif
                           g.GetVertexRoot(v)});
     });
   }
