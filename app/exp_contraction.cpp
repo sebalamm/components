@@ -101,7 +101,7 @@ GraphAccess G = GraphIO::ReadDistributedEdgeList(conf, rank, size, MPI_COMM_WORL
     local_time = t.Elapsed();
     MPI_Reduce(&local_time, &total_time, 1, MPI_DOUBLE, MPI_MAX, ROOT,
                MPI_COMM_WORLD);
-    if (rank == ROOT) stats.Push(1000.0 * total_time);
+    if (rank == ROOT) stats.Push(total_time);
     
     // Print labels
     G.OutputComponents();

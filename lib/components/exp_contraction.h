@@ -192,9 +192,9 @@ class ExponentialContraction {
       g.SetParent(v, g.GetGlobalID(v));
       LPFloat weight = 
 #ifdef TIEBREAK_DEGREE
-        static_cast<LPFloat>(g.GetVertexDegree(v) / g.GetMaxDegree());
+        // static_cast<LPFloat>(g.GetVertexDegree(v) / g.GetMaxDegree());
         // static_cast<LPFloat>(log2(g.GetNumberOfVertices()) / g.GetVertexDegree(v));
-        // 1.0;
+        1.0;
 #else
         1.0;
 #endif
