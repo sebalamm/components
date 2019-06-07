@@ -24,11 +24,13 @@
 
 #include <queue>
 
+#include "base_graph_access.h"
 #include "graph_access.h"
 
+template <typename GraphInputType>
 class Utility {
  public:
-  static void BFS(GraphAccess &g,
+  static void BFS(GraphInputType &g,
                   const VertexID &start,
                   std::vector<bool> &marked,
                   std::vector<VertexID> &parent) {
