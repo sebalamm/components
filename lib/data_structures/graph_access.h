@@ -1213,7 +1213,7 @@ class GraphAccess {
   // Contraction
   VertexID contraction_level_;
   std::vector<VertexID> contraction_vertices_;
-  std::vector<LONG> inactive_level_;
+  std::vector<short> inactive_level_;
   std::stack<std::pair<VertexID, VertexID>> removed_edges_;
 
   // Adjacent PEs

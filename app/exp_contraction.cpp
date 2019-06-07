@@ -66,7 +66,7 @@ else {
 }
 if (rank == ROOT) 
   std::cout << "Graph generated" << std::endl;
-GraphAccess G = GraphIO::ReadDistributedEdgeList(conf, rank, size, MPI_COMM_WORLD, edge_list);
+  GraphAccess G = GraphIO::ReadDistributedEdgeList(conf, rank, size, MPI_COMM_WORLD, edge_list);
   // GraphAccess G = GraphIO::ReadDistributedGraph(conf, rank, size, MPI_COMM_WORLD);
 
   VertexID n = G.GatherNumberOfGlobalVertices();

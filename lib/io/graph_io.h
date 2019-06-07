@@ -30,6 +30,8 @@
 #include <sstream>
 #include <vector>
 
+#include "sys/types.h"
+#include "sys/sysinfo.h"
 #include "config.h"
 #include "graph_access.h"
 
@@ -58,6 +60,10 @@ class GraphIO {
       number_of_local_edges++;
     }
 
+    std::cout << "rank " << rank << " from " << from << " to " << to
+              << " num vertices " << number_of_local_vertices
+              << " num edges " << number_of_local_edges << std::endl;
+
     // Add datatype
     MPI_Datatype MPI_COMP;
     MPI_Type_vector(1, 2, 0, MPI_VERTEX, &MPI_COMP);
@@ -68,15 +74,47 @@ class GraphIO {
     std::vector<std::pair<VertexID, VertexID>> vertex_dist(size);
     MPI_Allgather(&range, 1, MPI_COMP,
                   &vertex_dist[0], 1, MPI_COMP, comm);
-    std::cout << "rank " << rank << " from " << from << " to " << to
-              << " amount " << number_of_local_vertices << std::endl;
+
+
+	struct sysinfo memInfo;
+	sysinfo (&memInfo);
+	long long totalPhysMem = memInfo.totalram;
+	long long freePhysMem = memInfo.freeram;
+	//Add other values in next statement to avoid int overflow on right hand side...
+	totalPhysMem *= memInfo.mem_unit;
+	freePhysMem *= memInfo.mem_unit;
+	totalPhysMem *= 1e-9;
+	freePhysMem *= 1e-9;
+	
+    if (rank == ROOT) std::cout << "building graph... mem" << freePhysMem << std::endl;
+
+	sysinfo (&memInfo);
+	totalPhysMem = memInfo.totalram;
+	freePhysMem = memInfo.freeram;
+	//Add other values in next statement to avoid int overflow on right hand side...
+	totalPhysMem *= memInfo.mem_unit;
+	freePhysMem *= memInfo.mem_unit;
+	totalPhysMem *= 1e-9;
+	freePhysMem *= 1e-9;
 
     // Build graph
     GraphAccess G(rank, size);
+    if (rank == ROOT) std::cout << "start construct... mem " << freePhysMem << std::endl;
     G.StartConstruct(number_of_local_vertices, 2 * number_of_local_edges, from);
 
+    if (rank == ROOT) std::cout << "compute offsets..." << std::endl;
     G.SetOffsetArray(std::move(vertex_dist));
 
+	sysinfo (&memInfo);
+	totalPhysMem = memInfo.totalram;
+	freePhysMem = memInfo.freeram;
+	//Add other values in next statement to avoid int overflow on right hand side...
+	totalPhysMem *= memInfo.mem_unit;
+	freePhysMem *= memInfo.mem_unit;
+	totalPhysMem *= 1e-9;
+	freePhysMem *= 1e-9;
+
+    if (rank == ROOT) std::cout << "add vertices... mem " << freePhysMem << std::endl;
     for (VertexID i = 0; i < number_of_local_vertices; ++i) {
       VertexID v = G.AddVertex();
       G.SetVertexPayload(v, {G.GetVertexDeviate(v), 
@@ -90,6 +128,7 @@ class GraphIO {
           G.AddEdge(v, w, size);
     }
 
+    if (rank == ROOT) std::cout << "finish" << std::endl;
     G.FinishConstruct();
 
     return G;
