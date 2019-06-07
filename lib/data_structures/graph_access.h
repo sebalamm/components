@@ -43,22 +43,7 @@
 
 #include "config.h"
 #include "timer.h"
-
-struct Vertex {
-  EdgeID first_edge_;
-
-  Vertex() : first_edge_(0) {}
-  explicit Vertex(EdgeID e) : first_edge_(e) {}
-};
-
-struct LocalVertexData {
-  bool is_interface_vertex_;
-
-  LocalVertexData()
-      : is_interface_vertex_(false) {}
-  LocalVertexData(const VertexID id, bool interface)
-      : is_interface_vertex_(interface) {}
-};
+#include "base_graph_access.h"
 
 struct VertexPayload {
   VertexID deviate_;
@@ -107,23 +92,6 @@ struct VertexPayload {
   bool operator!=(const VertexPayload &rhs) const {
     return !(*this == rhs);
   }
-};
-
-struct GhostVertexData {
-  PEID rank_;
-  VertexID global_id_;
-
-  GhostVertexData()
-      : rank_(0), global_id_(0) {}
-  GhostVertexData(PEID rank, VertexID global_id)
-      : rank_(rank), global_id_(global_id) {}
-};
-
-struct Edge {
-  VertexID target_;
-
-  Edge() : target_(0) {}
-  explicit Edge(VertexID target) : target_(target) {}
 };
 
 class NodeCommunicator;
@@ -862,84 +830,6 @@ class GraphAccess {
                   MPI_COMM_WORLD);
     number_of_global_edges_ /= 2;
     return number_of_global_edges_;
-  }
-
-  void OutputComponents() {
-    VertexID global_num_vertices = GatherNumberOfGlobalVertices();
-    // Gather component sizes
-    google::dense_hash_map<VertexID, VertexID> local_component_sizes; local_component_sizes.set_empty_key(-1);
-    ForallLocalVertices([&](const VertexID v) {
-      VertexID c = GetVertexLabel(v);
-      if (local_component_sizes.find(c) == end(local_component_sizes))
-        local_component_sizes[c] = 0;
-      local_component_sizes[c]++;
-    });
-
-    // Gather component message
-    std::vector<std::pair<VertexID, VertexID>> local_components;
-    // local_components.reserve(local_component_sizes.size());
-    for(auto &kv : local_component_sizes)
-      local_components.emplace_back(kv.first, kv.second);
-    // TODO [MEMORY]: Might be too small
-    int num_local_components = local_components.size();
-
-    // Exchange number of local components
-    std::vector<int> num_components(size_);
-    MPI_Gather(&num_local_components, 1, MPI_INT, &num_components[0], 1, MPI_INT, ROOT, MPI_COMM_WORLD);
-
-    // Compute diplacements
-    std::vector<int> displ_components(size_, 0);
-    // TODO [MEMORY]: Might be too small
-    int num_global_components = 0;
-    for (PEID i = 0; i < size_; ++i) {
-      displ_components[i] = num_global_components;
-      num_global_components += num_components[i];
-    }
-
-    // Add datatype
-    MPI_Datatype MPI_COMP;
-    MPI_Type_vector(1, 2, 0, MPI_VERTEX, &MPI_COMP);
-    MPI_Type_commit(&MPI_COMP);
-
-    // Exchange components
-    std::vector<std::pair<VertexID, VertexID>> global_components(num_global_components);
-    MPI_Gatherv(&local_components[0], num_local_components, MPI_COMP,
-                &global_components[0], &num_components[0], &displ_components[0], MPI_COMP,
-                ROOT, MPI_COMM_WORLD);
-
-    if (rank_ == ROOT) {
-      google::dense_hash_map<VertexID, VertexID> global_component_sizes; global_component_sizes.set_empty_key(-1);
-      for (auto &comp : global_components) {
-        VertexID c = comp.first;
-        VertexID size = comp.second;
-        if (global_component_sizes.find(c) == end(global_component_sizes))
-          global_component_sizes[c] = 0;
-        global_component_sizes[c] += size;
-      }
-
-      google::dense_hash_map<VertexID, VertexID> condensed_component_sizes; condensed_component_sizes.set_empty_key(-1);
-      for (auto &cs : global_component_sizes) {
-        VertexID c = cs.first;
-        VertexID size = cs.second;
-        if (condensed_component_sizes.find(size) == end(condensed_component_sizes)) {
-          condensed_component_sizes[size] = 0;
-        }
-        condensed_component_sizes[size]++;
-      }
-
-      // Build final vector
-      std::vector<std::pair<VertexID, VertexID>> components;
-      components.reserve(condensed_component_sizes.size());
-      for(auto &kv : condensed_component_sizes)
-        components.emplace_back(kv.first, kv.second);
-      std::sort(begin(components), end(components));
-
-      std::cout << "COMPONENTS [ ";
-      for (auto &comp : components)
-        std::cout << comp.first << "(" << comp.second << ") ";
-      std::cout << "]" << std::endl;
-    }
-
   }
 
   void SetVertexPayload(VertexID v, VertexPayload &&msg, bool propagate = true);

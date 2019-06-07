@@ -31,14 +31,14 @@
 #include <vector>
 
 #include "config.h"
-#include "graph_access.h"
+#include "base_graph_access.h"
 
 class GraphIO {
  public:
   GraphIO() = default;
   virtual ~GraphIO() = default;
 
-  static GraphAccess ReadDistributedEdgeList(Config &config, PEID rank,
+  static BaseGraphAccess ReadDistributedEdgeList(Config &config, PEID rank,
                                              PEID size, const MPI_Comm &comm,
                                              auto &edge_list) {
     // Gather local edge lists (transpose)
@@ -72,20 +72,13 @@ class GraphIO {
               << " amount " << number_of_local_vertices << std::endl;
 
     // Build graph
-    GraphAccess G(rank, size);
+    BaseGraphAccess G(rank, size);
     G.StartConstruct(number_of_local_vertices, 2 * number_of_local_edges, from);
 
     G.SetOffsetArray(std::move(vertex_dist));
 
     for (VertexID i = 0; i < number_of_local_vertices; ++i) {
       VertexID v = G.AddVertex();
-      G.SetVertexPayload(v, {G.GetVertexDeviate(v), 
-                             from + v, 
-#ifdef TIEBREAK_DEGREE
-                             0,
-#endif
-                             rank});
-
       for (VertexID w : local_edge_lists[v]) 
           G.AddEdge(v, w, size);
     }
@@ -95,7 +88,7 @@ class GraphIO {
     return G;
   }
 
-  static GraphAccess ReadDistributedGraph(Config &config, PEID rank,
+  static BaseGraphAccess ReadDistributedGraph(Config &config, PEID rank,
                                           PEID size, const MPI_Comm &comm) {
     std::string line;
     std::string filename(config.input_file);
@@ -179,21 +172,13 @@ class GraphIO {
 
     MPI_Barrier(comm);
 
-    GraphAccess G(rank, size);
+    BaseGraphAccess G(rank, size);
     G.StartConstruct(number_of_local_vertices, 2 * edge_counter, from);
 
     G.SetOffsetArray(std::move(vertex_dist));
 
     for (VertexID i = 0; i < number_of_local_vertices; ++i) {
       VertexID v = G.AddVertex();
-      // G.SetVertexLabel(v, from + v);
-      G.SetVertexPayload(v, {G.GetVertexDeviate(v), 
-                             from + v, 
-#ifdef TIEBREAK_DEGREE
-                             0,
-#endif
-                             rank});
-
       for (VertexID j : local_edge_lists[i])
         G.AddEdge(v, j - 1, size);
     }

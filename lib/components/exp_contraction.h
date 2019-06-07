@@ -30,6 +30,7 @@
 #include "definitions.h"
 #include "graph_io.h"
 #include "graph_access.h"
+#include "base_graph_access.h"
 #include "graph_contraction.h"
 #include "utils.h"
 #include "union_find.h"
@@ -44,24 +45,32 @@ class ExponentialContraction {
         iteration_(0) {}
   virtual ~ExponentialContraction() = default;
 
-  void FindComponents(GraphAccess &g) {
-    Timer t;
-    t.Restart();
+  void FindComponents(BaseGraphAccess &g, std::vector<VertexID> &g_labels) {
     rng_offset_ = size_ + config_.seed;
-    if (config_.use_contraction) {
-      FindLocalComponents(g);
-      Contraction cont(g, rank_, size_);
-      GraphAccess cag = cont.BuildComponentAdjacencyGraph();
-      FindLocalComponents(cag);
-      Contraction ccont(cag, rank_, size_);
-      GraphAccess ccag = ccont.BuildComponentAdjacencyGraph();
-      // rng_offset_ = ccag.GatherNumberOfGlobalVertices();
+    FindLocalComponents(g, g_labels);
 
-      PerformDecomposition(ccag);
+    // First round of contraction
+    Contraction<BaseGraphAccess> 
+      first_contraction(g, g_labels, rank_, size_);
+    BaseGraphAccess cag 
+      = first_contraction.ReduceBaseGraph();
 
-      ApplyToLocalComponents(ccag, cag);
-      ApplyToLocalComponents(cag, g);
-    } else PerformDecomposition(g);
+    std::vector<VertexID> cag_labels(g.GetNumberOfVertices(), 0);
+    FindLocalComponents(cag, cag_labels);
+
+    // Second round of contraction
+    Contraction<BaseGraphAccess> 
+      second_contraction(cag, cag_labels, rank_, size_);
+    GraphAccess ccag 
+      = second_contraction.BuildComponentAdjacencyGraph();
+
+    // Main decomposition algorithm
+    PerformDecomposition(ccag);
+
+    // CCAG -> CAG (labels)
+    ApplyToLocalComponents(ccag, cag, cag_labels);
+    // CAG (labels) -> G (labels)
+    ApplyToLocalComponents(cag, cag_labels, g, g_labels);
   }
 
   void Output(GraphAccess &g) {
@@ -81,7 +90,6 @@ class ExponentialContraction {
   VertexID rng_offset_;
 
   // Local components
-  std::vector<VertexID> parent_;
 
   // Statistics
   Timer iteration_timer_;
@@ -100,26 +108,22 @@ class ExponentialContraction {
     PropagateLabelsUp(g);
   }
 
-  void FindLocalComponents(GraphAccess &g) {
-    Timer t;
-    t.Restart();
+  void FindLocalComponents(BaseGraphAccess &g, std::vector<VertexID> & label) {
     std::vector<bool> marked(g.GetNumberOfVertices(), false);
-    parent_.resize(g.GetNumberOfVertices());
+    std::vector<VertexID> parent(g.GetNumberOfVertices(), 0);
+
+    g.ForallVertices([&](const VertexID v) {
+      label[v] = g.GetGlobalID(v);
+    });
 
     // Compute components
     g.ForallLocalVertices([&](const VertexID v) {
-      if (!marked[v]) Utility::BFS(g, v, marked, parent_);
+      if (!marked[v]) Utility<BaseGraphAccess>::BFS(g, v, marked, parent);
     });
 
-    // Set vertex labels for contraction
+    // Set vertex labe for contraction
     g.ForallLocalVertices([&](const VertexID v) {
-      // g.SetVertexLabel(v, parent_[v]);
-      g.SetVertexPayload(v, {g.GetVertexDeviate(v), 
-                             g.GetVertexLabel(parent_[v]), 
-#ifdef TIEBREAK_DEGREE
-                             0,
-#endif
-                             rank_});
+      label[v] = label[parent[v]];
     });
   }
 
@@ -311,15 +315,17 @@ class ExponentialContraction {
     g.MoveUpContraction();
   }
 
-  void ApplyToLocalComponents(GraphAccess &cag, GraphAccess &g) {
+  void ApplyToLocalComponents(GraphAccess &cag, BaseGraphAccess &g, std::vector<VertexID> &g_label) {
     g.ForallLocalVertices([&](const VertexID v) {
-      VertexID cv = g.GetContractionVertex(v);
-      g.SetVertexPayload(v, {0, 
-                             cag.GetVertexLabel(cag.GetLocalID(cv)), 
-#ifdef TIEBREAK_DEGREE
-                             0,
-#endif
-                             rank_});
+      VertexID cv = cag.GetLocalID(g.GetContractionVertex(v));
+      g_label[v] = cag.GetVertexLabel(cv);
+    });
+  }
+
+  void ApplyToLocalComponents(BaseGraphAccess &cag, std::vector<VertexID> &cag_label, BaseGraphAccess &g, std::vector<VertexID> &g_label) {
+    g.ForallLocalVertices([&](const VertexID v) {
+      VertexID cv = cag.GetLocalID(g.GetContractionVertex(v));
+      g_label[v] = cag_label[cv];
     });
   }
 
@@ -349,28 +355,15 @@ class ExponentialContraction {
         edge_lists[vertex_map[e.first]].push_back(vertex_map[e.second]);
 
       // Construct temporary graph
-      GraphAccess sg(ROOT, 1);
+      BaseGraphAccess sg(ROOT, 1);
       sg.StartConstruct(vertices.size(), edges.size(), ROOT);
-      // TODO: Might be too small
       for (int i = 0; i < vertices.size(); ++i) {
         VertexID v = sg.AddVertex();
-        sg.SetVertexPayload(v, {sg.GetVertexDeviate(v), 
-                                labels[v], 
-#ifdef TIEBREAK_DEGREE
-                                0,
-#endif
-                                ROOT});
-
         for (const int &e : edge_lists[v]) 
           sg.AddEdge(v, e, 1);
       }
       sg.FinishConstruct();
-      FindLocalComponents(sg);
-
-      // Gather labels
-      sg.ForallLocalVertices([&](const VertexID &v) {
-        labels[v] = sg.GetVertexLabel(v);
-      });
+      FindLocalComponents(sg, labels);
     }
 
     // Distribute labels to other PEs

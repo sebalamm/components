@@ -41,33 +41,31 @@ int main(int argn, char **argv) {
   Config conf;
   ParseParameters(argn, argv, conf);
 
-  // Parse for kagen input
-kagen::KaGen gen(rank, size);
-kagen::EdgeList edge_list;
-if (conf.gen == "gnm_undirected")
-    edge_list = gen.GenerateUndirectedGNM(conf.gen_n, conf.gen_m, conf.gen_k);
-else if (conf.gen == "rdg_2d")
-    edge_list = gen.Generate2DRDG(conf.gen_n, conf.gen_k);
-else if (conf.gen == "rdg_3d")
-    edge_list = gen.Generate3DRDG(conf.gen_n, conf.gen_k);
-else if (conf.gen == "rgg_2d")
-    edge_list = gen.Generate2DRGG(conf.gen_n, conf.gen_r, conf.gen_k);
-else if (conf.gen == "rgg_3d")
-    edge_list = gen.Generate3DRGG(conf.gen_n, conf.gen_r, conf.gen_k);
-else if (conf.gen == "rhg")
-    edge_list = gen.GenerateRHG(conf.gen_n, conf.gen_gamma, conf.gen_d, conf.gen_k);
-else if (conf.gen == "ba")
-    edge_list = gen.GenerateBA(conf.gen_n, conf.gen_d, conf.gen_k);
-else {
-  if (rank == ROOT) 
-    std::cout << "generator not supported" << std::endl;
-  MPI_Finalize();
-  exit(1);
-}
-if (rank == ROOT) 
-  std::cout << "Graph generated" << std::endl;
-GraphAccess G = GraphIO::ReadDistributedEdgeList(conf, rank, size, MPI_COMM_WORLD, edge_list);
-  // GraphAccess G = GraphIO::ReadDistributedGraph(conf, rank, size, MPI_COMM_WORLD);
+    // Parse for kagen input
+  kagen::KaGen gen(rank, size);
+  kagen::EdgeList edge_list;
+  if (conf.gen == "gnm_undirected")
+      edge_list = gen.GenerateUndirectedGNM(conf.gen_n, conf.gen_m, conf.gen_k);
+  else if (conf.gen == "rdg_2d")
+      edge_list = gen.Generate2DRDG(conf.gen_n, conf.gen_k);
+  else if (conf.gen == "rdg_3d")
+      edge_list = gen.Generate3DRDG(conf.gen_n, conf.gen_k);
+  else if (conf.gen == "rgg_2d")
+      edge_list = gen.Generate2DRGG(conf.gen_n, conf.gen_r, conf.gen_k);
+  else if (conf.gen == "rgg_3d")
+      edge_list = gen.Generate3DRGG(conf.gen_n, conf.gen_r, conf.gen_k);
+  else if (conf.gen == "rhg")
+      edge_list = gen.GenerateRHG(conf.gen_n, conf.gen_gamma, conf.gen_d, conf.gen_k);
+  else if (conf.gen == "ba")
+      edge_list = gen.GenerateBA(conf.gen_n, conf.gen_d, conf.gen_k);
+  else {
+    if (rank == ROOT) 
+      std::cout << "generator not supported" << std::endl;
+    MPI_Finalize();
+    exit(1);
+  }
+  if (rank == ROOT) std::cout << "Graph generated" << std::endl;
+  BaseGraphAccess G = GraphIO::ReadDistributedEdgeList(conf, rank, size, MPI_COMM_WORLD, edge_list);
 
   VertexID n = G.GatherNumberOfGlobalVertices();
   EdgeID m = G.GatherNumberOfGlobalEdges();
@@ -78,7 +76,6 @@ GraphAccess G = GraphIO::ReadDistributedEdgeList(conf, rank, size, MPI_COMM_WORL
               << "n=" << n << ", "
               << "m=" << m << std::endl;
   }
-  if (G.CheckDuplicates()) exit(1);
 
   // Timers
   Timer t;
@@ -88,6 +85,7 @@ GraphAccess G = GraphIO::ReadDistributedEdgeList(conf, rank, size, MPI_COMM_WORL
   double total_time = 0.0;
 
   int user_seed = conf.seed;
+  std::vector<VertexID> labels(G.GetNumberOfVertices(), 0);
   for (int i = 0; i < conf.iterations; ++i) {
     MPI_Barrier(MPI_COMM_WORLD);
     t.Restart();
@@ -95,16 +93,16 @@ GraphAccess G = GraphIO::ReadDistributedEdgeList(conf, rank, size, MPI_COMM_WORL
     // Determine labels
     conf.seed = user_seed + i;
     ExponentialContraction comp(conf, rank, size);
-    comp.FindComponents(G);
+    comp.FindComponents(G, labels);
 
     // Gather total time
     local_time = t.Elapsed();
     MPI_Reduce(&local_time, &total_time, 1, MPI_DOUBLE, MPI_MAX, ROOT,
                MPI_COMM_WORLD);
-    if (rank == ROOT) stats.Push(1000.0 * total_time);
+    if (rank == ROOT) stats.Push(total_time);
     
     // Print labels
-    G.OutputComponents();
+    G.OutputComponents(labels);
   }
 
   if (rank == ROOT) {

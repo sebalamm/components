@@ -28,51 +28,51 @@
 #include "config.h"
 #include "definitions.h"
 #include "graph_access.h"
+#include "base_graph_access.h"
 #include "edge_hash.h"
 
+template <typename GraphInputType>
 class Contraction {
  public:
-  Contraction(GraphAccess &g, const PEID rank, const PEID size)
-      : g_(g), rank_(rank), size_(size),
+  Contraction(GraphInputType &g, std::vector<VertexID> & vertex_labels, const PEID rank, const PEID size)
+      : g_(g), vertex_labels_(vertex_labels), rank_(rank), size_(size),
         num_smaller_components_(0),
         num_local_components_(0),
         num_global_components_(0),
-        node_buffers_(size),
-        edge_buffers_(size) {
-    // local_edges_.set_empty_key(HashedEdge{0, 0, 0, 0});
+        node_buffers_(size) {
     local_components_.set_empty_key(-1);
   }
   virtual ~Contraction() = default;
 
   GraphAccess BuildComponentAdjacencyGraph() {
-    Timer t;
-    t.Restart();
-    // if (rank_ == ROOT) std::cout << "[STATUS] |- Compute component prefix sum (" << t.Elapsed() << ")" << std::endl;
     ComputeComponentPrefixSum();
-    // if (rank_ == ROOT) std::cout << "[STATUS] |- Compute local contraction mapping (" << t.Elapsed() << ")" << std::endl;
     ComputeLocalContractionMapping();
-    // if (rank_ == ROOT) std::cout << "[STATUS] |- Exchange ghost contraction mapping (" << t.Elapsed() << ")" << std::endl;
     ExchangeGhostContractionMapping();
-
-    // if (rank_ == ROOT) std::cout << "[STATUS] |- Generate local contraction edges (" << t.Elapsed() << ")" << std::endl;
     GenerateLocalContractionEdges();
-    // if (rank_ == ROOT) std::cout << "[STATUS] |- Exchange ghost contraction edges (" << t.Elapsed() << ")" << std::endl;
-    // ExchangeGhostContractionEdges();
+    return BuildContractionGraph();
+  }
 
-    // if (rank_ == ROOT) std::cout << "[STATUS] |- Build local contration graph (" << t.Elapsed() << ")" << std::endl;
-    return BuildLocalContractionGraph();
+  BaseGraphAccess ReduceBaseGraph() {
+    ComputeComponentPrefixSum();
+    ComputeLocalContractionMapping();
+    ExchangeGhostContractionMapping();
+    GenerateLocalContractionEdges();
+    return BuildReducedBaseGraph();
   }
 
  private:
   // Original graph instance
-  GraphAccess &g_;
+  GraphInputType &g_;
+  std::vector<VertexID> &vertex_labels_;
 
   // Network information
   PEID rank_, size_;
 
   // Component information
-  VertexID num_smaller_components_, num_local_components_,
-      num_global_components_;
+  VertexID num_smaller_components_, 
+           num_local_components_,
+           num_global_components_;
+
   google::dense_hash_set<VertexID> local_components_; 
 
   // Local edges
@@ -80,18 +80,12 @@ class Contraction {
 
   // Send buffers
   std::vector<std::vector<VertexID>> node_buffers_;
-  std::vector<std::vector<VertexID>> edge_buffers_;
+
+  std::vector<bool> received_message_;
 
   void ComputeComponentPrefixSum() {
     // Gather local components O(max(#component))
-    num_local_components_ = 0;
-    g_.ForallLocalVertices([&](const VertexID v) {
-      VertexID v_label = g_.GetVertexLabel(v);
-      if (local_components_.find(v_label) == end(local_components_)) {
-        local_components_.insert(v_label);
-        num_local_components_++;
-      }
-    });
+    num_local_components_ = FindLocalComponents();
 
     // Build prefix sum over local components O(log P)
     VertexID component_prefix_sum;
@@ -102,6 +96,7 @@ class Contraction {
              MPI_SUM,
              MPI_COMM_WORLD);
 
+    // Broadcast number of global components
     num_global_components_ = component_prefix_sum;
     MPI_Bcast(&num_global_components_,
               1,
@@ -110,12 +105,23 @@ class Contraction {
               MPI_COMM_WORLD);
 
     num_smaller_components_ = component_prefix_sum - num_local_components_;
-    // std::cout << "num small " << num_smaller_components_ << std::endl;
+  }
+
+  VertexID FindLocalComponents() {
+    // Add local components to hash set
+    g_.ForallLocalVertices([&](const VertexID v) {
+      VertexID v_label = vertex_labels_[v];
+      if (local_components_.find(v_label) == end(local_components_)) {
+        local_components_.insert(v_label);
+      }
+    });
+    return local_components_.size();
   }
 
   void ComputeLocalContractionMapping() {
     // Map local components to contraction vertices O(n/P)
-    google::dense_hash_map<VertexID, VertexID> label_map; label_map.set_empty_key(-1);
+    google::dense_hash_map<VertexID, VertexID> label_map; 
+    label_map.set_empty_key(-1);
     VertexID current_component = num_smaller_components_;
     for (const VertexID c : local_components_) {
       label_map[c] = current_component++;
@@ -124,32 +130,58 @@ class Contraction {
     // Setup contraction vertices for local vertices O(n/P)
     g_.AllocateContractionVertices();
     g_.ForallLocalVertices([&](const VertexID v) {
-      g_.SetContractionVertex(v, label_map[g_.GetVertexLabel(v)]);
+      VertexID component = label_map[vertex_labels_[v]];
+      g_.SetContractionVertex(v, component);
+      // std::cout << "R" << rank_ << " v " << g_.GetGlobalID(v) << " set cid " << component << std::endl;
     });
   }
 
   void ExchangeGhostContractionMapping() {
-    std::vector<bool> packed_pes(size_, false);
-    std::vector<bool> largest_pes(size_, false);
+    IdentifyLargestInterfaceComponents();
+    AddComponentMessages();
 
-    google::dense_hash_map<VertexID, VertexID> component_sizes;
-    component_sizes.set_empty_key(std::numeric_limits<VertexID>::max());
-    std::vector<VertexID> largest_component_sizes(size_, 0);
-    std::vector<VertexID> largest_component_ids(size_, 0);
+    // Send ghost vertex updates O(cut size) (communication)
+    std::vector<MPI_Request*> requests = SendBuffers();
 
-    // Find largest components for each neighbor
+    google::dense_hash_map<PEID, VertexID> largest_component; 
+    google::dense_hash_map<VertexID, VertexID> vertex_message; 
+    largest_component.set_empty_key(-1); 
+    vertex_message.set_empty_key(-1);
+
+    received_message_.resize(g_.GetNumberOfVertices(), false);
+    ReceiveBuffers(largest_component, vertex_message);
+
+    ApplyUpdatesToGhostVertices(largest_component, vertex_message);
+    WaitForRequests(requests);
+  }
+
+  void IdentifyLargestInterfaceComponents() {
+    // Compute sizes of components for interface vertices
+    google::dense_hash_map<VertexID, VertexID> interface_component_size;
+    interface_component_size.set_empty_key(-1);
+
     g_.ForallLocalVertices([&](const VertexID v) {
       if (g_.IsInterface(v)) {
         VertexID cv = g_.GetContractionVertex(v);
-        if (component_sizes.find(cv) == component_sizes.end()) 
-          component_sizes[cv] = 0;
-        component_sizes[cv]++;
+        if (interface_component_size.find(cv) == interface_component_size.end()) 
+          interface_component_size[cv] = 0;
+        interface_component_size[cv]++;
+      }
+    });
+
+    std::vector<VertexID> largest_component_size(size_, 0);
+    std::vector<VertexID> largest_component_id(size_, 0);
+
+    // Identify largest component for each adjacent PE
+    g_.ForallLocalVertices([&](const VertexID v) {
+      if (g_.IsInterface(v)) {
+        VertexID cv = g_.GetContractionVertex(v);
         g_.ForallNeighbors(v, [&](const VertexID w) {
           if (!g_.IsLocal(w)) {
             PEID target_pe = g_.GetPE(w);
-            if (component_sizes[cv] > largest_component_sizes[target_pe]) {
-              largest_component_sizes[target_pe] = component_sizes[cv];
-              largest_component_ids[target_pe] = cv;
+            if (interface_component_size[cv] > largest_component_size[target_pe]) {
+              largest_component_size[target_pe] = interface_component_size[cv];
+              largest_component_id[target_pe] = cv;
             } 
           }
         });
@@ -157,39 +189,36 @@ class Contraction {
     });
 
     for (PEID i = 0; i < size_; ++i) {
-      if (largest_component_sizes[i] > 0) {
+      if (largest_component_size[i] > 0) {
         node_buffers_[i].push_back(std::numeric_limits<VertexID>::max()); 
-        node_buffers_[i].push_back(largest_component_ids[i]); 
+        node_buffers_[i].push_back(largest_component_id[i]); 
+        // std::cout << "R" << rank_ << " set largest " << largest_component_id[i] << " PE " << i << std::endl;
       }
     }
+  }
 
+  void AddComponentMessages() {
     // Helper functions
     auto pair = [&](VertexID x, VertexID y) {
       return static_cast<VertexID>((0.5 * ((x + y) * (x + y + 1))) + y);
     };
-
-    // auto depair = [&](VertexID z) {
-    //   VertexID w = static_cast<VertexID>(0.5 * (sqrt(8 * z + 1) - 1));
-    //   VertexID t = 0.5 * ((w * w) + w);
-    //   VertexID y = z - t;
-    //   VertexID x = w - y;
-    //   return std::make_pair(x, y);
-    // };
 
     // Gather components with the same neighbor
     google::sparse_hash_set<VertexID> unique_neighbors;
     g_.ForallLocalVertices([&](const VertexID v) {
       if (g_.IsInterface(v)) {
         g_.ForallNeighbors(v, [&](const VertexID w) {
-          // unique_neighbors[w][g_.GetContractionVertex(v)];   
           if (!g_.IsLocal(w)) {
             PEID target_pe = g_.GetPE(w);
             VertexID contraction_vertex = g_.GetContractionVertex(v);
-            if (contraction_vertex != largest_component_ids[target_pe]) {
+            VertexID largest_component = node_buffers_[target_pe][1];
+            // Only send message if not part of largest component
+            if (contraction_vertex != largest_component) {
+              // Avoid duplicates by hashing the message
               VertexID comp_pair = pair(w, g_.GetContractionVertex(v));
               if (unique_neighbors.find(comp_pair) == end(unique_neighbors)) {
                 unique_neighbors.insert(comp_pair);
-                node_buffers_[target_pe].push_back(g_.GetGlobalID(w));
+                node_buffers_[target_pe].push_back(g_.GetGlobalID(v));
                 node_buffers_[target_pe].push_back(contraction_vertex);
               }
             }
@@ -198,9 +227,12 @@ class Contraction {
       }
     });
 
-    // Send ghost vertex updates O(cut size) (communication)
+  }
+
+  std::vector<MPI_Request*> SendBuffers() {
     std::vector<MPI_Request*> requests;
     requests.clear();
+
     for (PEID i = 0; i < size_; ++i) {
       if (g_.IsAdjacentPE(i)) {
         if (node_buffers_[i].empty()) 
@@ -217,18 +249,15 @@ class Contraction {
       };
     }
 
+    return requests;
+  }
+
+  void ReceiveBuffers(google::dense_hash_map<PEID, VertexID> & largest_component, 
+                      google::dense_hash_map<VertexID, VertexID> & vertex_message) {
+    // Optimization for receiving largest component
     // Receive updates O(cut size)
     PEID num_adjacent_pes = g_.GetNumberOfAdjacentPEs();
     PEID recv_messages = 0;
-
-    // Optimization for receiving largest component
-    std::vector<VertexID> largest_components(size_, std::numeric_limits<VertexID>::max());
-
-    google::dense_hash_map<VertexID, std::vector<VertexID>> components_for_pe; components_for_pe.set_empty_key(-1);
-    g_.ForallLocalVertices([&](const VertexID v) {
-      if (g_.IsInterface(v)) components_for_pe[v].resize(size_, std::numeric_limits<VertexID>::max());
-    });
-
     while (recv_messages < num_adjacent_pes) {
       MPI_Status st{};
       MPI_Probe(MPI_ANY_SOURCE, rank_ + 6 * size_, MPI_COMM_WORLD, &st);
@@ -250,27 +279,32 @@ class Contraction {
       for (int i = 0; i < message_length - 1; i += 2) {
         VertexID global_id = message[i];
         VertexID contraction_id = message[i + 1];
-        if (global_id == std::numeric_limits<VertexID>::max())
-          largest_components[st.MPI_SOURCE] = contraction_id;
-        else 
-          components_for_pe[g_.GetLocalID(global_id)][st.MPI_SOURCE] = contraction_id;
+        if (global_id == std::numeric_limits<VertexID>::max()) {
+          largest_component[st.MPI_SOURCE] = contraction_id;
+        } else {
+          vertex_message[g_.GetLocalID(global_id)] = contraction_id;
+          received_message_[g_.GetLocalID(global_id)] = true;
+        }
       }
     }
+  }
 
-    // Apply labels
-    g_.ForallLocalVertices([&](const VertexID v) {
-      if (g_.IsInterface(v)) {
-        g_.ForallNeighbors(v, [&](const VertexID w) {
-          if (!g_.IsLocal(w)) {
-            if (components_for_pe[v][g_.GetPE(w)] != std::numeric_limits<VertexID>::max())
-              g_.SetContractionVertex(w, components_for_pe[v][g_.GetPE(w)]);
-            else 
-              g_.SetContractionVertex(w, largest_components[g_.GetPE(w)]);
-          }
-        });
+  void ApplyUpdatesToGhostVertices(google::dense_hash_map<PEID, VertexID> & largest_component, 
+                                   google::dense_hash_map<VertexID, VertexID> & vertex_message) {
+    g_.ForallGhostVertices([&](VertexID v) {
+      PEID pe = g_.GetPE(v);
+      VertexID cid = vertex_message[v];
+      if (received_message_[v]) {
+        g_.SetContractionVertex(v, cid);
+        // std::cout << "R" << rank_ << " v " << g_.GetGlobalID(v) << " cid(r) " << cid << std::endl;
+      } else {
+        g_.SetContractionVertex(v, largest_component[pe]);
+        // std::cout << "R" << rank_ << " v " << g_.GetGlobalID(v) << " cid(l) " << largest_component[pe] << std::endl;
       }
     });
+  }
 
+  void WaitForRequests(std::vector<MPI_Request*>& requests) {
     for (unsigned int i = 0; i < requests.size(); ++i) {
       MPI_Status st;
       MPI_Wait(requests[i], &st);
@@ -278,7 +312,6 @@ class Contraction {
     }
   }
 
-  // TODO: Do we need this and the next step?
   void GenerateLocalContractionEdges() {
     // Gather local edges (there shouldn't be any) O(m/P)
     g_.ForallLocalVertices([&](const VertexID v) {
@@ -289,71 +322,13 @@ class Contraction {
           auto h_edge = HashedEdge{num_global_components_, cv, cw, g_.GetPE(w)};
           if (local_edges_.find(h_edge) == end(local_edges_)) {
             local_edges_.insert(h_edge);
-            edge_buffers_[g_.GetPE(w)].push_back(cw);
-            edge_buffers_[g_.GetPE(w)].push_back(cv);
           }
         }
       });
     });
   }
 
-  void ExchangeGhostContractionEdges() {
-    // Send edges O(cut size) (communication)
-    std::vector<MPI_Request*> requests;
-    requests.clear();
-    for (PEID i = 0; i < size_; ++i) {
-      if (g_.IsAdjacentPE(i)) {
-        if (edge_buffers_[i].empty()) edge_buffers_[i].push_back(0);
-        auto *req = new MPI_Request();
-        MPI_Isend(&edge_buffers_[i][0],
-                  static_cast<int>(edge_buffers_[i].size()),
-                  MPI_VERTEX,
-                  i,
-                  i + 7 * size_,
-                  MPI_COMM_WORLD,
-                  req);
-        requests.emplace_back(req);
-      }
-    }
-
-    // Receive updates O(cut size)
-    PEID num_adjacent_pes = g_.GetNumberOfAdjacentPEs();
-    PEID recv_messages = 0;
-    while (recv_messages < num_adjacent_pes) {
-      MPI_Status st{};
-      MPI_Probe(MPI_ANY_SOURCE, rank_ + 7 * size_, MPI_COMM_WORLD, &st);
-
-      int message_length;
-      MPI_Get_count(&st, MPI_VERTEX, &message_length);
-      std::vector<VertexID> message(static_cast<unsigned long>(message_length));
-
-      MPI_Status rst{};
-      MPI_Recv(&message[0],
-               message_length,
-               MPI_VERTEX,
-               st.MPI_SOURCE,
-               rank_ + 7 * size_,
-               MPI_COMM_WORLD,
-               &rst);
-      recv_messages++;
-
-      if (message_length == 1) continue;
-      for (int i = 0; i < message_length - 1; i += 2) {
-        VertexID source = message[i];
-        VertexID target = message[i + 1];
-        local_edges_.insert(HashedEdge{num_global_components_, source, target,
-                                        st.MPI_SOURCE});
-      }
-    }
-
-    for (unsigned int i = 0; i < requests.size(); ++i) {
-      MPI_Status st;
-      MPI_Wait(requests[i], &st);
-      delete requests[i];
-    }
-  }
-
-  GraphAccess BuildLocalContractionGraph() {
+  GraphAccess BuildContractionGraph() {
     VertexID from = num_smaller_components_;
     VertexID to = num_smaller_components_ + num_local_components_ - 1;
 
@@ -390,6 +365,43 @@ class Contraction {
 #endif
                               rank_});
 
+      for (auto &j : local_edge_lists[i]) {
+        VertexID target = j.first;
+        cg.AddEdge(v, target, static_cast<PEID>(j.second));
+      }
+    }
+    cg.FinishConstruct();
+    return cg;
+  }
+
+  BaseGraphAccess BuildReducedBaseGraph() {
+    VertexID from = num_smaller_components_;
+    VertexID to = num_smaller_components_ + num_local_components_ - 1;
+
+    EdgeID edge_counter = 0;
+    std::vector<std::vector<std::pair<VertexID, VertexID>>>
+        local_edge_lists(num_local_components_);
+    for (const auto &e : local_edges_) {
+      // Edge runs between local vertices
+      if (from <= e.target && e.target < to) {
+        local_edge_lists[e.source - from].emplace_back(e.target - from, rank_);
+        local_edge_lists[e.target - from].emplace_back(e.source - from, rank_);
+        edge_counter += 2;
+      }
+      else {
+        local_edge_lists[e.source - from].emplace_back(e.target, e.rank);
+        edge_counter++;
+      }
+    }
+
+
+    BaseGraphAccess cg(rank_, size_);
+    cg.StartConstruct(num_local_components_,
+                      edge_counter,
+                      num_smaller_components_);
+
+    for (VertexID i = 0; i < num_local_components_; ++i) {
+      VertexID v = cg.AddVertex();
       for (auto &j : local_edge_lists[i]) {
         VertexID target = j.first;
         cg.AddEdge(v, target, static_cast<PEID>(j.second));
