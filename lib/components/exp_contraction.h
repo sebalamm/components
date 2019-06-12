@@ -31,6 +31,7 @@
 #include "graph_io.h"
 #include "graph_access.h"
 #include "base_graph_access.h"
+#include "initial_contraction.h"
 #include "graph_contraction.h"
 #include "utils.h"
 #include "union_find.h"
@@ -42,27 +43,38 @@ class ExponentialContraction {
       : rank_(rank),
         size_(size),
         config_(conf),
-        iteration_(0) {}
-  virtual ~ExponentialContraction() = default;
+        iteration_(0) { }
+
+  virtual ~ExponentialContraction() {
+    delete exp_contraction_;
+    exp_contraction_ = nullptr;
+  };
 
   void FindComponents(BaseGraphAccess &g, std::vector<VertexID> &g_labels) {
     rng_offset_ = size_ + config_.seed;
     FindLocalComponents(g, g_labels);
 
     // First round of contraction
-    Contraction<BaseGraphAccess> 
+    InitialContraction<BaseGraphAccess> 
       first_contraction(g, g_labels, rank_, size_);
     BaseGraphAccess cag 
       = first_contraction.ReduceBaseGraph();
+
+    // Delete original graph?
+    // Keep contraction labeling for later
 
     std::vector<VertexID> cag_labels(g.GetNumberOfVertices(), 0);
     FindLocalComponents(cag, cag_labels);
 
     // Second round of contraction
-    Contraction<BaseGraphAccess> 
+    InitialContraction<BaseGraphAccess> 
       second_contraction(cag, cag_labels, rank_, size_);
     GraphAccess ccag 
       = second_contraction.BuildComponentAdjacencyGraph();
+
+    // Delete intermediate graph?
+    // Keep contraction labeling for later
+    exp_contraction_ = new GraphContraction(ccag, rank_, size_);
 
     // Main decomposition algorithm
     PerformDecomposition(ccag);
@@ -89,10 +101,11 @@ class ExponentialContraction {
   unsigned int iteration_;
   VertexID rng_offset_;
 
-  // Local components
-
   // Statistics
   Timer iteration_timer_;
+  
+  // Contraction
+  GraphContraction *exp_contraction_;
 
   void PerformDecomposition(GraphAccess &g) {
     // if (rank_ == ROOT) std::cout << "[STATUS] |- Start exponential BFS" << std::endl;
@@ -105,7 +118,7 @@ class ExponentialContraction {
       else RunContraction(g);
     }
     // if (rank_ == ROOT) std::cout << "[STATUS] |- Propagate labels upward" << std::endl;
-    PropagateLabelsUp(g);
+    exp_contraction_->UndoContraction();
   }
 
   void FindLocalComponents(BaseGraphAccess &g, std::vector<VertexID> & label) {
@@ -299,7 +312,7 @@ class ExponentialContraction {
 
     // Determine remaining active vertices
     g.BuildLabelShortcuts();
-    g.ContractExponential();
+    exp_contraction_->ExponentialContraction();
 
     // Count remaining number of vertices
     global_vertices = g.GatherNumberOfGlobalVertices();
@@ -309,10 +322,6 @@ class ExponentialContraction {
         RunSequentialCC(g);
       else RunContraction(g);
     }
-  }
-
-  void PropagateLabelsUp(GraphAccess &g) {
-    g.MoveUpContraction();
   }
 
   void ApplyToLocalComponents(GraphAccess &cag, BaseGraphAccess &g, std::vector<VertexID> &g_label) {

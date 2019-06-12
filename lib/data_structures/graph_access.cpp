@@ -16,7 +16,6 @@ GraphAccess::GraphAccess(const PEID rank, const PEID size)
       max_degree_computed_(false),
       local_offset_(0),
       ghost_offset_(0),
-      contraction_level_(0),
       ghost_comm_(nullptr),
       vertex_counter_(0),
       edge_counter_(0) {
@@ -45,8 +44,8 @@ void GraphAccess::StartConstruct(const VertexID local_n,
   local_offset_ = local_offset;
   ghost_offset_ = local_n;
 
-  inactive_level_.resize(local_n, -1);
   parent_.resize(local_n);
+  is_active_.resize(local_n, true);
 
   adjacent_pes_.resize(static_cast<unsigned long>(size_), false);
 }
@@ -86,7 +85,8 @@ EdgeID GraphAccess::AddEdge(VertexID from, VertexID to, PEID rank) {
     if (IsGhostFromGlobal(to)) { // true if ghost already in map, otherwise false
       edges_[from].emplace_back(global_to_local_map_[to]);
       edges_[global_to_local_map_[to]].emplace_back(from);
-      inactive_level_[global_to_local_map_[to]] = -1;
+      // inactive_level_[global_to_local_map_[to]] = -1;
+      is_active_[global_to_local_map_[to]] = true;
       vertex_payload_[global_to_local_map_[to]] = {std::numeric_limits<VertexID>::max() - 1, 
                                                    GetVertexLabel(global_to_local_map_[to]), 
 #ifdef TIEBREAK_DEGREE
@@ -98,10 +98,9 @@ EdgeID GraphAccess::AddEdge(VertexID from, VertexID to, PEID rank) {
       edges_[from].emplace_back(global_to_local_map_[to]);
       edges_.resize(number_of_vertices_);
       edges_[global_to_local_map_[to]].emplace_back(from);
-      // active_vertices_[contraction_level_].resize(number_of_vertices_);
-      // active_vertices_[contraction_level_][global_to_local_map_[to]] = true;
-      inactive_level_.resize(number_of_vertices_);
-      inactive_level_[global_to_local_map_[to]] = -1;
+      // inactive_level_.resize(number_of_vertices_);
+      // inactive_level_[global_to_local_map_[to]] = -1;
+      is_active_.resize(number_of_vertices_, true);
       local_vertices_data_.emplace_back(to, false);
       ghost_vertices_data_.emplace_back(neighbor, to);
       SetAdjacentPE(neighbor, true);
@@ -145,7 +144,7 @@ void GraphAccess::OutputLocal() {
 
   ForallLocalVertices([&](const VertexID v) {
     std::stringstream out;
-    out << "[R" << rank << ":" << contraction_level_ << "] [V] "
+    out << "[R" << rank << "] [V] "
         << GetGlobalID(v) << " (local_id=" << v
         << ", msg=" << GetVertexString(v) << ", pe="
         << rank << ")";
@@ -154,7 +153,7 @@ void GraphAccess::OutputLocal() {
 
   ForallLocalVertices([&](const VertexID v) {
     std::stringstream out;
-    out << "[R" << rank << ":" << contraction_level_ << "] [N] "
+    out << "[R" << rank << "] [N] "
         << GetGlobalID(v) << " -> ";
     ForallNeighbors(v, [&](VertexID u) {
       // out << GetGlobalID(u) << " ";
@@ -173,7 +172,7 @@ void GraphAccess::OutputLabels() {
 
   ForallLocalVertices([&](const VertexID v) {
     std::stringstream out;
-    out << "[R" << rank << ":" << contraction_level_ << "] [V] "
+    out << "[R" << rank << "] [V] "
         << GetGlobalID(v) << " label="
         << vertex_payload_[v].label_;
     std::cout << out.str() << std::endl;
