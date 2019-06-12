@@ -78,44 +78,62 @@ void GraphAccess::ForceVertexPayload(const VertexID v,
 // Local ID, Global ID, target rank
 EdgeID GraphAccess::AddEdge(VertexID from, VertexID to, PEID rank) {
   if (IsLocalFromGlobal(to)) {
-    edges_[from].emplace_back(to - local_offset_);
+    AddLocalEdge(from, to);
   } else {
     PEID neighbor = (rank == size_) ? GetPEFromOffset(to) : rank;
     local_vertices_data_[from].is_interface_vertex_ = true;
     if (IsGhostFromGlobal(to)) { // true if ghost already in map, otherwise false
-      edges_[from].emplace_back(global_to_local_map_[to]);
-      edges_[global_to_local_map_[to]].emplace_back(from);
-      // inactive_level_[global_to_local_map_[to]] = -1;
-      is_active_[global_to_local_map_[to]] = true;
-      vertex_payload_[global_to_local_map_[to]] = {std::numeric_limits<VertexID>::max() - 1, 
-                                                   GetVertexLabel(global_to_local_map_[to]), 
-#ifdef TIEBREAK_DEGREE
-                                                   0,
-#endif
-                                                   neighbor};
+      AddGhostEdge(from, to, neighbor);
     } else {
-      global_to_local_map_[to] = number_of_vertices_++;
-      edges_[from].emplace_back(global_to_local_map_[to]);
-      edges_.resize(number_of_vertices_);
-      edges_[global_to_local_map_[to]].emplace_back(from);
-      // inactive_level_.resize(number_of_vertices_);
-      // inactive_level_[global_to_local_map_[to]] = -1;
-      is_active_.resize(number_of_vertices_, true);
-      local_vertices_data_.emplace_back(to, false);
-      ghost_vertices_data_.emplace_back(neighbor, to);
-      SetAdjacentPE(neighbor, true);
-      ghost_comm_->SetAdjacentPE(neighbor, true);
-      // Contraction additions
-      vertex_payload_.emplace_back(std::numeric_limits<VertexID>::max() - 1, 
-                                   to, 
-#ifdef TIEBREAK_DEGREE
-                                   0,
-#endif
-                                   neighbor);
+      CreateGhostAndAddEdge(from, to, neighbor);
     }
   }
-
   return edge_counter_++;
+}
+
+void GraphAccess::AddLocalEdge(VertexID from, VertexID to) {
+  edges_[from].emplace_back(to - local_offset_);
+}
+
+void GraphAccess::AddGhostEdge(VertexID from, VertexID to, PEID neighbor) {
+  // Add edge
+  edges_[from].emplace_back(global_to_local_map_[to]);
+  edges_[global_to_local_map_[to]].emplace_back(from);
+
+  // Set as active
+  is_active_[global_to_local_map_[to]] = true;
+
+  // Set payload
+  vertex_payload_[global_to_local_map_[to]] = {std::numeric_limits<VertexID>::max() - 1, 
+                                               GetVertexLabel(global_to_local_map_[to]), 
+#ifdef TIEBREAK_DEGREE
+                                               0,
+#endif
+                                               neighbor};
+}
+
+void GraphAccess::CreateGhostAndAddEdge(VertexID from, VertexID to, PEID neighbor) {
+  global_to_local_map_[to] = number_of_vertices_++;
+  edges_.resize(number_of_vertices_);
+  is_active_.resize(number_of_vertices_, true);
+
+  // Add edge
+  edges_[from].emplace_back(global_to_local_map_[to]);
+  edges_[global_to_local_map_[to]].emplace_back(from);
+
+  // Add vertex data and corresponding PE
+  local_vertices_data_.emplace_back(to, false);
+  ghost_vertices_data_.emplace_back(neighbor, to);
+  SetAdjacentPE(neighbor, true);
+  ghost_comm_->SetAdjacentPE(neighbor, true);
+
+  // Set payload
+  vertex_payload_.emplace_back(std::numeric_limits<VertexID>::max() - 1, 
+                               to, 
+#ifdef TIEBREAK_DEGREE
+                               0,
+#endif
+                               neighbor);
 }
 
 void GraphAccess::RemoveAllEdges(const VertexID from) {

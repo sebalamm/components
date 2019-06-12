@@ -294,24 +294,36 @@ class BaseGraphAccess {
 
   EdgeID AddEdge(VertexID from, VertexID to, PEID rank) {
     if (IsLocalFromGlobal(to)) {
-      adjacent_edges_[from].emplace_back(to - local_offset_);
+      AddLocalEdge(from, to);
     } else {
       PEID neighbor = (rank == size_) ? GetPEFromOffset(to) : rank;
       local_vertices_data_[from].is_interface_vertex_ = true;
       if (IsGhostFromGlobal(to)) { // true if ghost already in map, otherwise false
-        adjacent_edges_[from].emplace_back(global_to_local_map_[to]);
-        adjacent_edges_[global_to_local_map_[to]].emplace_back(from);
+        AddGhostEdge(from, to, neighbor);
       } else {
-        global_to_local_map_[to] = number_of_vertices_++;
-        adjacent_edges_[from].emplace_back(global_to_local_map_[to]);
-        adjacent_edges_.resize(number_of_vertices_);
-        adjacent_edges_[global_to_local_map_[to]].emplace_back(from);
-        local_vertices_data_.emplace_back(to, false);
-        ghost_vertices_data_.emplace_back(neighbor, to);
-        SetAdjacentPE(neighbor, true);
+        CreateGhostAndAddEdge(from, to, neighbor);
       }
     }
     return edge_counter_++;
+  }
+
+  void AddLocalEdge(VertexID from, VertexID to) {
+    adjacent_edges_[from].emplace_back(to - local_offset_);
+  }
+
+  void AddGhostEdge(VertexID from, VertexID to, PEID neighbor) {
+    adjacent_edges_[from].emplace_back(global_to_local_map_[to]);
+    adjacent_edges_[global_to_local_map_[to]].emplace_back(from);
+  }
+
+  void CreateGhostAndAddEdge(VertexID from, VertexID to, PEID neighbor) {
+    global_to_local_map_[to] = number_of_vertices_++;
+    adjacent_edges_[from].emplace_back(global_to_local_map_[to]);
+    adjacent_edges_.resize(number_of_vertices_);
+    adjacent_edges_[global_to_local_map_[to]].emplace_back(from);
+    local_vertices_data_.emplace_back(to, false);
+    ghost_vertices_data_.emplace_back(neighbor, to);
+    SetAdjacentPE(neighbor, true);
   }
 
   void RemoveAllEdges(VertexID from) { adjacent_edges_[from].clear(); }

@@ -589,6 +589,12 @@ class GraphAccess {
 
   EdgeID AddEdge(VertexID from, VertexID to, PEID rank);
 
+  void AddLocalEdge(VertexID from, VertexID to);
+
+  void AddGhostEdge(VertexID from, VertexID to, PEID rank);
+
+  void CreateGhostAndAddEdge(VertexID from, VertexID to, PEID rank);
+
   void RemoveAllEdges(VertexID from);
 
   // Local IDs
