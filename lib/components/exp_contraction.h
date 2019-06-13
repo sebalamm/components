@@ -184,6 +184,7 @@ class ExponentialContraction {
 
   void RunContraction(GraphAccess &g) {
     VertexID global_vertices = g.GatherNumberOfGlobalVertices();
+    // TODO: Number of vertices seems correct so something is probably wrong with backwards edges
     if (rank_ == ROOT) {
       if (iteration_ == 1)
         std::cout << "[STATUS] |-- Iteration " << iteration_ 
@@ -365,11 +366,12 @@ class ExponentialContraction {
 
       // Construct temporary graph
       BaseGraphAccess sg(ROOT, 1);
-      sg.StartConstruct(vertices.size(), edges.size(), ROOT);
-      for (int i = 0; i < vertices.size(); ++i) {
-        VertexID v = sg.AddVertex();
+
+      sg.StartConstruct(vertices.size(), 0, ROOT);
+      for (int v = 0; v < vertices.size(); ++v) {
+        sg.ReserveEdgesForVertex(v, edge_lists[v].size());
         for (const int &e : edge_lists[v]) 
-          sg.AddEdge(v, e, 1);
+          sg.AddEdge(v, e, ROOT);
       }
       sg.FinishConstruct();
       FindLocalComponents(sg, labels);

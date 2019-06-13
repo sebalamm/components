@@ -46,21 +46,30 @@ class GraphIO {
     VertexID number_of_local_vertices = to - from + 1;
     edge_list.erase(begin(edge_list));
 
-    EdgeID number_of_local_edges = 0;
+    VertexID number_of_ghost_vertices = 0;
+    google::dense_hash_map<VertexID, VertexID> num_edges_for_ghost; 
+    num_edges_for_ghost.set_empty_key(-1);
+
     std::vector<std::vector<VertexID>> local_edge_lists(number_of_local_vertices);
     for (auto &edge : edge_list) {
       VertexID source = edge.first;
       VertexID target = edge.second;
-      if (from <= source && source <= to) 
-        local_edge_lists[source - from].emplace_back(target);
-      if (from <= target && target <= to) 
-        local_edge_lists[target - from].emplace_back(source);
-      number_of_local_edges++;
-    }
 
-    std::cout << "rank " << rank << " from " << from << " to " << to
-              << " num vertices " << number_of_local_vertices
-              << " num edges " << number_of_local_edges << std::endl;
+      // Add edge from source to target
+      local_edge_lists[source - from].emplace_back(target);
+
+      if (from <= target && target <= to) {
+        // Target is local
+        local_edge_lists[target - from].emplace_back(source);
+      } else {
+        // Target is ghost
+        if (num_edges_for_ghost.find(target) == end(num_edges_for_ghost)) {
+          num_edges_for_ghost[target] = 0;
+          number_of_ghost_vertices++;
+        }
+        num_edges_for_ghost[target]++;
+      }
+    }
 
     // Add datatype
     MPI_Datatype MPI_COMP;
@@ -76,14 +85,29 @@ class GraphIO {
 
     // Build graph
     BaseGraphAccess G(rank, size);
-    G.StartConstruct(number_of_local_vertices, 2 * number_of_local_edges, from);
+    G.StartConstruct(number_of_local_vertices, 
+                     number_of_ghost_vertices, 
+                     from);
 
     G.SetOffsetArray(std::move(vertex_dist));
 
-    for (VertexID i = 0; i < number_of_local_vertices; ++i) {
-      VertexID v = G.AddVertex();
-      for (VertexID w : local_edge_lists[v]) 
-          G.AddEdge(v, w, size);
+    // Build ghost mapping
+    // We need this to reserve memory for the edges
+    for (auto &kv : num_edges_for_ghost) {
+      VertexID local_id = G.AddGhostVertex(kv.first);
+      G.ReserveEdgesForVertex(local_id, kv.second);
+    }
+
+    // Reserve memory for outgoing edges from local vertices
+    for (VertexID v = 0; v < number_of_local_vertices; ++v) {
+      G.ReserveEdgesForVertex(v, local_edge_lists[v].size());
+    }
+
+    // Add edges
+    for (VertexID v = 0; v < number_of_local_vertices; ++v) {
+      for (VertexID w : local_edge_lists[v]) {
+        G.AddEdge(v, w, size);
+      }
     }
 
     G.FinishConstruct();
@@ -175,7 +199,8 @@ class GraphIO {
     MPI_Barrier(comm);
 
     BaseGraphAccess G(rank, size);
-    G.StartConstruct(number_of_local_vertices, 2 * edge_counter, from);
+    // TODO: Add number of ghost vertices and reserve memory
+    // G.StartConstruct(number_of_local_vertices, from);
 
     G.SetOffsetArray(std::move(vertex_dist));
 

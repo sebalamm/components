@@ -107,7 +107,7 @@ class GraphAccess {
   //////////////////////////////////////////////
   // Graph construction
   //////////////////////////////////////////////
-  void StartConstruct(VertexID local_n, EdgeID local_m, VertexID local_offset);
+  void StartConstruct(VertexID local_n, VertexID local_offset);
 
   void FinishConstruct() { number_of_edges_ = edge_counter_; }
 

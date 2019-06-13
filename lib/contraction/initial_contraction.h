@@ -336,8 +336,8 @@ class InitialContraction {
     for (const auto &e : local_edges_) {
       // Edge runs between local vertices
       if (from <= e.target && e.target < to) {
-        local_edge_lists[e.source - from].emplace_back(e.target - from, rank_);
-        local_edge_lists[e.target - from].emplace_back(e.source - from, rank_);
+        local_edge_lists[e.source - from].emplace_back(e.target, rank_);
+        local_edge_lists[e.target - from].emplace_back(e.source, rank_);
         edge_counter += 2;
       }
       // Edge runs between interface and ghost vertices
@@ -350,12 +350,10 @@ class InitialContraction {
 
     GraphAccess cg(rank_, size_);
     cg.StartConstruct(num_local_components_,
-                      edge_counter,
                       num_smaller_components_);
 
     for (VertexID i = 0; i < num_local_components_; ++i) {
       VertexID v = cg.AddVertex();
-      // cg.SetVertexLabel(v, from + v);
       cg.SetVertexPayload(v, {cg.GetVertexDeviate(v), 
                               from + v, 
 #ifdef TIEBREAK_DEGREE
@@ -376,35 +374,66 @@ class InitialContraction {
     VertexID from = num_smaller_components_;
     VertexID to = num_smaller_components_ + num_local_components_ - 1;
 
-    EdgeID edge_counter = 0;
+    VertexID number_of_ghost_vertices = 0;
+    google::dense_hash_map<VertexID, VertexID> num_edges_for_ghost; 
+    num_edges_for_ghost.set_empty_key(-1);
+
     std::vector<std::vector<std::pair<VertexID, VertexID>>>
         local_edge_lists(num_local_components_);
     for (const auto &e : local_edges_) {
-      // Edge runs between local vertices
-      if (from <= e.target && e.target < to) {
-        local_edge_lists[e.source - from].emplace_back(e.target - from, rank_);
-        local_edge_lists[e.target - from].emplace_back(e.source - from, rank_);
-        edge_counter += 2;
-      }
-      else {
-        local_edge_lists[e.source - from].emplace_back(e.target, e.rank);
-        edge_counter++;
+      // Add edge from source to target
+      local_edge_lists[e.source - from].emplace_back(e.target, e.rank);
+
+      if (from <= e.target && e.target <= to) {
+        // Target is local
+        local_edge_lists[e.target - from].emplace_back(e.source, rank_);
+      } else {
+        // Target is ghost
+        if (num_edges_for_ghost.find(e.target) == end(num_edges_for_ghost)) {
+          num_edges_for_ghost[e.target] = 0;
+          number_of_ghost_vertices++;
+        }
+        num_edges_for_ghost[e.target]++;
       }
     }
 
+    // Add datatype
+    MPI_Datatype MPI_COMP;
+    MPI_Type_vector(1, 2, 0, MPI_VERTEX, &MPI_COMP);
+    MPI_Type_commit(&MPI_COMP);
+
+    // Gather vertex distribution
+    std::pair<VertexID, VertexID> range(from, to + 1);
+    std::vector<std::pair<VertexID, VertexID>> vertex_dist(size_);
+    MPI_Allgather(&range, 1, MPI_COMP,
+                  &vertex_dist[0], 1, MPI_COMP, MPI_COMM_WORLD);
 
     BaseGraphAccess cg(rank_, size_);
     cg.StartConstruct(num_local_components_,
-                      edge_counter,
+                      number_of_ghost_vertices,
                       num_smaller_components_);
 
-    for (VertexID i = 0; i < num_local_components_; ++i) {
-      VertexID v = cg.AddVertex();
-      for (auto &j : local_edge_lists[i]) {
-        VertexID target = j.first;
-        cg.AddEdge(v, target, static_cast<PEID>(j.second));
+
+    cg.SetOffsetArray(std::move(vertex_dist));
+
+    // Reserve memory for outgoing edges from ghost vertices
+    for (auto &kv : num_edges_for_ghost) {
+      VertexID local_id = cg.AddGhostVertex(kv.first);
+      cg.ReserveEdgesForVertex(local_id, kv.second);
+    }
+
+    // Reserve memory for outgoing edges from local vertices
+    for (VertexID v = 0; v < to - from + 1; ++v) {
+      cg.ReserveEdgesForVertex(v, local_edge_lists[v].size());
+    }
+
+    // Add edges
+    for (VertexID v = 0; v < to - from + 1; ++v) {
+      for (auto &kv : local_edge_lists[v]) {
+        cg.AddEdge(v, kv.first, static_cast<PEID>(kv.second));
       }
     }
+
     cg.FinishConstruct();
     return cg;
   }

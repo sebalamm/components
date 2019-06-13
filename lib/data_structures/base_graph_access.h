@@ -92,7 +92,8 @@ class BaseGraphAccess {
       local_offset_(0),
       ghost_offset_(0),
       vertex_counter_(0),
-      edge_counter_(0) {
+      edge_counter_(0),
+      ghost_counter_(0) {
     global_to_local_map_.set_empty_key(-1);
   }
 
@@ -105,13 +106,17 @@ class BaseGraphAccess {
   //////////////////////////////////////////////
   // Graph construction
   //////////////////////////////////////////////
-  void StartConstruct(VertexID local_n, EdgeID local_m, VertexID local_offset) {
-    number_of_vertices_ = local_n;
+  void StartConstruct(VertexID local_n, VertexID ghost_n, 
+                      VertexID local_offset) {
     number_of_local_vertices_ = local_n;
-    number_of_edges_ = local_m;
+    number_of_vertices_ = local_n + ghost_n;
 
-    adjacent_edges_.resize(local_n);
-    local_vertices_data_.resize(local_n);
+    // Temp counter for properly counting new ghost vertices
+    ghost_counter_ = local_n;
+
+    adjacent_edges_.resize(number_of_vertices_);
+    local_vertices_data_.resize(number_of_vertices_);
+    ghost_vertices_data_.resize(ghost_n);
 
     local_offset_ = local_offset;
     ghost_offset_ = local_n;
@@ -292,19 +297,40 @@ class BaseGraphAccess {
     return vertex_counter_++;
   }
 
+  inline VertexID AddGhostVertex(VertexID v) {
+    global_to_local_map_[v] = ghost_counter_++;
+
+    // Update data
+    local_vertices_data_[global_to_local_map_[v]].is_interface_vertex_ = false;
+    ghost_vertices_data_[global_to_local_map_[v] - ghost_offset_].rank_ = GetPEFromOffset(v);
+    ghost_vertices_data_[global_to_local_map_[v] - ghost_offset_].global_id_ = v;
+
+    // Set adjacent PE
+    SetAdjacentPE(GetPEFromOffset(v), true);
+
+    return global_to_local_map_[v];
+  }
+
+  void ReserveEdgesForVertex(VertexID v, VertexID num_edges) {
+    adjacent_edges_[v].reserve(num_edges);
+  }
+
   EdgeID AddEdge(VertexID from, VertexID to, PEID rank) {
     if (IsLocalFromGlobal(to)) {
       AddLocalEdge(from, to);
+      edge_counter_++;
     } else {
       PEID neighbor = (rank == size_) ? GetPEFromOffset(to) : rank;
       local_vertices_data_[from].is_interface_vertex_ = true;
       if (IsGhostFromGlobal(to)) { // true if ghost already in map, otherwise false
         AddGhostEdge(from, to, neighbor);
+        edge_counter_ += 2;
       } else {
-        CreateGhostAndAddEdge(from, to, neighbor);
+        std::cout << "This shouldn't happen" << std::endl;
+        exit(1);
       }
     }
-    return edge_counter_++;
+    return edge_counter_;
   }
 
   void AddLocalEdge(VertexID from, VertexID to) {
@@ -312,18 +338,8 @@ class BaseGraphAccess {
   }
 
   void AddGhostEdge(VertexID from, VertexID to, PEID neighbor) {
-    adjacent_edges_[from].emplace_back(global_to_local_map_[to]);
+    adjacent_edges_[from].emplace_back(global_to_local_map_[to]); 
     adjacent_edges_[global_to_local_map_[to]].emplace_back(from);
-  }
-
-  void CreateGhostAndAddEdge(VertexID from, VertexID to, PEID neighbor) {
-    global_to_local_map_[to] = number_of_vertices_++;
-    adjacent_edges_[from].emplace_back(global_to_local_map_[to]);
-    adjacent_edges_.resize(number_of_vertices_);
-    adjacent_edges_[global_to_local_map_[to]].emplace_back(from);
-    local_vertices_data_.emplace_back(to, false);
-    ghost_vertices_data_.emplace_back(neighbor, to);
-    SetAdjacentPE(neighbor, true);
   }
 
   void RemoveAllEdges(VertexID from) { adjacent_edges_[from].clear(); }
@@ -520,6 +536,7 @@ class BaseGraphAccess {
   // Temporary counters
   VertexID vertex_counter_;
   EdgeID edge_counter_;
+  VertexID ghost_counter_;
 };
 
 #endif

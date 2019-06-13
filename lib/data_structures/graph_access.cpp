@@ -31,11 +31,9 @@ GraphAccess::~GraphAccess() {
 }
 
 void GraphAccess::StartConstruct(const VertexID local_n,
-                                 const EdgeID local_m,
                                  const VertexID local_offset) {
   number_of_vertices_ = local_n;
   number_of_local_vertices_ = local_n;
-  number_of_edges_ = local_m;
 
   edges_.resize(local_n);
   local_vertices_data_.resize(local_n);
