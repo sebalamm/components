@@ -330,42 +330,74 @@ class InitialContraction {
     VertexID from = num_smaller_components_;
     VertexID to = num_smaller_components_ + num_local_components_ - 1;
 
-    EdgeID edge_counter = 0;
-    std::vector<std::vector<std::pair<VertexID, VertexID>>>
-        local_edge_lists(num_local_components_);
-    for (const auto &e : local_edges_) {
-      // Edge runs between local vertices
-      if (from <= e.target && e.target < to) {
-        local_edge_lists[e.source - from].emplace_back(e.target, rank_);
-        local_edge_lists[e.target - from].emplace_back(e.source, rank_);
-        edge_counter += 2;
+    VertexID number_of_ghost_vertices = 0;
+    google::dense_hash_map<VertexID, VertexID> num_edges_for_vertex; 
+    num_edges_for_vertex.set_empty_key(-1);
+
+    for (auto &edge : local_edges_) {
+      VertexID source = edge.source;
+      VertexID target = edge.target;
+
+      // Source
+      if (num_edges_for_vertex.find(source) == end(num_edges_for_vertex)) {
+          num_edges_for_vertex[source] = 0;
       }
-      // Edge runs between interface and ghost vertices
-      else {
-        local_edge_lists[e.source - from].emplace_back(e.target, e.rank);
-        edge_counter++;
+      num_edges_for_vertex[source]++;
+
+      // Target
+      if (num_edges_for_vertex.find(target) == end(num_edges_for_vertex)) {
+          num_edges_for_vertex[target] = 0;
+          if (from > target || target > to) {
+            number_of_ghost_vertices++;
+          } 
       }
+      num_edges_for_vertex[target]++;
     }
 
+    // Add datatype
+    MPI_Datatype MPI_COMP;
+    MPI_Type_vector(1, 2, 0, MPI_VERTEX, &MPI_COMP);
+    MPI_Type_commit(&MPI_COMP);
 
+    // Gather vertex distribution
+    std::pair<VertexID, VertexID> range(from, to + 1);
+    std::vector<std::pair<VertexID, VertexID>> vertex_dist(size_);
+    MPI_Allgather(&range, 1, MPI_COMP,
+                  &vertex_dist[0], 1, MPI_COMP, MPI_COMM_WORLD);
+
+    // Build graph
     GraphAccess cg(rank_, size_);
-    cg.StartConstruct(num_local_components_,
-                      num_smaller_components_);
+    cg.StartConstruct(num_local_components_, 
+                     number_of_ghost_vertices, 
+                     from);
 
-    for (VertexID i = 0; i < num_local_components_; ++i) {
-      VertexID v = cg.AddVertex();
-      cg.SetVertexPayload(v, {cg.GetVertexDeviate(v), 
-                              from + v, 
-#ifdef TIEBREAK_DEGREE
-                              0,
-#endif
-                              rank_});
+    cg.SetOffsetArray(std::move(vertex_dist));
 
-      for (auto &j : local_edge_lists[i]) {
-        VertexID target = j.first;
-        cg.AddEdge(v, target, static_cast<PEID>(j.second));
+    for (auto &kv : num_edges_for_vertex) {
+      VertexID global_id = kv.first;
+      VertexID num_edges = kv.second;
+      VertexID local_id = 0;
+      if (from > global_id || global_id > to) {
+        local_id = cg.AddGhostVertex(global_id);
+      } else {
+        local_id = cg.GetLocalID(global_id);
       }
+      cg.ReserveEdgesForVertex(local_id, num_edges);
     }
+
+    // Add edges
+    // for (VertexID v = 0; v < number_of_local_vertices; ++v) {
+    for (auto &edge : local_edges_) {
+      VertexID source_local_id = cg.GetLocalID(edge.source);
+      cg.AddEdge(source_local_id, edge.target, edge.rank);
+      cg.SetVertexPayload(source_local_id, {cg.GetVertexDeviate(source_local_id), 
+                                            edge.source, 
+#ifdef TIEBREAK_DEGREE
+                                            0,
+#endif
+                                            rank_});
+    }
+
     cg.FinishConstruct();
     return cg;
   }
@@ -375,26 +407,27 @@ class InitialContraction {
     VertexID to = num_smaller_components_ + num_local_components_ - 1;
 
     VertexID number_of_ghost_vertices = 0;
-    google::dense_hash_map<VertexID, VertexID> num_edges_for_ghost; 
-    num_edges_for_ghost.set_empty_key(-1);
+    google::dense_hash_map<VertexID, VertexID> num_edges_for_vertex; 
+    num_edges_for_vertex.set_empty_key(-1);
 
-    std::vector<std::vector<std::pair<VertexID, VertexID>>>
-        local_edge_lists(num_local_components_);
-    for (const auto &e : local_edges_) {
-      // Add edge from source to target
-      local_edge_lists[e.source - from].emplace_back(e.target, e.rank);
+    for (auto &e : local_edges_) {
+      VertexID source = e.source;
+      VertexID target = e.target;
 
-      if (from <= e.target && e.target <= to) {
-        // Target is local
-        local_edge_lists[e.target - from].emplace_back(e.source, rank_);
-      } else {
-        // Target is ghost
-        if (num_edges_for_ghost.find(e.target) == end(num_edges_for_ghost)) {
-          num_edges_for_ghost[e.target] = 0;
-          number_of_ghost_vertices++;
-        }
-        num_edges_for_ghost[e.target]++;
+      // Source
+      if (num_edges_for_vertex.find(source) == end(num_edges_for_vertex)) {
+          num_edges_for_vertex[source] = 0;
       }
+      num_edges_for_vertex[source]++;
+
+      // Target
+      if (num_edges_for_vertex.find(target) == end(num_edges_for_vertex)) {
+          num_edges_for_vertex[target] = 0;
+          if (from > target || target > to) {
+            number_of_ghost_vertices++;
+          } 
+      }
+      num_edges_for_vertex[target]++;
     }
 
     // Add datatype
@@ -416,22 +449,21 @@ class InitialContraction {
 
     cg.SetOffsetArray(std::move(vertex_dist));
 
-    // Reserve memory for outgoing edges from ghost vertices
-    for (auto &kv : num_edges_for_ghost) {
-      VertexID local_id = cg.AddGhostVertex(kv.first);
-      cg.ReserveEdgesForVertex(local_id, kv.second);
-    }
-
-    // Reserve memory for outgoing edges from local vertices
-    for (VertexID v = 0; v < to - from + 1; ++v) {
-      cg.ReserveEdgesForVertex(v, local_edge_lists[v].size());
-    }
-
-    // Add edges
-    for (VertexID v = 0; v < to - from + 1; ++v) {
-      for (auto &kv : local_edge_lists[v]) {
-        cg.AddEdge(v, kv.first, static_cast<PEID>(kv.second));
+    for (auto &kv : num_edges_for_vertex) {
+      VertexID global_id = kv.first;
+      VertexID num_edges = kv.second;
+      VertexID local_id = 0;
+      if (from > global_id || global_id > to) {
+        local_id = cg.AddGhostVertex(global_id);
+      } else {
+        local_id = cg.GetLocalID(global_id);
       }
+      cg.ReserveEdgesForVertex(local_id, num_edges);
+    }
+
+    // for (VertexID v = 0; v < number_of_local_vertices; ++v) {
+    for (auto &edge : local_edges_) {
+      cg.AddEdge(cg.GetLocalID(edge.source), edge.target, edge.rank);
     }
 
     cg.FinishConstruct();

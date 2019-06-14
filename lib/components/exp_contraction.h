@@ -53,7 +53,7 @@ class ExponentialContraction {
   void FindComponents(BaseGraphAccess &g, std::vector<VertexID> &g_labels) {
     rng_offset_ = size_ + config_.seed;
     FindLocalComponents(g, g_labels);
-
+    
     // First round of contraction
     InitialContraction<BaseGraphAccess> 
       first_contraction(g, g_labels, rank_, size_);

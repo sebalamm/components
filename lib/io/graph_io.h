@@ -47,28 +47,28 @@ class GraphIO {
     edge_list.erase(begin(edge_list));
 
     VertexID number_of_ghost_vertices = 0;
-    google::dense_hash_map<VertexID, VertexID> num_edges_for_ghost; 
-    num_edges_for_ghost.set_empty_key(-1);
+    google::dense_hash_map<VertexID, VertexID> num_edges_for_vertex; 
+    num_edges_for_vertex.set_empty_key(-1);
 
-    std::vector<std::vector<VertexID>> local_edge_lists(number_of_local_vertices);
+    // TODO: Backward edges missing for both local and ghost vertices
     for (auto &edge : edge_list) {
       VertexID source = edge.first;
       VertexID target = edge.second;
 
-      // Add edge from source to target
-      local_edge_lists[source - from].emplace_back(target);
-
-      if (from <= target && target <= to) {
-        // Target is local
-        local_edge_lists[target - from].emplace_back(source);
-      } else {
-        // Target is ghost
-        if (num_edges_for_ghost.find(target) == end(num_edges_for_ghost)) {
-          num_edges_for_ghost[target] = 0;
-          number_of_ghost_vertices++;
-        }
-        num_edges_for_ghost[target]++;
+      // Source
+      if (num_edges_for_vertex.find(source) == end(num_edges_for_vertex)) {
+          num_edges_for_vertex[source] = 0;
       }
+      num_edges_for_vertex[source]++;
+
+      // Target
+      if (num_edges_for_vertex.find(target) == end(num_edges_for_vertex)) {
+          num_edges_for_vertex[target] = 0;
+          if (from > target || target > to) {
+            number_of_ghost_vertices++;
+          } 
+      }
+      num_edges_for_vertex[target]++;
     }
 
     // Add datatype
@@ -82,7 +82,6 @@ class GraphIO {
     MPI_Allgather(&range, 1, MPI_COMP,
                   &vertex_dist[0], 1, MPI_COMP, comm);
 
-
     // Build graph
     BaseGraphAccess G(rank, size);
     G.StartConstruct(number_of_local_vertices, 
@@ -91,23 +90,22 @@ class GraphIO {
 
     G.SetOffsetArray(std::move(vertex_dist));
 
-    // Build ghost mapping
-    // We need this to reserve memory for the edges
-    for (auto &kv : num_edges_for_ghost) {
-      VertexID local_id = G.AddGhostVertex(kv.first);
-      G.ReserveEdgesForVertex(local_id, kv.second);
-    }
-
-    // Reserve memory for outgoing edges from local vertices
-    for (VertexID v = 0; v < number_of_local_vertices; ++v) {
-      G.ReserveEdgesForVertex(v, local_edge_lists[v].size());
+    for (auto &kv : num_edges_for_vertex) {
+      VertexID global_id = kv.first;
+      VertexID num_edges = kv.second;
+      VertexID local_id = 0;
+      if (from > global_id || global_id > to) {
+        local_id = G.AddGhostVertex(global_id);
+      } else {
+        local_id = G.GetLocalID(global_id);
+      }
+      G.ReserveEdgesForVertex(local_id, num_edges);
     }
 
     // Add edges
-    for (VertexID v = 0; v < number_of_local_vertices; ++v) {
-      for (VertexID w : local_edge_lists[v]) {
-        G.AddEdge(v, w, size);
-      }
+    // for (VertexID v = 0; v < number_of_local_vertices; ++v) {
+    for (auto &edge : edge_list) {
+      G.AddEdge(G.GetLocalID(edge.first), edge.second, size);
     }
 
     G.FinishConstruct();

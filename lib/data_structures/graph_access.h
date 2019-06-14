@@ -107,7 +107,7 @@ class GraphAccess {
   //////////////////////////////////////////////
   // Graph construction
   //////////////////////////////////////////////
-  void StartConstruct(VertexID local_n, VertexID local_offset);
+  void StartConstruct(VertexID local_n, VertexID ghost_n, VertexID local_offset);
 
   void FinishConstruct() { number_of_edges_ = edge_counter_; }
 
@@ -137,7 +137,7 @@ class GraphAccess {
 
   template<typename F>
   void ForallNeighbors(const VertexID v, F &&callback) {
-    ForallAdjacentEdges(v, [&](EdgeID e) { callback(edges_[v][e].target_); });
+    ForallAdjacentEdges(v, [&](EdgeID e) { callback(adjacent_edges_[v][e].target_); });
   }
 
   template<typename F>
@@ -584,8 +584,7 @@ class GraphAccess {
     return vertex_counter_++;
   }
 
-  inline void RemoveVertex() {
-  }
+  VertexID  AddGhostVertex(VertexID v);
 
   EdgeID AddEdge(VertexID from, VertexID to, PEID rank);
 
@@ -593,7 +592,7 @@ class GraphAccess {
 
   void AddGhostEdge(VertexID from, VertexID to, PEID rank);
 
-  void CreateGhostAndAddEdge(VertexID from, VertexID to, PEID rank);
+  void ReserveEdgesForVertex(VertexID v, VertexID num_edges);
 
   void RemoveAllEdges(VertexID from);
 
@@ -606,7 +605,7 @@ class GraphAccess {
   }
 
   inline VertexID GetVertexDegree(const VertexID v) const {
-    return edges_[v].size();
+    return adjacent_edges_[v].size();
   }
 
   VertexID GetMaxDegree() {
@@ -787,7 +786,7 @@ class GraphAccess {
   PEID rank_, size_;
 
   // Vertices and edges
-  std::vector<std::vector<Edge>> edges_;
+  std::vector<std::vector<Edge>> adjacent_edges_;
 
   std::vector<LocalVertexData> local_vertices_data_;
   std::vector<GhostVertexData> ghost_vertices_data_;
@@ -826,6 +825,7 @@ class GraphAccess {
 
   // Temporary counters
   VertexID vertex_counter_;
+  VertexID ghost_counter_;
   EdgeID edge_counter_;
 };
 

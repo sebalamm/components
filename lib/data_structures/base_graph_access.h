@@ -106,13 +106,11 @@ class BaseGraphAccess {
   //////////////////////////////////////////////
   // Graph construction
   //////////////////////////////////////////////
-  void StartConstruct(VertexID local_n, VertexID ghost_n, 
-                      VertexID local_offset) {
+  void StartConstruct(const VertexID local_n, 
+                      const VertexID ghost_n, 
+                      const VertexID local_offset) {
     number_of_local_vertices_ = local_n;
     number_of_vertices_ = local_n + ghost_n;
-
-    // Temp counter for properly counting new ghost vertices
-    ghost_counter_ = local_n;
 
     adjacent_edges_.resize(number_of_vertices_);
     local_vertices_data_.resize(number_of_vertices_);
@@ -120,6 +118,9 @@ class BaseGraphAccess {
 
     local_offset_ = local_offset;
     ghost_offset_ = local_n;
+
+    // Temp counter for properly counting new ghost vertices
+    ghost_counter_ = local_n;
 
     adjacent_pes_.resize(static_cast<unsigned long>(size_), false);
   }
@@ -196,7 +197,9 @@ class BaseGraphAccess {
 
   PEID GetPEFromOffset(const VertexID v) const {
     for (PEID i = 0; i < offset_array_.size(); ++i) {
-      if (v >= offset_array_[i].first && v < offset_array_[i].second) return i;
+      if (v >= offset_array_[i].first && v < offset_array_[i].second) {
+        return i;
+      }
     }
     return rank_;
   }
@@ -318,23 +321,23 @@ class BaseGraphAccess {
   EdgeID AddEdge(VertexID from, VertexID to, PEID rank) {
     if (IsLocalFromGlobal(to)) {
       AddLocalEdge(from, to);
-      edge_counter_++;
     } else {
       PEID neighbor = (rank == size_) ? GetPEFromOffset(to) : rank;
       local_vertices_data_[from].is_interface_vertex_ = true;
       if (IsGhostFromGlobal(to)) { // true if ghost already in map, otherwise false
         AddGhostEdge(from, to, neighbor);
-        edge_counter_ += 2;
       } else {
         std::cout << "This shouldn't happen" << std::endl;
         exit(1);
       }
     }
+    edge_counter_ += 2;
     return edge_counter_;
   }
 
   void AddLocalEdge(VertexID from, VertexID to) {
     adjacent_edges_[from].emplace_back(to - local_offset_);
+    adjacent_edges_[to - local_offset_].emplace_back(from);
   }
 
   void AddGhostEdge(VertexID from, VertexID to, PEID neighbor) {
