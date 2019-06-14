@@ -46,9 +46,10 @@ class GraphIO {
     VertexID number_of_local_vertices = to - from + 1;
     edge_list.erase(begin(edge_list));
 
+    std::vector<VertexID> num_edges_for_local_vertex(number_of_local_vertices, 0);
     VertexID number_of_ghost_vertices = 0;
-    google::dense_hash_map<VertexID, VertexID> num_edges_for_vertex; 
-    num_edges_for_vertex.set_empty_key(-1);
+    google::dense_hash_map<VertexID, VertexID> num_edges_for_ghost_vertex; 
+    num_edges_for_ghost_vertex.set_empty_key(-1);
 
     // TODO: Backward edges missing for both local and ghost vertices
     for (auto &edge : edge_list) {
@@ -56,19 +57,18 @@ class GraphIO {
       VertexID target = edge.second;
 
       // Source
-      if (num_edges_for_vertex.find(source) == end(num_edges_for_vertex)) {
-          num_edges_for_vertex[source] = 0;
-      }
-      num_edges_for_vertex[source]++;
+      num_edges_for_local_vertex[source - from]++;
 
-      // Target
-      if (num_edges_for_vertex.find(target) == end(num_edges_for_vertex)) {
-          num_edges_for_vertex[target] = 0;
-          if (from > target || target > to) {
+      // Target ghost
+      if (from > target || target > to) {
+        if (num_edges_for_ghost_vertex.find(target) == end(num_edges_for_ghost_vertex)) {
+            num_edges_for_ghost_vertex[target] = 0;
             number_of_ghost_vertices++;
-          } 
+        } 
+        num_edges_for_ghost_vertex[target]++;
+      } else {
+        num_edges_for_local_vertex[target - from]++;
       }
-      num_edges_for_vertex[target]++;
     }
 
     // Add datatype
@@ -90,15 +90,17 @@ class GraphIO {
 
     G.SetOffsetArray(std::move(vertex_dist));
 
-    for (auto &kv : num_edges_for_vertex) {
+    // Reserve local vertices
+    for (VertexID v = 0; v < number_of_local_vertices; ++v) {
+      VertexID num_edges = num_edges_for_local_vertex[v];
+      G.ReserveEdgesForVertex(v, num_edges);
+    }
+
+    // Reserve ghost vertices
+    for (auto &kv : num_edges_for_ghost_vertex) {
       VertexID global_id = kv.first;
       VertexID num_edges = kv.second;
-      VertexID local_id = 0;
-      if (from > global_id || global_id > to) {
-        local_id = G.AddGhostVertex(global_id);
-      } else {
-        local_id = G.GetLocalID(global_id);
-      }
+      VertexID local_id = G.AddGhostVertex(global_id);
       G.ReserveEdgesForVertex(local_id, num_edges);
     }
 
