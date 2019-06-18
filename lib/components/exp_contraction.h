@@ -66,11 +66,18 @@ class ExponentialContraction {
     std::vector<VertexID> cag_labels(g.GetNumberOfVertices(), 0);
     FindLocalComponents(cag, cag_labels);
 
+    // cag.OutputLocal();
+    // MPI_Barrier(MPI_COMM_WORLD);
+
     // Second round of contraction
     InitialContraction<BaseGraphAccess> 
       second_contraction(cag, cag_labels, rank_, size_);
     GraphAccess ccag 
       = second_contraction.BuildComponentAdjacencyGraph();
+
+    // ccag.OutputLocal();
+    // MPI_Barrier(MPI_COMM_WORLD);
+    // exit(1);
 
     // Delete intermediate graph?
     // Keep contraction labeling for later
@@ -86,7 +93,6 @@ class ExponentialContraction {
   }
 
   void Output(GraphAccess &g) {
-    // if (rank_ == ROOT) std::cout << "Component labels" << std::endl;
     g.OutputLabels();
   }
 
@@ -367,9 +373,9 @@ class ExponentialContraction {
       // Construct temporary graph
       BaseGraphAccess sg(ROOT, 1);
 
-      sg.StartConstruct(vertices.size(), 0, ROOT);
+      sg.StartConstruct(vertices.size(), 0, edges.size(), ROOT);
       for (int v = 0; v < vertices.size(); ++v) {
-        sg.ReserveEdgesForVertex(v, edge_lists[v].size());
+        // sg.ReserveEdgesForVertex(v, edge_lists[v].size());
         for (const int &e : edge_lists[v]) 
           sg.AddEdge(v, e, ROOT);
       }

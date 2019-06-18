@@ -24,6 +24,7 @@
 
 #include <iostream>
 #include <google/sparse_hash_set>
+#include <google/dense_hash_set>
 
 #include "config.h"
 #include "definitions.h"
@@ -48,7 +49,7 @@ class InitialContraction {
     ComputeComponentPrefixSum();
     ComputeLocalContractionMapping();
     ExchangeGhostContractionMapping();
-    GenerateLocalContractionEdges();
+    GenerateLocalContractionEdges(false);
     return BuildContractionGraph();
   }
 
@@ -56,7 +57,7 @@ class InitialContraction {
     ComputeComponentPrefixSum();
     ComputeLocalContractionMapping();
     ExchangeGhostContractionMapping();
-    GenerateLocalContractionEdges();
+    GenerateLocalContractionEdges(true);
     return BuildReducedBaseGraph();
   }
 
@@ -77,6 +78,7 @@ class InitialContraction {
 
   // Local edges
   EdgeHash local_edges_{};
+  std::vector<std::pair<VertexID, VertexID>> edges_;
 
   // Send buffers
   std::vector<std::vector<VertexID>> node_buffers_;
@@ -132,7 +134,6 @@ class InitialContraction {
     g_.ForallLocalVertices([&](const VertexID v) {
       VertexID component = label_map[vertex_labels_[v]];
       g_.SetContractionVertex(v, component);
-      // std::cout << "R" << rank_ << " v " << g_.GetGlobalID(v) << " set cid " << component << std::endl;
     });
   }
 
@@ -192,7 +193,6 @@ class InitialContraction {
       if (largest_component_size[i] > 0) {
         node_buffers_[i].push_back(std::numeric_limits<VertexID>::max()); 
         node_buffers_[i].push_back(largest_component_id[i]); 
-        // std::cout << "R" << rank_ << " set largest " << largest_component_id[i] << " PE " << i << std::endl;
       }
     }
   }
@@ -310,16 +310,26 @@ class InitialContraction {
     }
   }
 
-  void GenerateLocalContractionEdges() {
+  void GenerateLocalContractionEdges(bool backward) {
     // Gather local edges (there shouldn't be any) O(m/P)
     g_.ForallLocalVertices([&](const VertexID v) {
       VertexID cv = g_.GetContractionVertex(v);
       g_.ForallNeighbors(v, [&](const VertexID w) {
         VertexID cw = g_.GetContractionVertex(w);
         if (cv != cw) {
+          // Forward edge
           auto h_edge = HashedEdge{num_global_components_, cv, cw, g_.GetPE(w)};
           if (local_edges_.find(h_edge) == end(local_edges_)) {
             local_edges_.insert(h_edge);
+            edges_.emplace_back(cv, cw);
+          }
+          // Backward edge
+          if (backward) {
+            h_edge = HashedEdge{num_global_components_, cw, cv, rank_};
+            if (local_edges_.find(h_edge) == end(local_edges_)) {
+              local_edges_.insert(h_edge);
+              edges_.emplace_back(cw, cv);
+            }
           }
         }
       });
@@ -382,8 +392,11 @@ class InitialContraction {
       } else {
         local_id = cg.GetLocalID(global_id);
       }
-      cg.ReserveEdgesForVertex(local_id, num_edges);
+      // cg.ReserveEdgesForVertex(local_id, num_edges);
     }
+
+    // std::cout << "rank " << rank_ << " add edges" << std::endl;
+    // MPI_Barrier(MPI_COMM_WORLD);
 
     // Add edges
     // for (VertexID v = 0; v < number_of_local_vertices; ++v) {
@@ -406,29 +419,23 @@ class InitialContraction {
     VertexID from = num_smaller_components_;
     VertexID to = num_smaller_components_ + num_local_components_ - 1;
 
-    VertexID number_of_ghost_vertices = 0;
-    google::dense_hash_map<VertexID, VertexID> num_edges_for_vertex; 
-    num_edges_for_vertex.set_empty_key(-1);
+    google::dense_hash_set<VertexID> ghost_vertices; 
+    ghost_vertices.set_empty_key(-1);
 
-    for (auto &e : local_edges_) {
-      VertexID source = e.source;
-      VertexID target = e.target;
+    for (auto &e : edges_) {
+      VertexID source = e.first;
+      VertexID target = e.second;
 
       // Source
-      if (num_edges_for_vertex.find(source) == end(num_edges_for_vertex)) {
-          num_edges_for_vertex[source] = 0;
-      }
-      num_edges_for_vertex[source]++;
-
-      // Target
-      if (num_edges_for_vertex.find(target) == end(num_edges_for_vertex)) {
-          num_edges_for_vertex[target] = 0;
-          if (from > target || target > to) {
-            number_of_ghost_vertices++;
-          } 
-      }
-      num_edges_for_vertex[target]++;
+      if (from > target || target > to) {
+        if (ghost_vertices.find(target) == end(ghost_vertices)) {
+            ghost_vertices.insert(target);
+        } 
+      } 
     }
+
+    VertexID number_of_ghost_vertices = ghost_vertices.size();
+    VertexID number_of_edges = edges_.size();
 
     // Add datatype
     MPI_Datatype MPI_COMP;
@@ -444,26 +451,40 @@ class InitialContraction {
     BaseGraphAccess cg(rank_, size_);
     cg.StartConstruct(num_local_components_,
                       number_of_ghost_vertices,
+                      edges_.size(),
                       num_smaller_components_);
-
 
     cg.SetOffsetArray(std::move(vertex_dist));
 
-    for (auto &kv : num_edges_for_vertex) {
-      VertexID global_id = kv.first;
-      VertexID num_edges = kv.second;
-      VertexID local_id = 0;
-      if (from > global_id || global_id > to) {
-        local_id = cg.AddGhostVertex(global_id);
-      } else {
-        local_id = cg.GetLocalID(global_id);
-      }
-      cg.ReserveEdgesForVertex(local_id, num_edges);
+    for (auto &v : ghost_vertices) {
+      cg.AddGhostVertex(v);
     }
 
-    // for (VertexID v = 0; v < number_of_local_vertices; ++v) {
-    for (auto &edge : local_edges_) {
-      cg.AddEdge(cg.GetLocalID(edge.source), edge.target, edge.rank);
+    std::sort(edges_.begin(), edges_.end(), [&](const auto &left, const auto &right) {
+        VertexID offset = to + 1;
+        VertexID left_source_distance = (left.first < from ? 
+                                         left.first + offset : 
+                                         left.first) - from;
+        VertexID left_target_distance = (left.second < from ? 
+                                          left.second + offset : 
+                                          left.second) - from;
+        VertexID right_source_distance = (right.first < from ? 
+                                          right.first + offset : 
+                                          right.first) - from;
+        VertexID right_target_distance = (right.second < from ? 
+                                          right.second + offset : 
+                                          right.second) - from;
+
+        return (left_source_distance < right_source_distance
+                  || (left_source_distance == right_source_distance && left_target_distance < right_target_distance));
+    });
+
+    // MPI_Barrier(MPI_COMM_WORLD);
+    // std::cout << "rank " << rank_ << " start adding " << edges_.size() << " edges" << std::endl;
+    for (auto &edge : edges_) {
+      // std::cout << "rank " << rank_ << " add edge (" 
+      //           << edge.first << "," << edge.second << ")" << std::endl;
+      cg.AddEdge(cg.GetLocalID(edge.first), edge.second, size_);
     }
 
     cg.FinishConstruct();

@@ -43,8 +43,7 @@ struct HashFunction {
 
 struct EdgeComparator {
   bool operator()(const HashedEdge e1, const HashedEdge e2) const {
-    bool eq = (e1.source == e2.source && e1.target == e2.target);
-    return (eq || (e1.source == e2.target && e1.target == e2.source));
+    return (e1.source == e2.source && e1.target == e2.target);
   }
 };
 

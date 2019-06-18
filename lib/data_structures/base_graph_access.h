@@ -93,7 +93,8 @@ class BaseGraphAccess {
       ghost_offset_(0),
       vertex_counter_(0),
       edge_counter_(0),
-      ghost_counter_(0) {
+      ghost_counter_(0),
+      last_source_(0) {
     global_to_local_map_.set_empty_key(-1);
   }
 
@@ -108,11 +109,15 @@ class BaseGraphAccess {
   //////////////////////////////////////////////
   void StartConstruct(const VertexID local_n, 
                       const VertexID ghost_n, 
+                      const VertexID total_m,
                       const VertexID local_offset) {
     number_of_local_vertices_ = local_n;
     number_of_vertices_ = local_n + ghost_n;
+    number_of_edges_ = total_m;
 
-    adjacent_edges_.resize(number_of_vertices_);
+    vertices_.resize(number_of_vertices_ + 1);
+    edges_.resize(number_of_edges_);
+
     local_vertices_data_.resize(number_of_vertices_);
     ghost_vertices_data_.resize(ghost_n);
 
@@ -120,12 +125,25 @@ class BaseGraphAccess {
     ghost_offset_ = local_n;
 
     // Temp counter for properly counting new ghost vertices
+    vertex_counter_ = local_n; 
+    edge_counter_ = 0;
     ghost_counter_ = local_n;
 
     adjacent_pes_.resize(static_cast<unsigned long>(size_), false);
   }
 
-  void FinishConstruct() { number_of_edges_ = edge_counter_; }
+  void FinishConstruct() { 
+    vertices_.resize(vertex_counter_ + 1);
+    edges_.resize(edge_counter_ + 1);
+
+    //fill isolated sources at the end
+    if (last_source_ != vertex_counter_ - 1) {
+      //in that case at least the last node was an isolated node
+      for (VertexID v = vertex_counter_; v > last_source_ + 1; v--) {
+        vertices_[v].first_edge_ = vertices_[last_source_ + 1].first_edge_;
+      }
+    }
+  }
 
   //////////////////////////////////////////////
   // Graph iterators
@@ -154,13 +172,13 @@ class BaseGraphAccess {
   template<typename F>
   void ForallNeighbors(const VertexID v, F &&callback) {
     ForallAdjacentEdges(v, [&](EdgeID e) { 
-        callback(adjacent_edges_[v][e].target_); 
+        callback(edges_[e].target_); 
     });
   }
 
   template<typename F>
   void ForallAdjacentEdges(const VertexID v, F &&callback) {
-    for (EdgeID e = 0; e < GetVertexDegree(v); ++e) {
+    for (EdgeID e = GetFirstEdge(v); e < GetFirstInvalidEdge(v); ++e) {
       callback(e);
     }
   }
@@ -267,6 +285,14 @@ class BaseGraphAccess {
 
   inline EdgeID GetNumberOfEdges() const { return number_of_edges_; }
 
+  inline EdgeID GetFirstEdge(const VertexID v) const {
+    return vertices_[v].first_edge_;
+  }
+
+  inline EdgeID GetFirstInvalidEdge(const VertexID v) const {
+    return vertices_[v + 1].first_edge_;
+  }
+
   VertexID GatherNumberOfGlobalVertices() {
     VertexID local_vertices = 0;
     ForallLocalVertices([&](const VertexID v) { local_vertices++; });
@@ -301,7 +327,9 @@ class BaseGraphAccess {
   }
 
   inline VertexID AddGhostVertex(VertexID v) {
+    AddVertex();
     global_to_local_map_[v] = ghost_counter_++;
+    // if (rank_ == ROOT) std::cout << "add ghost " << v << "->" << global_to_local_map_[v] << std::endl;
 
     // Update data
     local_vertices_data_[global_to_local_map_[v]].is_interface_vertex_ = false;
@@ -314,9 +342,10 @@ class BaseGraphAccess {
     return global_to_local_map_[v];
   }
 
-  void ReserveEdgesForVertex(VertexID v, VertexID num_edges) {
-    adjacent_edges_[v].reserve(num_edges);
-  }
+  // TODO: Remove
+  // void ReserveEdgesForVertex(VertexID v, VertexID num_edges) {
+    // edges_[v].reserve(num_edges);
+  // }
 
   EdgeID AddEdge(VertexID from, VertexID to, PEID rank) {
     if (IsLocalFromGlobal(to)) {
@@ -325,30 +354,33 @@ class BaseGraphAccess {
       PEID neighbor = (rank == size_) ? GetPEFromOffset(to) : rank;
       local_vertices_data_[from].is_interface_vertex_ = true;
       if (IsGhostFromGlobal(to)) { // true if ghost already in map, otherwise false
-        AddGhostEdge(from, to, neighbor);
+        AddLocalEdge(from, to);
       } else {
         std::cout << "This shouldn't happen" << std::endl;
         exit(1);
       }
     }
-    edge_counter_ += 2;
+    last_source_ = from;
     return edge_counter_;
   }
 
+  // TODO: Remove
   void AddLocalEdge(VertexID from, VertexID to) {
-    adjacent_edges_[from].emplace_back(to - local_offset_);
-    adjacent_edges_[to - local_offset_].emplace_back(from);
+    edges_[edge_counter_++].target_ = GetLocalID(to);
+    vertices_[from + 1].first_edge_ = edge_counter_;
   }
 
-  void AddGhostEdge(VertexID from, VertexID to, PEID neighbor) {
-    adjacent_edges_[from].emplace_back(global_to_local_map_[to]); 
-    adjacent_edges_[global_to_local_map_[to]].emplace_back(from);
-  }
+  // TODO: Remove
+  // void AddGhostEdge(VertexID from, VertexID to, PEID neighbor) {
+  //   edges_[edge_counter_++].target_ = to;
+  //   vertices_[from + 1].first_edge_ = edge_counter_;
+  // }
 
-  void RemoveAllEdges(VertexID from) { adjacent_edges_[from].clear(); }
+  // TODO: Remove
+  // void RemoveAllEdges(VertexID from) { edges_[from].clear(); }
 
   inline VertexID GetVertexDegree(const VertexID v) const {
-    return adjacent_edges_[v].size();
+    return vertices_[v + 1].first_edge_ - vertices_[v].first_edge_; 
   }
 
   VertexID GetMaxDegree() {
@@ -508,7 +540,8 @@ class BaseGraphAccess {
   PEID rank_, size_;
 
   // Vertices and edges
-  std::vector<std::vector<Edge>> adjacent_edges_;
+  std::vector<Vertex> vertices_;
+  std::vector<Edge> edges_;
 
   std::vector<LocalVertexData> local_vertices_data_;
   std::vector<GhostVertexData> ghost_vertices_data_;
@@ -540,6 +573,7 @@ class BaseGraphAccess {
   VertexID vertex_counter_;
   EdgeID edge_counter_;
   VertexID ghost_counter_;
+  VertexID last_source_;
 };
 
 #endif
