@@ -1,9 +1,9 @@
 #include <iostream>
 
-#include "node_communicator.h"
+#include "vertex_communicator.h"
 
-void NodeCommunicator::AddMessage(const VertexID v,
-                                  const VertexPayload &msg) {
+void VertexCommunicator::AddMessage(const VertexID v,
+                                    const VertexPayload &msg) {
   g_->ForallNeighbors(v, [&](const VertexID u) {
     if (!g_->IsLocal(u)) {
       PEID neighbor = g_->GetPE(u);
@@ -31,7 +31,7 @@ void NodeCommunicator::AddMessage(const VertexID v,
   });
 }
 
-void NodeCommunicator::ReceiveMessages() {
+void VertexCommunicator::ReceiveMessages() {
   PEID messages_recv = 0;
   recv_tag_++;
   while (messages_recv < GetNumberOfAdjacentPEs()) {

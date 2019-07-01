@@ -19,8 +19,8 @@
  * this program.  If not, see <http://www.gnu.org/licenses/>.
  *****************************************************************************/
 
-#ifndef _BASE_GRAPH_ACCESS_H_
-#define _BASE_GRAPH_ACCESS_H_
+#ifndef _STATIC_GRAPH_ACCESS_H_
+#define _STATIC_GRAPH_ACCESS_H_
 
 #include <mpi.h>
 
@@ -77,9 +77,9 @@ struct Edge {
   explicit Edge(VertexID target) : target_(target) {}
 };
 
-class BaseGraphAccess {
+class StaticGraphAccess {
  public:
-  BaseGraphAccess(const PEID rank, const PEID size)
+  StaticGraphAccess(const PEID rank, const PEID size)
     : rank_(rank),
       size_(size),
       number_of_vertices_(0),
@@ -98,11 +98,11 @@ class BaseGraphAccess {
     global_to_local_map_.set_empty_key(-1);
   }
 
-  virtual ~BaseGraphAccess() {};
+  virtual ~StaticGraphAccess() {};
 
-  BaseGraphAccess(BaseGraphAccess &&rhs) = default;
+  StaticGraphAccess(StaticGraphAccess &&rhs) = default;
 
-  BaseGraphAccess(const BaseGraphAccess &rhs) = default;
+  StaticGraphAccess(const StaticGraphAccess &rhs) = default;
 
   //////////////////////////////////////////////
   // Graph construction

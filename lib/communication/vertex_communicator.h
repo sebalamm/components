@@ -19,21 +19,21 @@
  * this program.  If not, see <http://www.gnu.org/licenses/>.
  *****************************************************************************/
 
-#ifndef _NODE_COMMUNICATOR_H_
-#define _NODE_COMMUNICATOR_H_
+#ifndef _VERTEX_COMMUNICATOR_H_
+#define _VERTEX_COMMUNICATOR_H_
 
 #include <unordered_map>
 #include <vector>
 #include <memory>
 
 #include "config.h"
-#include "graph_access.h"
+#include "dynamic_graph_access.h"
 
 using Buffer = std::vector<VertexID>;
 
-class NodeCommunicator {
+class VertexCommunicator {
  public:
-  NodeCommunicator(const PEID rank,
+  VertexCommunicator(const PEID rank,
                    const PEID size,
                    MPI_Comm communicator)
       : communicator_(communicator),
@@ -48,12 +48,12 @@ class NodeCommunicator {
     send_tag_ = static_cast<unsigned int>(100 * size_);
     recv_tag_ = static_cast<unsigned int>(100 * size_);
   }
-  virtual ~NodeCommunicator() {};
+  virtual ~VertexCommunicator() {};
 
-  NodeCommunicator(const NodeCommunicator &rhs) = default;
-  NodeCommunicator(NodeCommunicator &&rhs) = default;
+  VertexCommunicator(const VertexCommunicator &rhs) = default;
+  VertexCommunicator(VertexCommunicator &&rhs) = default;
  
-  inline void SetGraph(GraphAccess *g) {
+  inline void SetGraph(DynamicGraphAccess *g) {
     g_ = g;
   }
 
@@ -84,7 +84,7 @@ class NodeCommunicator {
 
  private:
   MPI_Comm communicator_;
-  GraphAccess *g_;
+  DynamicGraphAccess *g_;
 
   PEID rank_, size_;
 

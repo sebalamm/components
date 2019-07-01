@@ -19,8 +19,8 @@
  * this program.  If not, see <http://www.gnu.org/licenses/>.
  *****************************************************************************/
 
-#ifndef _INITIAL_CONTRACTION_H_
-#define _INITIAL_CONTRACTION_H_
+#ifndef _CAG_BUILDER_H_
+#define _CAG_BUILDER_H_
 
 #include <iostream>
 #include <google/sparse_hash_set>
@@ -28,14 +28,14 @@
 
 #include "config.h"
 #include "definitions.h"
-#include "graph_access.h"
-#include "base_graph_access.h"
+#include "dynamic_graph_access.h"
+#include "static_graph_access.h"
 #include "edge_hash.h"
 
 template <typename GraphInputType>
-class InitialContraction {
+class CAGBuilder {
  public:
-  InitialContraction(GraphInputType &g, std::vector<VertexID> &vertex_labels, const PEID rank, const PEID size)
+  CAGBuilder(GraphInputType &g, std::vector<VertexID> &vertex_labels, const PEID rank, const PEID size)
       : g_(g), vertex_labels_(vertex_labels), rank_(rank), size_(size),
         num_smaller_components_(0),
         num_local_components_(0),
@@ -43,22 +43,16 @@ class InitialContraction {
         node_buffers_(size) {
     local_components_.set_empty_key(-1);
   }
-  virtual ~InitialContraction() = default;
+  virtual ~CAGBuilder() = default;
 
-  GraphAccess BuildComponentAdjacencyGraph() {
-    ComputeComponentPrefixSum();
-    ComputeLocalContractionMapping();
-    ExchangeGhostContractionMapping();
-    GenerateLocalContractionEdges(false);
-    return BuildContractionGraph();
+  DynamicGraphAccess BuildDynamicComponentAdjacencyGraph() {
+    PerformContraction(false);
+    return BuildDynamicContractionGraph();
   }
 
-  BaseGraphAccess ReduceBaseGraph() {
-    ComputeComponentPrefixSum();
-    ComputeLocalContractionMapping();
-    ExchangeGhostContractionMapping();
-    GenerateLocalContractionEdges(true);
-    return BuildReducedBaseGraph();
+  StaticGraphAccess BuildStaticComponentAdjacencyGraph() {
+    PerformContraction(true);
+    return BuildStaticContractionGraph();
   }
 
  private:
@@ -84,6 +78,13 @@ class InitialContraction {
   std::vector<std::vector<VertexID>> node_buffers_;
 
   std::vector<bool> received_message_;
+
+  void PerformContraction(bool output_dynamic) {
+    ComputeComponentPrefixSum();
+    ComputeLocalContractionMapping();
+    ExchangeGhostContractionMapping();
+    GenerateLocalContractionEdges(output_dynamic);
+  }
 
   void ComputeComponentPrefixSum() {
     // Gather local components O(max(#component))
@@ -336,7 +337,7 @@ class InitialContraction {
     });
   }
 
-  GraphAccess BuildContractionGraph() {
+  DynamicGraphAccess BuildDynamicContractionGraph() {
     VertexID from = num_smaller_components_;
     VertexID to = num_smaller_components_ + num_local_components_ - 1;
 
@@ -376,7 +377,7 @@ class InitialContraction {
                   &vertex_dist[0], 1, MPI_COMP, MPI_COMM_WORLD);
 
     // Build graph
-    GraphAccess cg(rank_, size_);
+    DynamicGraphAccess cg(rank_, size_);
     cg.StartConstruct(num_local_components_, 
                      number_of_ghost_vertices, 
                      from);
@@ -415,7 +416,7 @@ class InitialContraction {
     return cg;
   }
 
-  BaseGraphAccess BuildReducedBaseGraph() {
+  StaticGraphAccess BuildStaticContractionGraph() {
     VertexID from = num_smaller_components_;
     VertexID to = num_smaller_components_ + num_local_components_ - 1;
 
@@ -448,7 +449,7 @@ class InitialContraction {
     MPI_Allgather(&range, 1, MPI_COMP,
                   &vertex_dist[0], 1, MPI_COMP, MPI_COMM_WORLD);
 
-    BaseGraphAccess cg(rank_, size_);
+    StaticGraphAccess cg(rank_, size_);
     cg.StartConstruct(num_local_components_,
                       number_of_ghost_vertices,
                       edges_.size(),

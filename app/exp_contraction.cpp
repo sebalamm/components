@@ -28,7 +28,7 @@
 #include "timer.h"
 #include "kagen_interface.h"
 
-#include "components/exp_contraction.h"
+#include "components/exponential_contraction.h"
 
 int main(int argn, char **argv) {
   // Init MPI
@@ -65,7 +65,7 @@ int main(int argn, char **argv) {
     exit(1);
   }
   if (rank == ROOT) std::cout << "Graph generated" << std::endl;
-  BaseGraphAccess G = GraphIO::ReadDistributedEdgeList(conf, rank, size, MPI_COMM_WORLD, edge_list);
+  StaticGraphAccess G = GraphIO::ReadDistributedEdgeList(conf, rank, size, MPI_COMM_WORLD, edge_list);
 
   VertexID n = G.GatherNumberOfGlobalVertices();
   EdgeID m = G.GatherNumberOfGlobalEdges();

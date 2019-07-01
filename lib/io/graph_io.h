@@ -31,16 +31,16 @@
 #include <vector>
 
 #include "config.h"
-#include "base_graph_access.h"
+#include "static_graph_access.h"
 
 class GraphIO {
  public:
   GraphIO() = default;
   virtual ~GraphIO() = default;
 
-  static BaseGraphAccess ReadDistributedEdgeList(Config &config, PEID rank,
-                                             PEID size, const MPI_Comm &comm,
-                                             auto &edge_list) {
+  static StaticGraphAccess ReadDistributedEdgeList(Config &config, PEID rank,
+                                                   PEID size, const MPI_Comm &comm,
+                                                   auto &edge_list) {
     // Gather local edge lists (transpose)
     VertexID from = edge_list[0].first, to = edge_list[0].second;
     VertexID number_of_local_vertices = to - from + 1;
@@ -76,7 +76,7 @@ class GraphIO {
                   &vertex_dist[0], 1, MPI_COMP, comm);
 
     // Build graph
-    BaseGraphAccess G(rank, size);
+    StaticGraphAccess G(rank, size);
     G.StartConstruct(number_of_local_vertices, 
                      number_of_ghost_vertices, 
                      number_of_edges,
@@ -150,7 +150,7 @@ class GraphIO {
     return G;
   }
 
-  static BaseGraphAccess ReadDistributedGraph(Config &config, PEID rank,
+  static StaticGraphAccess ReadDistributedGraph(Config &config, PEID rank,
                                           PEID size, const MPI_Comm &comm) {
     std::string line;
     std::string filename(config.input_file);
@@ -234,7 +234,7 @@ class GraphIO {
 
     MPI_Barrier(comm);
 
-    BaseGraphAccess G(rank, size);
+    StaticGraphAccess G(rank, size);
     // TODO: Add number of ghost vertices and reserve memory
     // G.StartConstruct(number_of_local_vertices, from);
 

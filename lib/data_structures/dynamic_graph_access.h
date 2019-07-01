@@ -19,8 +19,8 @@
  * this program.  If not, see <http://www.gnu.org/licenses/>.
  *****************************************************************************/
 
-#ifndef _GRAPH_ACCESS_H_
-#define _GRAPH_ACCESS_H_
+#ifndef _DYNAMIC_GRAPH_ACCESS_
+#define _DYNAMIC_GRAPH_ACCESS_
 
 #include <mpi.h>
 
@@ -43,7 +43,7 @@
 
 #include "config.h"
 #include "timer.h"
-#include "base_graph_access.h"
+#include "static_graph_access.h"
 
 struct VertexPayload {
   VertexID deviate_;
@@ -94,15 +94,15 @@ struct VertexPayload {
   }
 };
 
-class NodeCommunicator;
-class GraphAccess {
+class VertexCommunicator;
+class DynamicGraphAccess {
  public:
-  GraphAccess(const PEID rank, const PEID size);
-  virtual ~GraphAccess();
+  DynamicGraphAccess(const PEID rank, const PEID size);
+  virtual ~DynamicGraphAccess();
 
-  GraphAccess(GraphAccess &&rhs) = default;
+  DynamicGraphAccess(DynamicGraphAccess &&rhs) = default;
 
-  GraphAccess(const GraphAccess &rhs) = default;
+  DynamicGraphAccess(const DynamicGraphAccess &rhs) = default;
 
   //////////////////////////////////////////////
   // Graph construction
@@ -821,7 +821,7 @@ class GraphAccess {
   std::vector<bool> adjacent_pes_;
 
   // Communication interface
-  NodeCommunicator *ghost_comm_;
+  VertexCommunicator *ghost_comm_;
 
   // Temporary counters
   VertexID vertex_counter_;
