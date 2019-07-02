@@ -11,6 +11,7 @@ DynamicGraphAccess::DynamicGraphAccess(const PEID rank, const PEID size)
       number_of_local_vertices_(0),
       number_of_global_vertices_(0),
       number_of_edges_(0),
+      number_of_cut_edges_(0),
       number_of_global_edges_(0),
       max_degree_(0),
       max_degree_computed_(false),
@@ -118,6 +119,7 @@ EdgeID DynamicGraphAccess::AddEdge(VertexID from, VertexID to, PEID rank) {
     PEID neighbor = (rank == size_) ? GetPEFromOffset(to) : rank;
     local_vertices_data_[from].is_interface_vertex_ = true;
     if (IsGhostFromGlobal(to)) { // true if ghost already in map, otherwise false
+      number_of_cut_edges_++;
       AddGhostEdge(from, to, neighbor);
     } else {
       std::cout << "This shouldn't happen" << std::endl;

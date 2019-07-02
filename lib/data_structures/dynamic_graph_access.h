@@ -511,6 +511,8 @@ class DynamicGraphAccess {
 
   inline EdgeID GetNumberOfEdges() const { return number_of_edges_; }
 
+  inline EdgeID GetNumberOfCutEdges() const { return number_of_cut_edges_; }
+
   VertexID GatherNumberOfGlobalVertices() {
     VertexID local_vertices = 0;
     ForallLocalVertices([&](const VertexID v) { local_vertices++; });
@@ -801,6 +803,7 @@ class DynamicGraphAccess {
   VertexID number_of_global_vertices_;
 
   EdgeID number_of_edges_;
+  EdgeID number_of_cut_edges_;
   EdgeID number_of_global_edges_;
 
   VertexID max_degree_;

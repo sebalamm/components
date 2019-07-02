@@ -86,6 +86,7 @@ class StaticGraphAccess {
       number_of_local_vertices_(0),
       number_of_global_vertices_(0),
       number_of_edges_(0),
+      number_of_cut_edges_(0),
       number_of_global_edges_(0),
       max_degree_(0),
       max_degree_computed_(false),
@@ -285,6 +286,8 @@ class StaticGraphAccess {
 
   inline EdgeID GetNumberOfEdges() const { return number_of_edges_; }
 
+  inline EdgeID GetNumberOfCutEdges() const { return number_of_cut_edges_; }
+
   inline EdgeID GetFirstEdge(const VertexID v) const {
     return vertices_[v].first_edge_;
   }
@@ -353,6 +356,7 @@ class StaticGraphAccess {
       PEID neighbor = (rank == size_) ? GetPEFromOffset(to) : rank;
       local_vertices_data_[from].is_interface_vertex_ = true;
       if (IsGhostFromGlobal(to)) { // true if ghost already in map, otherwise false
+        number_of_cut_edges_++;
         AddLocalEdge(from, to);
       } else {
         std::cout << "This shouldn't happen" << std::endl;
@@ -550,6 +554,7 @@ class StaticGraphAccess {
   VertexID number_of_global_vertices_;
 
   EdgeID number_of_edges_;
+  EdgeID number_of_cut_edges_;
   EdgeID number_of_global_edges_;
 
   VertexID max_degree_;

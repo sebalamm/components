@@ -70,12 +70,22 @@ int main(int argn, char **argv) {
 
   VertexID n = G.GatherNumberOfGlobalVertices();
   EdgeID m = G.GatherNumberOfGlobalEdges();
+
+  // Determine min/maximum cut size
+  EdgeID m_cut = G.GetNumberOfCutEdges();
+  EdgeID min_cut, max_cut;
+  MPI_Reduce(&m_cut, &min_cut, 1, MPI_VERTEX, MPI_MIN, ROOT,
+             MPI_COMM_WORLD);
+  MPI_Reduce(&m_cut, &max_cut, 1, MPI_VERTEX, MPI_MAX, ROOT,
+             MPI_COMM_WORLD);
+
   if (rank == ROOT) {
     std::cout << "INPUT "
               << "s=" << conf.seed << ", "
               << "p=" << size  << ", "
               << "n=" << n << ", "
-              << "m=" << m << std::endl;
+              << "m=" << m << ", "
+              << "c(min,max)=" << min_cut << "," << max_cut << std::endl;
   }
 
   // Timers
