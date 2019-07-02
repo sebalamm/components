@@ -64,6 +64,7 @@ int main(int argn, char **argv) {
     MPI_Finalize();
     exit(1);
   }
+
   if (rank == ROOT) std::cout << "Graph generated" << std::endl;
   StaticGraphAccess G = GraphIO::ReadDistributedEdgeList(conf, rank, size, MPI_COMM_WORLD, edge_list);
 

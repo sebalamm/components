@@ -47,7 +47,7 @@
 struct Vertex {
   EdgeID first_edge_;
 
-  Vertex() : first_edge_(0) {}
+  Vertex() : first_edge_(std::numeric_limits<EdgeID>::max()) {}
   explicit Vertex(EdgeID e) : first_edge_(e) {}
 };
 
@@ -116,6 +116,8 @@ class StaticGraphAccess {
     number_of_edges_ = total_m;
 
     vertices_.resize(number_of_vertices_ + 1);
+    // Fix first node being isolated
+    if (local_n > 0) vertices_[0].first_edge_ = 0;
     edges_.resize(number_of_edges_);
 
     local_vertices_data_.resize(number_of_vertices_);
@@ -136,11 +138,9 @@ class StaticGraphAccess {
     vertices_.resize(vertex_counter_ + 1);
     edges_.resize(edge_counter_ + 1);
 
-    //fill isolated sources at the end
-    if (last_source_ != vertex_counter_ - 1) {
-      //in that case at least the last node was an isolated node
-      for (VertexID v = vertex_counter_; v > last_source_ + 1; v--) {
-        vertices_[v].first_edge_ = vertices_[last_source_ + 1].first_edge_;
+    for (VertexID v = 1; v <= vertex_counter_ + 1; v++) {
+      if (vertices_[v].first_edge_ == std::numeric_limits<EdgeID>::max()) {
+        vertices_[v].first_edge_ = vertices_[v - 1].first_edge_;
       }
     }
   }
@@ -329,7 +329,6 @@ class StaticGraphAccess {
   inline VertexID AddGhostVertex(VertexID v) {
     AddVertex();
     global_to_local_map_[v] = ghost_counter_++;
-    // if (rank_ == ROOT) std::cout << "add ghost " << v << "->" << global_to_local_map_[v] << std::endl;
 
     // Update data
     local_vertices_data_[global_to_local_map_[v]].is_interface_vertex_ = false;
@@ -360,7 +359,7 @@ class StaticGraphAccess {
         exit(1);
       }
     }
-    last_source_ = from;
+    if (from > last_source_) last_source_ = from;
     return edge_counter_;
   }
 
