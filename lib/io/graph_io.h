@@ -31,45 +31,38 @@
 #include <vector>
 
 #include "config.h"
-#include "base_graph_access.h"
+#include "static_graph_access.h"
 
 class GraphIO {
  public:
   GraphIO() = default;
   virtual ~GraphIO() = default;
 
-  static BaseGraphAccess ReadDistributedEdgeList(Config &config, PEID rank,
-                                             PEID size, const MPI_Comm &comm,
-                                             auto &edge_list) {
+  static StaticGraphAccess ReadDistributedEdgeList(Config &config, PEID rank,
+                                                   PEID size, const MPI_Comm &comm,
+                                                   auto &edge_list) {
     // Gather local edge lists (transpose)
     VertexID from = edge_list[0].first, to = edge_list[0].second;
     VertexID number_of_local_vertices = to - from + 1;
     edge_list.erase(begin(edge_list));
 
-    std::vector<VertexID> num_edges_for_local_vertex(number_of_local_vertices, 0);
-    VertexID number_of_ghost_vertices = 0;
-    google::dense_hash_map<VertexID, VertexID> num_edges_for_ghost_vertex; 
-    num_edges_for_ghost_vertex.set_empty_key(-1);
-
-    // TODO: Backward edges missing for both local and ghost vertices
+    // Count ghost vertices
+    google::dense_hash_set<VertexID> ghost_vertices; 
+    ghost_vertices.set_empty_key(-1);
     for (auto &edge : edge_list) {
       VertexID source = edge.first;
       VertexID target = edge.second;
 
-      // Source
-      num_edges_for_local_vertex[source - from]++;
-
       // Target ghost
       if (from > target || target > to) {
-        if (num_edges_for_ghost_vertex.find(target) == end(num_edges_for_ghost_vertex)) {
-            num_edges_for_ghost_vertex[target] = 0;
-            number_of_ghost_vertices++;
+        if (ghost_vertices.find(target) == end(ghost_vertices)) {
+            ghost_vertices.insert(target);
         } 
-        num_edges_for_ghost_vertex[target]++;
-      } else {
-        num_edges_for_local_vertex[target - from]++;
-      }
+      } 
     }
+
+    VertexID number_of_ghost_vertices = ghost_vertices.size();
+    VertexID number_of_edges = edge_list.size();
 
     // Add datatype
     MPI_Datatype MPI_COMP;
@@ -83,38 +76,81 @@ class GraphIO {
                   &vertex_dist[0], 1, MPI_COMP, comm);
 
     // Build graph
-    BaseGraphAccess G(rank, size);
+    StaticGraphAccess G(rank, size);
     G.StartConstruct(number_of_local_vertices, 
                      number_of_ghost_vertices, 
+                     number_of_edges,
                      from);
 
     G.SetOffsetArray(std::move(vertex_dist));
 
-    // Reserve local vertices
-    for (VertexID v = 0; v < number_of_local_vertices; ++v) {
-      VertexID num_edges = num_edges_for_local_vertex[v];
-      G.ReserveEdgesForVertex(v, num_edges);
+    // Initialize ghost vertices
+    for (auto &v : ghost_vertices) {
+      G.AddGhostVertex(v);
     }
+
+    // Reserve local vertices
+    // for (VertexID v = 0; v < number_of_local_vertices; ++v) {
+    //   VertexID num_edges = num_edges_for_local_vertex[v];
+    //   G.ReserveEdgesForVertex(v, num_edges);
+    // }
 
     // Reserve ghost vertices
-    for (auto &kv : num_edges_for_ghost_vertex) {
-      VertexID global_id = kv.first;
-      VertexID num_edges = kv.second;
-      VertexID local_id = G.AddGhostVertex(global_id);
-      G.ReserveEdgesForVertex(local_id, num_edges);
-    }
+    // for (auto &kv : num_edges_for_ghost_vertex) {
+    //   VertexID global_id = kv.first;
+    //   VertexID num_edges = kv.second;
+    //   VertexID local_id = G.AddGhostVertex(global_id);
+    //   G.ReserveEdgesForVertex(local_id, num_edges);
+    // }
 
-    // Add edges
+    // Add local edges
     // for (VertexID v = 0; v < number_of_local_vertices; ++v) {
+
+    std::sort(edge_list.begin(), edge_list.end(), [&](auto &left, auto &right) {
+        VertexID offset = to + 1;
+        VertexID left_source_distance = (left.first < from ? 
+                                         left.first + offset : 
+                                         left.first) - from;
+        VertexID left_target_distance = (left.second < from ? 
+                                          left.second + offset : 
+                                          left.second) - from;
+
+        VertexID right_source_distance = (right.first < from ? 
+                                          right.first + offset : 
+                                          right.first) - from;
+        VertexID right_target_distance = (right.second < from ? 
+                                          right.second + offset : 
+                                          right.second) - from;
+
+        return (left_source_distance < right_source_distance
+                  || (left_source_distance == right_source_distance && left_target_distance < right_target_distance));
+    });
     for (auto &edge : edge_list) {
       G.AddEdge(G.GetLocalID(edge.first), edge.second, size);
     }
+    
+    // if (rank == ROOT) G.OutputLocal();
+    // MPI_Barrier(MPI_COMM_WORLD);
+
+    // Add ghost edges
+    // std::sort(edge_list.begin(), edge_list.end(), [](auto &left, auto &right) {
+    //     return left.second < right.second;
+    // });
+    // for (auto &edge : edge_list) {
+    //   if (from > edge.second || edge.second > to) {
+    //     G.AddEdge(G.GetLocalID(edge.second), edge.first, size);
+    //   }
+    // }
 
     G.FinishConstruct();
+
+    // if (rank == ROOT) G.OutputLocal();
+    // MPI_Barrier(MPI_COMM_WORLD);
+
     return G;
   }
 
-  static BaseGraphAccess ReadDistributedGraph(Config &config, PEID rank,
+  static StaticGraphAccess ReadDistributedGraph(Config &config, PEID rank,
                                           PEID size, const MPI_Comm &comm) {
     std::string line;
     std::string filename(config.input_file);
@@ -198,7 +234,7 @@ class GraphIO {
 
     MPI_Barrier(comm);
 
-    BaseGraphAccess G(rank, size);
+    StaticGraphAccess G(rank, size);
     // TODO: Add number of ghost vertices and reserve memory
     // G.StartConstruct(number_of_local_vertices, from);
 
@@ -210,8 +246,6 @@ class GraphIO {
         G.AddEdge(v, j - 1, size);
     }
     G.FinishConstruct();
-    MPI_Barrier(comm);
-
     return G;
   }
 

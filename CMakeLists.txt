@@ -54,11 +54,11 @@ set(SOURCES
         app
         lib
         lib/communication
-        lib/communication/node_communicator.cpp
+        lib/communication/vertex_communicator.cpp
         lib/components
         lib/contraction
         lib/data_structures
-        lib/data_structures/graph_access.cpp
+        lib/data_structures/dynamic_graph_access.cpp
         lib/io
         lib/tools
         )

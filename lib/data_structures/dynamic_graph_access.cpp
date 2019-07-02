@@ -1,10 +1,10 @@
 #include <iostream>
 #include <sstream>
 
-#include "graph_access.h"
-#include "node_communicator.h"
+#include "dynamic_graph_access.h"
+#include "vertex_communicator.h"
 
-GraphAccess::GraphAccess(const PEID rank, const PEID size) 
+DynamicGraphAccess::DynamicGraphAccess(const PEID rank, const PEID size) 
     : rank_(rank),
       size_(size),
       number_of_vertices_(0),
@@ -20,18 +20,18 @@ GraphAccess::GraphAccess(const PEID rank, const PEID size)
       vertex_counter_(0),
       edge_counter_(0),
       ghost_counter_(0) {
-  ghost_comm_ = new NodeCommunicator(rank_, size_, MPI_COMM_WORLD);
+  ghost_comm_ = new VertexCommunicator(rank_, size_, MPI_COMM_WORLD);
   ghost_comm_->SetGraph(this);
   label_shortcut_.set_empty_key(-1);
   global_to_local_map_.set_empty_key(-1);
 }
 
-GraphAccess::~GraphAccess() {
+DynamicGraphAccess::~DynamicGraphAccess() {
   delete ghost_comm_;
   ghost_comm_ = nullptr;
 }
 
-void GraphAccess::StartConstruct(const VertexID local_n,
+void DynamicGraphAccess::StartConstruct(const VertexID local_n,
                                  const VertexID ghost_n,
                                  const VertexID local_offset) {
   number_of_local_vertices_ = local_n;
@@ -54,15 +54,15 @@ void GraphAccess::StartConstruct(const VertexID local_n,
   adjacent_pes_.resize(static_cast<unsigned long>(size_), false);
 }
 
-void GraphAccess::SendAndReceiveGhostVertices() {
+void DynamicGraphAccess::SendAndReceiveGhostVertices() {
   ghost_comm_->SendAndReceiveGhostVertices();
 }
 
-void GraphAccess::ReceiveAndSendGhostVertices() {
+void DynamicGraphAccess::ReceiveAndSendGhostVertices() {
   ghost_comm_->ReceiveAndSendGhostVertices();
 }
 
-void GraphAccess::SetVertexPayload(const VertexID v,
+void DynamicGraphAccess::SetVertexPayload(const VertexID v,
                                    VertexPayload &&msg,
                                    bool propagate) {
   if (GetVertexMessage(v) != msg
@@ -72,18 +72,18 @@ void GraphAccess::SetVertexPayload(const VertexID v,
   SetVertexMessage(v, std::move(msg));
 }
 
-void GraphAccess::ForceVertexPayload(const VertexID v,
+void DynamicGraphAccess::ForceVertexPayload(const VertexID v,
                                      VertexPayload &&msg) {
   if (local_vertices_data_[v].is_interface_vertex_)
     ghost_comm_->AddMessage(v, msg);
   SetVertexMessage(v, std::move(msg));
 }
 
-void GraphAccess::ReserveEdgesForVertex(VertexID v, VertexID num_edges) {
+void DynamicGraphAccess::ReserveEdgesForVertex(VertexID v, VertexID num_edges) {
   adjacent_edges_[v].reserve(num_edges);
 }
 
-VertexID GraphAccess::AddGhostVertex(VertexID v) {
+VertexID DynamicGraphAccess::AddGhostVertex(VertexID v) {
   VertexID local_id = ghost_counter_++;
   global_to_local_map_[v] = local_id;
 
@@ -111,7 +111,7 @@ VertexID GraphAccess::AddGhostVertex(VertexID v) {
 }
 
 // Local ID, Global ID, target rank
-EdgeID GraphAccess::AddEdge(VertexID from, VertexID to, PEID rank) {
+EdgeID DynamicGraphAccess::AddEdge(VertexID from, VertexID to, PEID rank) {
   if (IsLocalFromGlobal(to)) {
     AddLocalEdge(from, to);
   } else {
@@ -128,21 +128,21 @@ EdgeID GraphAccess::AddEdge(VertexID from, VertexID to, PEID rank) {
   return edge_counter_;
 }
 
-void GraphAccess::AddLocalEdge(VertexID from, VertexID to) {
+void DynamicGraphAccess::AddLocalEdge(VertexID from, VertexID to) {
   adjacent_edges_[from].emplace_back(to - local_offset_);
   adjacent_edges_[to - local_offset_].emplace_back(from);
 }
 
-void GraphAccess::AddGhostEdge(VertexID from, VertexID to, PEID neighbor) {
+void DynamicGraphAccess::AddGhostEdge(VertexID from, VertexID to, PEID neighbor) {
   adjacent_edges_[from].emplace_back(global_to_local_map_[to]);
   adjacent_edges_[global_to_local_map_[to]].emplace_back(from);
 }
 
-void GraphAccess::RemoveAllEdges(const VertexID from) {
+void DynamicGraphAccess::RemoveAllEdges(const VertexID from) {
   adjacent_edges_[from].clear();
 }
 
-bool GraphAccess::CheckDuplicates() {
+bool DynamicGraphAccess::CheckDuplicates() {
   // google::dense_hash_set<VertexID> neighbors;
   ForallLocalVertices([&](const VertexID v) {
     std::unordered_set<VertexID> neighbors;
@@ -157,7 +157,7 @@ bool GraphAccess::CheckDuplicates() {
   return false;
 }
 
-void GraphAccess::OutputLocal() {
+void DynamicGraphAccess::OutputLocal() {
   PEID rank, size;
   MPI_Comm_rank(MPI_COMM_WORLD, &rank);
   MPI_Comm_size(MPI_COMM_WORLD, &size);
@@ -185,7 +185,7 @@ void GraphAccess::OutputLocal() {
   });
 }
 
-void GraphAccess::OutputLabels() {
+void DynamicGraphAccess::OutputLabels() {
   PEID rank, size;
   MPI_Comm_rank(MPI_COMM_WORLD, &rank);
   MPI_Comm_size(MPI_COMM_WORLD, &size);
@@ -199,7 +199,7 @@ void GraphAccess::OutputLabels() {
   });
 }
 
-void GraphAccess::OutputGhosts() {
+void DynamicGraphAccess::OutputGhosts() {
   PEID rank, size;
   MPI_Comm_rank(MPI_COMM_WORLD, &rank);
   MPI_Comm_size(MPI_COMM_WORLD, &size);

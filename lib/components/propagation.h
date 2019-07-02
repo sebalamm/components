@@ -27,14 +27,14 @@
 #include "config.h"
 #include "definitions.h"
 #include "graph_io.h"
-#include "graph_access.h"
+#include "dynamic_graph_access.h"
 
 class Propagation {
  public:
   Propagation() = default;
   virtual ~Propagation() = default;
 
-  void FindComponents(GraphAccess &g, const Config &conf, const PEID rank) {
+  void FindComponents(DynamicGraphAccess &g, const Config &conf, const PEID rank) {
     // Iterate for fixed number of rounds
     for (unsigned int i = 0; i < conf.prop_iterations; ++i) {
       FindLocalComponents(g);
@@ -45,12 +45,12 @@ class Propagation {
     }
   }
 
-  void Output(GraphAccess &g) {
+  void Output(DynamicGraphAccess &g) {
     GatherComponents(g);
   }
 
  private:
-  void FindLocalComponents(GraphAccess &g) {
+  void FindLocalComponents(DynamicGraphAccess &g) {
     g.ForallLocalVertices([&](VertexID v) {
       // Gather min label of all neighbors
       VertexID min_label = g.GetVertexLabel(v);
@@ -68,7 +68,7 @@ class Propagation {
     });
   }
 
-  void GatherComponents(GraphAccess &g) {
+  void GatherComponents(DynamicGraphAccess &g) {
     // Gather local components
     std::vector<VertexID> local_components(g.GetNumberOfLocalVertices());
     g.ForallLocalVertices([&](VertexID v) {

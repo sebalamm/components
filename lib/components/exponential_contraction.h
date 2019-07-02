@@ -18,8 +18,8 @@
  * this program.  If not, see <http://www.gnu.org/licenses/>.
  *****************************************************************************/
 
-#ifndef _EXP_CONTRACTION_H_
-#define _EXP_CONTRACTION_H_
+#ifndef _EXPONENTIAL_CONTRACTION_H_
+#define _EXPONENTIAL_CONTRACTION_H_
 
 #include <iostream>
 #include <unordered_set>
@@ -29,10 +29,10 @@
 #include "config.h"
 #include "definitions.h"
 #include "graph_io.h"
-#include "graph_access.h"
-#include "base_graph_access.h"
-#include "initial_contraction.h"
-#include "graph_contraction.h"
+#include "dynamic_graph_access.h"
+#include "static_graph_access.h"
+#include "cag_builder.h"
+#include "dynamic_contraction.h"
 #include "utils.h"
 #include "union_find.h"
 #include "propagation.h"
@@ -50,15 +50,15 @@ class ExponentialContraction {
     exp_contraction_ = nullptr;
   };
 
-  void FindComponents(BaseGraphAccess &g, std::vector<VertexID> &g_labels) {
+  void FindComponents(StaticGraphAccess &g, std::vector<VertexID> &g_labels) {
     rng_offset_ = size_ + config_.seed;
     FindLocalComponents(g, g_labels);
     
     // First round of contraction
-    InitialContraction<BaseGraphAccess> 
+    CAGBuilder<StaticGraphAccess> 
       first_contraction(g, g_labels, rank_, size_);
-    BaseGraphAccess cag 
-      = first_contraction.ReduceBaseGraph();
+    StaticGraphAccess cag 
+      = first_contraction.BuildStaticComponentAdjacencyGraph();
 
     // Delete original graph?
     // Keep contraction labeling for later
@@ -66,15 +66,18 @@ class ExponentialContraction {
     std::vector<VertexID> cag_labels(g.GetNumberOfVertices(), 0);
     FindLocalComponents(cag, cag_labels);
 
+    // cag.OutputLocal();
+    // MPI_Barrier(MPI_COMM_WORLD);
+
     // Second round of contraction
-    InitialContraction<BaseGraphAccess> 
+    CAGBuilder<StaticGraphAccess> 
       second_contraction(cag, cag_labels, rank_, size_);
-    GraphAccess ccag 
-      = second_contraction.BuildComponentAdjacencyGraph();
+    DynamicGraphAccess ccag 
+      = second_contraction.BuildDynamicComponentAdjacencyGraph();
 
     // Delete intermediate graph?
     // Keep contraction labeling for later
-    exp_contraction_ = new GraphContraction(ccag, rank_, size_);
+    exp_contraction_ = new DynamicContraction(ccag, rank_, size_);
 
     // Main decomposition algorithm
     PerformDecomposition(ccag);
@@ -85,8 +88,7 @@ class ExponentialContraction {
     ApplyToLocalComponents(cag, cag_labels, g, g_labels);
   }
 
-  void Output(GraphAccess &g) {
-    // if (rank_ == ROOT) std::cout << "Component labels" << std::endl;
+  void Output(DynamicGraphAccess &g) {
     g.OutputLabels();
   }
 
@@ -105,9 +107,9 @@ class ExponentialContraction {
   Timer iteration_timer_;
   
   // Contraction
-  GraphContraction *exp_contraction_;
+  DynamicContraction *exp_contraction_;
 
-  void PerformDecomposition(GraphAccess &g) {
+  void PerformDecomposition(DynamicGraphAccess &g) {
     // if (rank_ == ROOT) std::cout << "[STATUS] |- Start exponential BFS" << std::endl;
     VertexID global_vertices = g.GatherNumberOfGlobalVertices();
     if (global_vertices > 0) {
@@ -121,7 +123,7 @@ class ExponentialContraction {
     exp_contraction_->UndoContraction();
   }
 
-  void FindLocalComponents(BaseGraphAccess &g, std::vector<VertexID> & label) {
+  void FindLocalComponents(StaticGraphAccess &g, std::vector<VertexID> & label) {
     std::vector<bool> marked(g.GetNumberOfVertices(), false);
     std::vector<VertexID> parent(g.GetNumberOfVertices(), 0);
 
@@ -131,7 +133,7 @@ class ExponentialContraction {
 
     // Compute components
     g.ForallLocalVertices([&](const VertexID v) {
-      if (!marked[v]) Utility<BaseGraphAccess>::BFS(g, v, marked, parent);
+      if (!marked[v]) Utility<StaticGraphAccess>::BFS(g, v, marked, parent);
     });
 
     // Set vertex labe for contraction
@@ -140,7 +142,7 @@ class ExponentialContraction {
     });
   }
 
-  void FindHighDegreeVertices(GraphAccess &g) {
+  void FindHighDegreeVertices(DynamicGraphAccess &g) {
     std::vector<VertexID> local_vertices;
     std::vector<VertexID> local_degrees;
     // TODO: Might be too small
@@ -182,7 +184,7 @@ class ExponentialContraction {
                    MPI_COMM_WORLD);
   }
 
-  void RunContraction(GraphAccess &g) {
+  void RunContraction(DynamicGraphAccess &g) {
     VertexID global_vertices = g.GatherNumberOfGlobalVertices();
     // TODO: Number of vertices seems correct so something is probably wrong with backwards edges
     if (rank_ == ROOT) {
@@ -325,21 +327,21 @@ class ExponentialContraction {
     }
   }
 
-  void ApplyToLocalComponents(GraphAccess &cag, BaseGraphAccess &g, std::vector<VertexID> &g_label) {
+  void ApplyToLocalComponents(DynamicGraphAccess &cag, StaticGraphAccess &g, std::vector<VertexID> &g_label) {
     g.ForallLocalVertices([&](const VertexID v) {
       VertexID cv = cag.GetLocalID(g.GetContractionVertex(v));
       g_label[v] = cag.GetVertexLabel(cv);
     });
   }
 
-  void ApplyToLocalComponents(BaseGraphAccess &cag, std::vector<VertexID> &cag_label, BaseGraphAccess &g, std::vector<VertexID> &g_label) {
+  void ApplyToLocalComponents(StaticGraphAccess &cag, std::vector<VertexID> &cag_label, StaticGraphAccess &g, std::vector<VertexID> &g_label) {
     g.ForallLocalVertices([&](const VertexID v) {
       VertexID cv = cag.GetLocalID(g.GetContractionVertex(v));
       g_label[v] = cag_label[cv];
     });
   }
 
-  void RunSequentialCC(GraphAccess &g) {
+  void RunSequentialCC(DynamicGraphAccess &g) {
     // Perform gather of graph on root 
     std::vector<VertexID> vertices;
     std::vector<int> num_vertices_per_pe(size_);
@@ -365,11 +367,11 @@ class ExponentialContraction {
         edge_lists[vertex_map[e.first]].push_back(vertex_map[e.second]);
 
       // Construct temporary graph
-      BaseGraphAccess sg(ROOT, 1);
+      StaticGraphAccess sg(ROOT, 1);
 
-      sg.StartConstruct(vertices.size(), 0, ROOT);
+      sg.StartConstruct(vertices.size(), 0, edges.size(), ROOT);
       for (int v = 0; v < vertices.size(); ++v) {
-        sg.ReserveEdgesForVertex(v, edge_lists[v].size());
+        // sg.ReserveEdgesForVertex(v, edge_lists[v].size());
         for (const int &e : edge_lists[v]) 
           sg.AddEdge(v, e, ROOT);
       }

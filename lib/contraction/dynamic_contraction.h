@@ -19,28 +19,28 @@
  * this program.  If not, see <http://www.gnu.org/licenses/>.
  *****************************************************************************/
 
-#ifndef _GRAPH_CONTRACTION_H_
-#define _GRAPH_CONTRACTION_H_
+#ifndef _DYNAMIC_CONTRACTION_H_
+#define _DYNAMIC_CONTRACTION_H_
 
 #include <iostream>
 #include <google/sparse_hash_set>
 
 #include "config.h"
 #include "definitions.h"
-#include "graph_access.h"
-#include "base_graph_access.h"
+#include "dynamic_graph_access.h"
+#include "static_graph_access.h"
 #include "edge_hash.h"
 
-class GraphContraction {
+class DynamicContraction {
  public:
-  GraphContraction(GraphAccess &g, const PEID rank, const PEID size)
+  DynamicContraction(DynamicGraphAccess &g, const PEID rank, const PEID size)
       : g_(g), 
         rank_(rank), 
         size_(size),
         contraction_level_(0) { 
     inactive_level_.resize(g_.GetNumberOfVertices(), -1);
   }
-  virtual ~GraphContraction() = default;
+  virtual ~DynamicContraction() = default;
 
   inline bool IsActive(VertexID v) const {
     return inactive_level_[v] == -1;
@@ -414,7 +414,7 @@ class GraphContraction {
 
  private:
   // Original graph instance
-  GraphAccess &g_;
+  DynamicGraphAccess &g_;
 
   // Network information
   PEID rank_, size_;

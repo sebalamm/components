@@ -19,22 +19,23 @@
  * this program.  If not, see <http://www.gnu.org/licenses/>.
  *****************************************************************************/
 
-#ifndef _INITIAL_CONTRACTION_H_
-#define _INITIAL_CONTRACTION_H_
+#ifndef _CAG_BUILDER_H_
+#define _CAG_BUILDER_H_
 
 #include <iostream>
 #include <google/sparse_hash_set>
+#include <google/dense_hash_set>
 
 #include "config.h"
 #include "definitions.h"
-#include "graph_access.h"
-#include "base_graph_access.h"
+#include "dynamic_graph_access.h"
+#include "static_graph_access.h"
 #include "edge_hash.h"
 
 template <typename GraphInputType>
-class InitialContraction {
+class CAGBuilder {
  public:
-  InitialContraction(GraphInputType &g, std::vector<VertexID> &vertex_labels, const PEID rank, const PEID size)
+  CAGBuilder(GraphInputType &g, std::vector<VertexID> &vertex_labels, const PEID rank, const PEID size)
       : g_(g), vertex_labels_(vertex_labels), rank_(rank), size_(size),
         num_smaller_components_(0),
         num_local_components_(0),
@@ -42,22 +43,16 @@ class InitialContraction {
         node_buffers_(size) {
     local_components_.set_empty_key(-1);
   }
-  virtual ~InitialContraction() = default;
+  virtual ~CAGBuilder() = default;
 
-  GraphAccess BuildComponentAdjacencyGraph() {
-    ComputeComponentPrefixSum();
-    ComputeLocalContractionMapping();
-    ExchangeGhostContractionMapping();
-    GenerateLocalContractionEdges();
-    return BuildContractionGraph();
+  DynamicGraphAccess BuildDynamicComponentAdjacencyGraph() {
+    PerformContraction(false);
+    return BuildDynamicContractionGraph();
   }
 
-  BaseGraphAccess ReduceBaseGraph() {
-    ComputeComponentPrefixSum();
-    ComputeLocalContractionMapping();
-    ExchangeGhostContractionMapping();
-    GenerateLocalContractionEdges();
-    return BuildReducedBaseGraph();
+  StaticGraphAccess BuildStaticComponentAdjacencyGraph() {
+    PerformContraction(true);
+    return BuildStaticContractionGraph();
   }
 
  private:
@@ -77,11 +72,19 @@ class InitialContraction {
 
   // Local edges
   EdgeHash local_edges_{};
+  std::vector<std::pair<VertexID, VertexID>> edges_;
 
   // Send buffers
   std::vector<std::vector<VertexID>> node_buffers_;
 
   std::vector<bool> received_message_;
+
+  void PerformContraction(bool output_dynamic) {
+    ComputeComponentPrefixSum();
+    ComputeLocalContractionMapping();
+    ExchangeGhostContractionMapping();
+    GenerateLocalContractionEdges(output_dynamic);
+  }
 
   void ComputeComponentPrefixSum() {
     // Gather local components O(max(#component))
@@ -132,7 +135,6 @@ class InitialContraction {
     g_.ForallLocalVertices([&](const VertexID v) {
       VertexID component = label_map[vertex_labels_[v]];
       g_.SetContractionVertex(v, component);
-      // std::cout << "R" << rank_ << " v " << g_.GetGlobalID(v) << " set cid " << component << std::endl;
     });
   }
 
@@ -192,7 +194,6 @@ class InitialContraction {
       if (largest_component_size[i] > 0) {
         node_buffers_[i].push_back(std::numeric_limits<VertexID>::max()); 
         node_buffers_[i].push_back(largest_component_id[i]); 
-        // std::cout << "R" << rank_ << " set largest " << largest_component_id[i] << " PE " << i << std::endl;
       }
     }
   }
@@ -310,23 +311,33 @@ class InitialContraction {
     }
   }
 
-  void GenerateLocalContractionEdges() {
+  void GenerateLocalContractionEdges(bool backward) {
     // Gather local edges (there shouldn't be any) O(m/P)
     g_.ForallLocalVertices([&](const VertexID v) {
       VertexID cv = g_.GetContractionVertex(v);
       g_.ForallNeighbors(v, [&](const VertexID w) {
         VertexID cw = g_.GetContractionVertex(w);
         if (cv != cw) {
+          // Forward edge
           auto h_edge = HashedEdge{num_global_components_, cv, cw, g_.GetPE(w)};
           if (local_edges_.find(h_edge) == end(local_edges_)) {
             local_edges_.insert(h_edge);
+            edges_.emplace_back(cv, cw);
+          }
+          // Backward edge
+          if (backward) {
+            h_edge = HashedEdge{num_global_components_, cw, cv, rank_};
+            if (local_edges_.find(h_edge) == end(local_edges_)) {
+              local_edges_.insert(h_edge);
+              edges_.emplace_back(cw, cv);
+            }
           }
         }
       });
     });
   }
 
-  GraphAccess BuildContractionGraph() {
+  DynamicGraphAccess BuildDynamicContractionGraph() {
     VertexID from = num_smaller_components_;
     VertexID to = num_smaller_components_ + num_local_components_ - 1;
 
@@ -366,7 +377,7 @@ class InitialContraction {
                   &vertex_dist[0], 1, MPI_COMP, MPI_COMM_WORLD);
 
     // Build graph
-    GraphAccess cg(rank_, size_);
+    DynamicGraphAccess cg(rank_, size_);
     cg.StartConstruct(num_local_components_, 
                      number_of_ghost_vertices, 
                      from);
@@ -382,8 +393,11 @@ class InitialContraction {
       } else {
         local_id = cg.GetLocalID(global_id);
       }
-      cg.ReserveEdgesForVertex(local_id, num_edges);
+      // cg.ReserveEdgesForVertex(local_id, num_edges);
     }
+
+    // std::cout << "rank " << rank_ << " add edges" << std::endl;
+    // MPI_Barrier(MPI_COMM_WORLD);
 
     // Add edges
     // for (VertexID v = 0; v < number_of_local_vertices; ++v) {
@@ -402,33 +416,27 @@ class InitialContraction {
     return cg;
   }
 
-  BaseGraphAccess BuildReducedBaseGraph() {
+  StaticGraphAccess BuildStaticContractionGraph() {
     VertexID from = num_smaller_components_;
     VertexID to = num_smaller_components_ + num_local_components_ - 1;
 
-    VertexID number_of_ghost_vertices = 0;
-    google::dense_hash_map<VertexID, VertexID> num_edges_for_vertex; 
-    num_edges_for_vertex.set_empty_key(-1);
+    google::dense_hash_set<VertexID> ghost_vertices; 
+    ghost_vertices.set_empty_key(-1);
 
-    for (auto &e : local_edges_) {
-      VertexID source = e.source;
-      VertexID target = e.target;
+    for (auto &e : edges_) {
+      VertexID source = e.first;
+      VertexID target = e.second;
 
       // Source
-      if (num_edges_for_vertex.find(source) == end(num_edges_for_vertex)) {
-          num_edges_for_vertex[source] = 0;
-      }
-      num_edges_for_vertex[source]++;
-
-      // Target
-      if (num_edges_for_vertex.find(target) == end(num_edges_for_vertex)) {
-          num_edges_for_vertex[target] = 0;
-          if (from > target || target > to) {
-            number_of_ghost_vertices++;
-          } 
-      }
-      num_edges_for_vertex[target]++;
+      if (from > target || target > to) {
+        if (ghost_vertices.find(target) == end(ghost_vertices)) {
+            ghost_vertices.insert(target);
+        } 
+      } 
     }
+
+    VertexID number_of_ghost_vertices = ghost_vertices.size();
+    VertexID number_of_edges = edges_.size();
 
     // Add datatype
     MPI_Datatype MPI_COMP;
@@ -441,29 +449,43 @@ class InitialContraction {
     MPI_Allgather(&range, 1, MPI_COMP,
                   &vertex_dist[0], 1, MPI_COMP, MPI_COMM_WORLD);
 
-    BaseGraphAccess cg(rank_, size_);
+    StaticGraphAccess cg(rank_, size_);
     cg.StartConstruct(num_local_components_,
                       number_of_ghost_vertices,
+                      edges_.size(),
                       num_smaller_components_);
-
 
     cg.SetOffsetArray(std::move(vertex_dist));
 
-    for (auto &kv : num_edges_for_vertex) {
-      VertexID global_id = kv.first;
-      VertexID num_edges = kv.second;
-      VertexID local_id = 0;
-      if (from > global_id || global_id > to) {
-        local_id = cg.AddGhostVertex(global_id);
-      } else {
-        local_id = cg.GetLocalID(global_id);
-      }
-      cg.ReserveEdgesForVertex(local_id, num_edges);
+    for (auto &v : ghost_vertices) {
+      cg.AddGhostVertex(v);
     }
 
-    // for (VertexID v = 0; v < number_of_local_vertices; ++v) {
-    for (auto &edge : local_edges_) {
-      cg.AddEdge(cg.GetLocalID(edge.source), edge.target, edge.rank);
+    std::sort(edges_.begin(), edges_.end(), [&](const auto &left, const auto &right) {
+        VertexID offset = to + 1;
+        VertexID left_source_distance = (left.first < from ? 
+                                         left.first + offset : 
+                                         left.first) - from;
+        VertexID left_target_distance = (left.second < from ? 
+                                          left.second + offset : 
+                                          left.second) - from;
+        VertexID right_source_distance = (right.first < from ? 
+                                          right.first + offset : 
+                                          right.first) - from;
+        VertexID right_target_distance = (right.second < from ? 
+                                          right.second + offset : 
+                                          right.second) - from;
+
+        return (left_source_distance < right_source_distance
+                  || (left_source_distance == right_source_distance && left_target_distance < right_target_distance));
+    });
+
+    // MPI_Barrier(MPI_COMM_WORLD);
+    // std::cout << "rank " << rank_ << " start adding " << edges_.size() << " edges" << std::endl;
+    for (auto &edge : edges_) {
+      // std::cout << "rank " << rank_ << " add edge (" 
+      //           << edge.first << "," << edge.second << ")" << std::endl;
+      cg.AddEdge(cg.GetLocalID(edge.first), edge.second, size_);
     }
 
     cg.FinishConstruct();

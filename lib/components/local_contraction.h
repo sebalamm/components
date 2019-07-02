@@ -29,8 +29,8 @@
 #include "config.h"
 #include "definitions.h"
 #include "graph_io.h"
-#include "graph_access.h"
-#include "graph_contraction.h"
+#include "dynamic_graph_access.h"
+#include "cag_builder.h"
 #include "utils.h"
 #include "union_find.h"
 #include "propagation.h"
@@ -44,17 +44,17 @@ class LocalContraction {
         iteration_(0) {}
   virtual ~LocalContraction() = default;
 
-  void FindComponents(GraphAccess &g) {
+  void FindComponents(DynamicGraphAccess &g) {
     Timer t;
     t.Restart();
     rng_offset_ = size_ + config_.seed;
     if (config_.use_contraction) {
       FindLocalComponents(g);
-      Contraction cont(g, rank_, size_);
-      GraphAccess cag = cont.BuildComponentAdjacencyGraph();
+      CAGBuilder cont(g, rank_, size_);
+      DynamicGraphAccess cag = cont.BuildDynamicComponentAdjacencyGraph();
       FindLocalComponents(cag);
-      Contraction ccont(cag, rank_, size_);
-      GraphAccess ccag = ccont.BuildComponentAdjacencyGraph();
+      CAGBuilder ccont(cag, rank_, size_);
+      DynamicGraphAccess ccag = ccont.BuildDynamicComponentAdjacencyGraph();
 
       PerformDecomposition(ccag);
 
@@ -63,7 +63,7 @@ class LocalContraction {
     } else PerformDecomposition(g);
   }
 
-  void Output(GraphAccess &g) {
+  void Output(DynamicGraphAccess &g) {
     g.OutputLabels();
   }
 
@@ -84,7 +84,7 @@ class LocalContraction {
   // Statistics
   Timer iteration_timer_;
 
-  void FindLocalComponents(GraphAccess &g) {
+  void FindLocalComponents(DynamicGraphAccess &g) {
     Timer t;
     t.Restart();
     std::vector<bool> marked(g.GetNumberOfVertices(), false);
@@ -107,7 +107,7 @@ class LocalContraction {
     });
   }
 
-  void PerformDecomposition(GraphAccess &g) {
+  void PerformDecomposition(DynamicGraphAccess &g) {
     VertexID global_vertices = g.GatherNumberOfGlobalVertices();
     if (global_vertices > 0) {
       iteration_timer_.Restart();
@@ -119,7 +119,7 @@ class LocalContraction {
     PropagateLabelsUp(g);
   }
 
-  void RunContraction(GraphAccess &g) {
+  void RunContraction(DynamicGraphAccess &g) {
     VertexID global_vertices = g.GatherNumberOfGlobalVertices();
     if (rank_ == ROOT) {
       if (iteration_ == 1)
@@ -235,11 +235,11 @@ class LocalContraction {
     }
   }
 
-  void PropagateLabelsUp(GraphAccess &g) {
+  void PropagateLabelsUp(DynamicGraphAccess &g) {
     g.MoveUpContraction();
   }
 
-  void ApplyToLocalComponents(GraphAccess &cag, GraphAccess &g) {
+  void ApplyToLocalComponents(DynamicGraphAccess &cag, DynamicGraphAccess &g) {
     g.ForallLocalVertices([&](const VertexID v) {
       VertexID cv = g.GetContractionVertex(v);
       g.SetVertexPayload(v, {0, 
@@ -251,7 +251,7 @@ class LocalContraction {
     });
   }
 
-  void RunSequentialCC(GraphAccess &g) {
+  void RunSequentialCC(DynamicGraphAccess &g) {
     // Perform gather of graph on root 
     std::vector<VertexID> vertices;
     std::vector<int> num_vertices_per_pe(size_);
@@ -277,7 +277,7 @@ class LocalContraction {
         edge_lists[vertex_map[e.first]].push_back(vertex_map[e.second]);
 
       // Construct temporary graph
-      GraphAccess sg(ROOT, 1);
+      DynamicGraphAccess sg(ROOT, 1);
       sg.StartConstruct(vertices.size(), edges.size(), ROOT);
       // TODO: Might be too small
       for (int i = 0; i < vertices.size(); ++i) {
