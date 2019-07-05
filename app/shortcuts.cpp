@@ -66,17 +66,27 @@ int main(int argn, char **argv) {
   }
   if (rank == ROOT) 
     std::cout << "Graph generated" << std::endl;
-  DynamicGraphAccess G = GraphIO::ReadDistributedEdgeList(conf, rank, size, MPI_COMM_WORLD, edge_list);
-      //G = GraphIO::ReadDistributedGraph(conf, rank, size, MPI_COMM_WORLD);
+  DynamicGraphAccess G 
+    = GraphIO::ReadDynamicDistributedEdgeList(conf, rank, size, MPI_COMM_WORLD, edge_list);
 
   VertexID n = G.GatherNumberOfGlobalVertices();
   EdgeID m = G.GatherNumberOfGlobalEdges();
+
+  // Determine min/maximum cut size
+  EdgeID m_cut = G.GetNumberOfCutEdges();
+  EdgeID min_cut, max_cut;
+  MPI_Reduce(&m_cut, &min_cut, 1, MPI_VERTEX, MPI_MIN, ROOT,
+             MPI_COMM_WORLD);
+  MPI_Reduce(&m_cut, &max_cut, 1, MPI_VERTEX, MPI_MAX, ROOT,
+             MPI_COMM_WORLD);
+
   if (rank == ROOT) {
     std::cout << "INPUT "
               << "s=" << conf.seed << ", "
               << "p=" << size  << ", "
               << "n=" << n << ", "
-              << "m=" << m << std::endl;
+              << "m=" << m << ", "
+              << "c(min,max)=" << min_cut << "," << max_cut << std::endl;
   }
 
   // Timers
@@ -87,6 +97,7 @@ int main(int argn, char **argv) {
   double total_time = 0.0;
 
   int user_seed = conf.seed;
+  std::vector<VertexID> labels(G.GetNumberOfVertices(), 0);
   for (int i = 0; i < conf.iterations; ++i) {
     MPI_Barrier(MPI_COMM_WORLD);
     t.Restart();
@@ -94,16 +105,16 @@ int main(int argn, char **argv) {
     // Determine labels
     conf.seed = user_seed + i;
     ShortcutPropagation comp(conf, rank, size);
-    comp.FindComponents(G);
+    comp.FindComponents(G, labels);
 
     // Gather total time
     local_time = t.Elapsed();
     MPI_Reduce(&local_time, &total_time, 1, MPI_DOUBLE, MPI_MAX, ROOT,
                MPI_COMM_WORLD);
     if (rank == ROOT) stats.Push(total_time);
-    
+   
     // Print labels
-    G.OutputComponents();
+    G.OutputComponents(labels);
   }
 
   if (rank == ROOT) {

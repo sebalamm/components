@@ -59,32 +59,29 @@ class ExponentialContraction {
       first_contraction(g, g_labels, rank_, size_);
     StaticGraphAccess cag 
       = first_contraction.BuildStaticComponentAdjacencyGraph();
+    OutputStats<StaticGraphAccess>(cag);
 
-    // Delete original graph?
+    // TODO: Delete original graph?
     // Keep contraction labeling for later
-
-    std::vector<VertexID> cag_labels(g.GetNumberOfVertices(), 0);
+    std::vector<VertexID> cag_labels(cag.GetNumberOfVertices(), 0);
     FindLocalComponents(cag, cag_labels);
-
-    // cag.OutputLocal();
-    // MPI_Barrier(MPI_COMM_WORLD);
 
     // Second round of contraction
     CAGBuilder<StaticGraphAccess> 
       second_contraction(cag, cag_labels, rank_, size_);
     DynamicGraphAccess ccag 
       = second_contraction.BuildDynamicComponentAdjacencyGraph();
+    OutputStats<DynamicGraphAccess>(ccag);
 
-    // Delete intermediate graph?
+    // TODO: Delete intermediate graph?
     // Keep contraction labeling for later
+
     exp_contraction_ = new DynamicContraction(ccag, rank_, size_);
 
     // Main decomposition algorithm
     PerformDecomposition(ccag);
 
-    // CCAG -> CAG (labels)
     ApplyToLocalComponents(ccag, cag, cag_labels);
-    // CAG (labels) -> G (labels)
     ApplyToLocalComponents(cag, cag_labels, g, g_labels);
   }
 
@@ -119,11 +116,10 @@ class ExponentialContraction {
         RunSequentialCC(g);
       else RunContraction(g);
     }
-    // if (rank_ == ROOT) std::cout << "[STATUS] |- Propagate labels upward" << std::endl;
     exp_contraction_->UndoContraction();
   }
 
-  void FindLocalComponents(StaticGraphAccess &g, std::vector<VertexID> & label) {
+  void FindLocalComponents(StaticGraphAccess &g, std::vector<VertexID> &label) {
     std::vector<bool> marked(g.GetNumberOfVertices(), false);
     std::vector<VertexID> parent(g.GetNumberOfVertices(), 0);
 
@@ -136,7 +132,7 @@ class ExponentialContraction {
       if (!marked[v]) Utility<StaticGraphAccess>::BFS(g, v, marked, parent);
     });
 
-    // Set vertex labe for contraction
+    // Set vertex label for contraction
     g.ForallLocalVertices([&](const VertexID v) {
       label[v] = label[parent[v]];
     });
@@ -317,6 +313,8 @@ class ExponentialContraction {
     g.BuildLabelShortcuts();
     exp_contraction_->ExponentialContraction();
 
+    OutputStats<DynamicGraphAccess>(g);
+
     // Count remaining number of vertices
     global_vertices = g.GatherNumberOfGlobalVertices();
     if (global_vertices > 0) {
@@ -327,14 +325,18 @@ class ExponentialContraction {
     }
   }
 
-  void ApplyToLocalComponents(DynamicGraphAccess &cag, StaticGraphAccess &g, std::vector<VertexID> &g_label) {
+  void ApplyToLocalComponents(DynamicGraphAccess &cag, 
+                              StaticGraphAccess &g, std::vector<VertexID> &g_label) {
     g.ForallLocalVertices([&](const VertexID v) {
       VertexID cv = cag.GetLocalID(g.GetContractionVertex(v));
       g_label[v] = cag.GetVertexLabel(cv);
     });
   }
 
-  void ApplyToLocalComponents(StaticGraphAccess &cag, std::vector<VertexID> &cag_label, StaticGraphAccess &g, std::vector<VertexID> &g_label) {
+  void ApplyToLocalComponents(StaticGraphAccess &cag, 
+                              std::vector<VertexID> &cag_label, 
+                              StaticGraphAccess &g, 
+                              std::vector<VertexID> &g_label) {
     g.ForallLocalVertices([&](const VertexID v) {
       VertexID cv = cag.GetLocalID(g.GetContractionVertex(v));
       g_label[v] = cag_label[cv];
@@ -381,6 +383,29 @@ class ExponentialContraction {
 
     // Distribute labels to other PEs
     g.DistributeLabelsFromRoot(labels, num_vertices_per_pe);
+  }
+
+  template <typename GraphType>
+  void OutputStats(GraphType &g) {
+    VertexID n = g.GatherNumberOfGlobalVertices();
+    EdgeID m = g.GatherNumberOfGlobalEdges();
+
+    // Determine min/maximum cut size
+    EdgeID m_cut = g.GetNumberOfCutEdges();
+    EdgeID min_cut, max_cut;
+    MPI_Reduce(&m_cut, &min_cut, 1, MPI_VERTEX, MPI_MIN, ROOT,
+               MPI_COMM_WORLD);
+    MPI_Reduce(&m_cut, &max_cut, 1, MPI_VERTEX, MPI_MAX, ROOT,
+               MPI_COMM_WORLD);
+
+    if (rank_ == ROOT) {
+      std::cout << "TEMP "
+                << "s=" << config_.seed << ", "
+                << "p=" << size_  << ", "
+                << "n=" << n << ", "
+                << "m=" << m << ", "
+                << "c(min,max)=" << min_cut << "," << max_cut << std::endl;
+    }
   }
 };
 

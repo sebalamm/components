@@ -513,6 +513,8 @@ class DynamicGraphAccess {
 
   inline EdgeID GetNumberOfCutEdges() const { return number_of_cut_edges_; }
 
+  inline void ResetNumberOfCutEdges() { number_of_cut_edges_ = 0; }
+
   VertexID GatherNumberOfGlobalVertices() {
     VertexID local_vertices = 0;
     ForallLocalVertices([&](const VertexID v) { local_vertices++; });
@@ -570,12 +572,24 @@ class DynamicGraphAccess {
     return vertex_payload_[v].deviate_;
   }
 
+  inline void SetVertexDeviate(const VertexID v, const VertexID deviate) {
+    vertex_payload_[v].deviate_ = deviate;
+  }
+
   inline VertexID GetVertexLabel(const VertexID v) const {
     return vertex_payload_[v].label_;
   }
 
+  inline void SetVertexLabel(const VertexID v, const VertexID label) {
+    vertex_payload_[v].label_ = label;
+  }
+
   inline PEID GetVertexRoot(const VertexID v) const {
     return vertex_payload_[v].root_;
+  }
+
+  inline void SetVertexRoot(const VertexID v, const PEID root) {
+    vertex_payload_[v].root_ = root;
   }
 
   inline VertexID GetParent(const VertexID v) {
@@ -592,7 +606,7 @@ class DynamicGraphAccess {
 
   void AddLocalEdge(VertexID from, VertexID to);
 
-  void AddGhostEdge(VertexID from, VertexID to, PEID rank);
+  void AddGhostEdge(VertexID from, VertexID to);
 
   void ReserveEdgesForVertex(VertexID v, VertexID num_edges);
 
@@ -780,6 +794,8 @@ class DynamicGraphAccess {
   void OutputLabels();
 
   void OutputGhosts();
+
+  void OutputComponents(std::vector<VertexID> &labels);
 
   void Logging(bool active);
 

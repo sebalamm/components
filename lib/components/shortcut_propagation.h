@@ -43,26 +43,41 @@ class ShortcutPropagation {
       config_(conf),
       iteration_(0),
       number_of_hitters_(0) { }
+
   virtual ~ShortcutPropagation() = default;
 
-  void FindComponents(DynamicGraphAccess &g) {
+  void FindComponents(DynamicGraphAccess &g, std::vector<VertexID> &g_labels) {
     if (config_.use_contraction) {
-      FindLocalComponents(g);
-      CAGBuilder cont(g, rank_, size_);
-      DynamicGraphAccess cag = cont.BuildDynamicComponentAdjacencyGraph();
-      FindLocalComponents(cag);
-      CAGBuilder ccont(cag, rank_, size_);
-      DynamicGraphAccess ccag = ccont.BuildDynamicComponentAdjacencyGraph();
+      FindLocalComponents(g, g_labels);
+
+      CAGBuilder<DynamicGraphAccess> 
+        first_contraction(g, g_labels, rank_, size_);
+      DynamicGraphAccess cag = first_contraction.BuildDynamicComponentAdjacencyGraph();
+      OutputStats<DynamicGraphAccess>(cag);
+
+      // TODO: Delete original graph?
+      // Keep contraction labeling for later
+      std::vector<VertexID> cag_labels(cag.GetNumberOfVertices(), 0);
+      FindLocalComponents(cag, cag_labels);
+
+      CAGBuilder<DynamicGraphAccess> 
+        second_contraction(cag, cag_labels, rank_, size_);
+      DynamicGraphAccess ccag = second_contraction.BuildDynamicComponentAdjacencyGraph();
+      OutputStats<DynamicGraphAccess>(ccag);
 
       PerformShortcutting(ccag);
 
-      ApplyToLocalComponents(ccag, cag);
-      ApplyToLocalComponents(cag, g);
-    } else PerformShortcutting(g);
+      ApplyToLocalComponents(ccag, cag, cag_labels);
+      ApplyToLocalComponents(cag, cag_labels, g, g_labels);
+    } else {
+      PerformShortcutting(g);
+      g.ForallLocalVertices([&](const VertexID v) {
+          g_labels[v] = g.GetVertexLabel(v);
+      });
+    }
   }
 
   void Output(DynamicGraphAccess &g) {
-    if (rank_ == ROOT) std::cout << "Component labels" << std::endl;
     g.OutputLabels();
   }
 
@@ -80,9 +95,6 @@ class ShortcutPropagation {
   std::vector<VertexID> labels_;
   std::vector<PEID> ranks_;
 
-  // Local components
-  std::vector<VertexID> parent_;
-
   // Heavy hitters
   VertexID number_of_hitters_;
   std::unordered_set<VertexID> heavy_hitters_;
@@ -99,30 +111,29 @@ class ShortcutPropagation {
       if (number_of_hitters_ > 0) 
         FindHeavyHitters(g);
       Shortcut(g);
+
+      OutputStats<DynamicGraphAccess>(g);
+
       iteration_++;
     } while (!CheckConvergence(g));
   }
 
-  void FindLocalComponents(DynamicGraphAccess &g) {
-    Timer t;
-    t.Restart();
+  void FindLocalComponents(DynamicGraphAccess &g, std::vector<VertexID> &label) {
     std::vector<bool> marked(g.GetNumberOfVertices(), false);
-    parent_.resize(g.GetNumberOfVertices());
+    std::vector<VertexID> parent(g.GetNumberOfVertices(), 0);
+
+    g.ForallVertices([&](const VertexID v) {
+      label[v] = g.GetVertexLabel(v);
+    });
 
     // Compute components
     g.ForallLocalVertices([&](const VertexID v) {
-      if (!marked[v]) Utility::BFS(g, v, marked, parent_);
+      if (!marked[v]) Utility<DynamicGraphAccess>::BFS(g, v, marked, parent);
     });
 
-    // Set vertex labels for contraction
+    // Set vertex label for contraction
     g.ForallLocalVertices([&](const VertexID v) {
-      // g.SetVertexLabel(v, parent_[v]);
-      g.SetVertexPayload(v, {g.GetVertexDeviate(v), 
-                             g.GetVertexLabel(parent_[v]), 
-#ifdef TIEBREAK_DEGREE
-                             0,
-#endif
-                             rank_});
+      label[v] = label[parent[v]];
     });
   }
 
@@ -135,7 +146,6 @@ class ShortcutPropagation {
                                0,
 #endif
                                ranks_[v]});
-      // std::cout << "[R" << rank_ << ":" << iteration_ << "]" << " v (" << g.GetGlobalID(v) << "," << labels_[v] << "," << ranks_[v] << ")" << std::endl;
     });
     g.SendAndReceiveGhostVertices();
     g.ForallLocalVertices([&](VertexID v) {
@@ -150,7 +160,6 @@ class ShortcutPropagation {
       });
       labels_[v] = min_label;
       ranks_[v] = min_rank;
-      // std::cout << "[R" << rank_ << ":" << iteration_ << "] p (" << g.GetGlobalID(v) << "," << labels_[v] << "," << ranks_[v] << ")" << std::endl;
     });
   } 
 
@@ -197,7 +206,6 @@ class ShortcutPropagation {
     for (PEID i = 0; i < size_; ++i) {
       {
         MPI_Request req;
-        // std::cout << "[R" << rank_ << ":" << iteration_ << "] num updates for " << i << " = " << update_buffers[i].size() << std::endl;
         MPI_Isend(&update_buffers[i][0], update_buffers[i].size(), MPI_LABEL_UPDATE, i, 
                   6 * size_ + i, MPI_COMM_WORLD, &req);
         MPI_Request_free(&req);
@@ -205,50 +213,15 @@ class ShortcutPropagation {
 
       {
         MPI_Request req;
-        // std::cout << "[R" << rank_ << ":" << iteration_ << "] num requests for " << i << " = " << request_buffers[i].size() << std::endl;
         MPI_Isend(&request_buffers[i][0], request_buffers[i].size(), MPI_LONG, i, 
                   7 * size_ + i, MPI_COMM_WORLD, &req);
         MPI_Request_free(&req);
       }
     }
 
-    // Process updates
-    // MPI_Barrier(MPI_COMM_WORLD);
-    // MPI_Status st{};
-    // int flag = 1;
-    // do {
-    //   // Probe for updates
-    //   MPI_Iprobe(MPI_ANY_SOURCE, 6 * size_ + rank_, MPI_COMM_WORLD, &flag, &st);
-    //   if (flag) {
-    //     int message_length;
-    //     MPI_Get_count(&st, MPI_LABEL_UPDATE, &message_length);
-    //     std::vector<std::tuple<VertexID, VertexID, VertexID>> message(message_length);
-    //     MPI_Status rst{};
-    //     MPI_Recv(&message[0], message_length, MPI_LABEL_UPDATE, st.MPI_SOURCE,
-    //              st.MPI_TAG, MPI_COMM_WORLD, &rst);
-    //     // Updates
-    //     if (st.MPI_TAG == 6 * size_ + rank_) {
-    //       for (const auto &update : message) {
-    //         const VertexID target = std::get<0>(update);
-    //         // const VertexID local_target = g.GetLocalID(target);
-    //         const VertexID label = std::get<1>(update);
-    //         const VertexID root = std::get<2>(update);
-    //         // std::cout << "[R" << rank_ << ":" << iteration_ << "] update " << target << " to " << label << std::endl;
-    //         for (const VertexID v : update_lists[target]) {
-    //           if (label < labels_[v]) {
-    //             labels_[v] = label;
-    //             ranks_[v] = root;
-    //           }
-    //         }
-    //       }
-    //     } else std::cout << "Unexpected tag." << std::endl;
-    //   }
-    // } while (flag);
-
     // Receive request and send shortcuts 
     MPI_Barrier(MPI_COMM_WORLD);
     std::vector<std::vector<std::tuple<VertexID, VertexID, VertexID>>> answers(size_);
-    // flag = 1;
     MPI_Status st{};
     int flag = 1;
     do {
@@ -264,7 +237,6 @@ class ShortcutPropagation {
         // Request
         if (st.MPI_TAG == 7 * size_ + rank_) {
           for (const VertexID &request : message) {
-            // std::cout << "[R" << rank_ << ":" << iteration_ << "] request from " << st.MPI_SOURCE<< " get label of " << request << std::endl;
             answers[st.MPI_SOURCE].emplace_back(request, g.GetVertexLabel(g.GetLocalID(request)), g.GetVertexRoot(g.GetLocalID(request)));
           }
         } else std::cout << "Unexpected tag." << std::endl;
@@ -298,7 +270,6 @@ class ShortcutPropagation {
             const VertexID target = std::get<0>(update);
             const VertexID label = std::get<1>(update);
             const VertexID root = std::get<2>(update);
-            // std::cout << "[R" << rank_ << ":" << iteration_ << "] request answer from " << st.MPI_SOURCE << " label of " << target << " is "  << label << std::endl;
             for (const VertexID v : update_lists[target]) {
               if (label < labels_[v]) {
                 labels_[v] = label;
@@ -332,16 +303,45 @@ class ShortcutPropagation {
     return converged_globally;
   }
 
-  void ApplyToLocalComponents(DynamicGraphAccess &cag, DynamicGraphAccess &g) {
+  void ApplyToLocalComponents(DynamicGraphAccess &cag, 
+                              DynamicGraphAccess &g, std::vector<VertexID> &g_label) {
     g.ForallLocalVertices([&](const VertexID v) {
-      VertexID cv = g.GetContractionVertex(v);
-      g.SetVertexPayload(v, {0, 
-                             cag.GetVertexLabel(cag.GetLocalID(cv)), 
-#ifdef TIEBREAK_DEGREE
-                             0,
-#endif
-                             rank_});
+      VertexID cv = cag.GetLocalID(g.GetContractionVertex(v));
+      g_label[v] = cag.GetVertexLabel(cv);
     });
+  }
+
+  void ApplyToLocalComponents(DynamicGraphAccess &cag, 
+                              std::vector<VertexID> &cag_label, 
+                              DynamicGraphAccess &g, 
+                              std::vector<VertexID> &g_label) {
+    g.ForallLocalVertices([&](const VertexID v) {
+      VertexID cv = cag.GetLocalID(g.GetContractionVertex(v));
+      g_label[v] = cag_label[cv];
+    });
+  }
+
+  template <typename GraphType>
+  void OutputStats(GraphType &g) {
+    VertexID n = g.GatherNumberOfGlobalVertices();
+    EdgeID m = g.GatherNumberOfGlobalEdges();
+
+    // Determine min/maximum cut size
+    EdgeID m_cut = g.GetNumberOfCutEdges();
+    EdgeID min_cut, max_cut;
+    MPI_Reduce(&m_cut, &min_cut, 1, MPI_VERTEX, MPI_MIN, ROOT,
+               MPI_COMM_WORLD);
+    MPI_Reduce(&m_cut, &max_cut, 1, MPI_VERTEX, MPI_MAX, ROOT,
+               MPI_COMM_WORLD);
+
+    if (rank_ == ROOT) {
+      std::cout << "TEMP "
+                << "s=" << config_.seed << ", "
+                << "p=" << size_  << ", "
+                << "n=" << n << ", "
+                << "m=" << m << ", "
+                << "c(min,max)=" << min_cut << "," << max_cut << std::endl;
+    }
   }
 };
 

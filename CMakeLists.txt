@@ -64,8 +64,8 @@ set(SOURCES
         )
 
 add_executable(exponential ${SOURCES} "app/exp_contraction.cpp")
-# add_executable(local ${SOURCES} "app/local_contraction.cpp")
-# add_executable(shortcuts ${SOURCES} "app/shortcuts.cpp")
+add_executable(local ${SOURCES} "app/local_contraction.cpp")
+add_executable(shortcuts ${SOURCES} "app/shortcuts.cpp")
 
 set(LIBS
         spooky
@@ -74,5 +74,5 @@ set(LIBS
         )
 
 target_link_libraries(exponential LINK_PUBLIC ${LIBS})
-# target_link_libraries(local LINK_PUBLIC ${LIBS})
-# target_link_libraries(shortcuts LINK_PUBLIC ${LIBS})
+target_link_libraries(local LINK_PUBLIC ${LIBS})
+target_link_libraries(shortcuts LINK_PUBLIC ${LIBS})
