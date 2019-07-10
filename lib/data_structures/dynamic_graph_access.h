@@ -98,15 +98,14 @@ class VertexCommunicator;
 class DynamicGraphAccess {
  public:
   DynamicGraphAccess(const PEID rank, const PEID size);
+
   virtual ~DynamicGraphAccess();
-
-  DynamicGraphAccess(DynamicGraphAccess &&rhs) = default;
-
-  DynamicGraphAccess(const DynamicGraphAccess &rhs) = default;
 
   //////////////////////////////////////////////
   // Graph construction
   //////////////////////////////////////////////
+  void ResetCommunicator();
+  
   void StartConstruct(VertexID local_n, VertexID ghost_n, VertexID local_offset);
 
   void FinishConstruct() { number_of_edges_ = edge_counter_; }

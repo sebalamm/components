@@ -24,6 +24,7 @@ set(CMAKE_CXX_FLAGS "${CMAKE_CXX_FLAGS} ${MPI_COMPILE_FLAGS} -std=c++14 -fno-omi
 set(CMAKE_CXX_LINK_FLAGS "${CMAKE_CXX_LINK_FLAGS} ${MPI_LINK_FLAGS}")
 
 add_subdirectory(extern/kagen)
+# add_subdirectory(extern/KaHIP)
 
 include_directories(
         app

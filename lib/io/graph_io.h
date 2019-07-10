@@ -39,9 +39,10 @@ class GraphIO {
   GraphIO() = default;
   virtual ~GraphIO() = default;
 
-  static StaticGraphAccess ReadStaticDistributedEdgeList(Config &config, PEID rank,
-                                                         PEID size, const MPI_Comm &comm,
-                                                         auto &edge_list) {
+  static void ReadStaticDistributedEdgeList(StaticGraphAccess &g,
+                                            Config &config, PEID rank,
+                                            PEID size, const MPI_Comm &comm,
+                                            auto &edge_list) {
     // Gather local edge lists (transpose)
     VertexID from = edge_list[0].first, to = edge_list[0].second;
     VertexID number_of_local_vertices = to - from + 1;
@@ -77,38 +78,37 @@ class GraphIO {
                   &vertex_dist[0], 1, MPI_COMP, comm);
 
     // Build graph
-    StaticGraphAccess G(rank, size);
-    G.StartConstruct(number_of_local_vertices, 
+    g.StartConstruct(number_of_local_vertices, 
                      number_of_ghost_vertices, 
                      number_of_edges,
                      from);
 
-    G.SetOffsetArray(std::move(vertex_dist));
+    g.SetOffsetArray(std::move(vertex_dist));
 
     // Initialize ghost vertices
     for (auto &v : ghost_vertices) {
-      G.AddGhostVertex(v);
+      g.AddGhostVertex(v);
     }
 
     std::sort(edge_list.begin(), edge_list.end(), [&](auto &left, auto &right) {
-        VertexID lhs_source = G.GetLocalID(left.first);
-        VertexID lhs_target = G.GetLocalID(left.second);
-        VertexID rhs_source = G.GetLocalID(right.first);
-        VertexID rhs_target = G.GetLocalID(right.second);
+        VertexID lhs_source = g.GetLocalID(left.first);
+        VertexID lhs_target = g.GetLocalID(left.second);
+        VertexID rhs_source = g.GetLocalID(right.first);
+        VertexID rhs_target = g.GetLocalID(right.second);
         return (lhs_source < rhs_source
                   || (lhs_source == rhs_source && lhs_target < rhs_target));
     });
     for (auto &edge : edge_list) {
-      G.AddEdge(G.GetLocalID(edge.first), edge.second, size);
+      g.AddEdge(g.GetLocalID(edge.first), edge.second, size);
     }
 
-    G.FinishConstruct();
-    return G;
+    g.FinishConstruct();
   }
 
-  static DynamicGraphAccess ReadDynamicDistributedEdgeList(Config &config, PEID rank,
-                                                           PEID size, const MPI_Comm &comm,
-                                                           auto &edge_list) {
+  static void ReadDynamicDistributedEdgeList(DynamicGraphAccess &g,
+                                             Config &config, PEID rank,
+                                             PEID size, const MPI_Comm &comm,
+                                             auto &edge_list) {
     // Gather local edge lists (transpose)
     VertexID from = edge_list[0].first, to = edge_list[0].second;
     VertexID number_of_local_vertices = to - from + 1;
@@ -144,131 +144,302 @@ class GraphIO {
                   &vertex_dist[0], 1, MPI_COMP, comm);
 
     // Build graph
-    DynamicGraphAccess G(rank, size);
-    G.StartConstruct(number_of_local_vertices, 
+    g.StartConstruct(number_of_local_vertices, 
                      number_of_ghost_vertices, 
                      from);
 
-    G.SetOffsetArray(std::move(vertex_dist));
+    g.SetOffsetArray(std::move(vertex_dist));
 
     // Initialize local vertices
     for (VertexID v = 0; v < number_of_local_vertices; v++) {
-        G.SetVertexLabel(v, from + v);
-        G.SetVertexRoot(v, rank);
+        g.SetVertexLabel(v, from + v);
+        g.SetVertexRoot(v, rank);
     }
 
     // Initialize ghost vertices
     // This will also set the payload
     for (auto &v : ghost_vertices) {
-      G.AddGhostVertex(v);
+      g.AddGhostVertex(v);
     }
 
     for (auto &edge : edge_list) {
-      G.AddEdge(G.GetLocalID(edge.first), edge.second, size);
+      g.AddEdge(g.GetLocalID(edge.first), edge.second, size);
     }
 
-    G.FinishConstruct();
-    return G;
+    g.FinishConstruct();
   }
 
-  // static StaticGraphAccess ReadDistributedGraph(Config &config, PEID rank,
-  //                                         PEID size, const MPI_Comm &comm) {
-  //   std::string line;
-  //   std::string filename(config.input_file);
+  static void ReadStaticDistributedFile(StaticGraphAccess &g, 
+                                        Config &config, PEID rank,
+                                        PEID size, const MPI_Comm &comm) {
+    std::string line;
+    std::string filename(config.input_file);
 
-  //   // open file for reading
-  //   std::ifstream in(filename.c_str());
-  //   if (!in) {
-  //     std::cerr << "Error opening " << filename << std::endl;
-  //     exit(0);
-  //   }
+    // open file for reading
+    std::ifstream in(filename.c_str());
+    if (!in) {
+      std::cerr << "Error opening " << filename << std::endl;
+      exit(0);
+    }
 
-  //   VertexID number_of_vertices;
-  //   EdgeID number_of_edges;
+    VertexID number_of_global_vertices = 0;
+    EdgeID number_of_global_edges = 0;
+    PEID number_of_partitions = 0;
 
-  //   std::getline(in, line);
-  //   while (line[0] == '%') std::getline(in, line);
+    std::getline(in, line);
+    while (line[0] == '%') std::getline(in, line);
 
-  //   std::stringstream ss(line);
-  //   ss >> number_of_vertices;
-  //   ss >> number_of_edges;
+    std::stringstream ss(line);
+    ss >> number_of_global_vertices;
+    ss >> number_of_global_edges;
+    ss >> number_of_partitions;
 
-  //   config.n = number_of_vertices;
-  //   config.m = number_of_edges;
+    config.n = number_of_global_vertices;
+    config.m = number_of_global_edges;
 
-  //   // Read the lines i*ceil(n/size) to (i+1)*floor(n/size) lines of that file
-  //   VertexID leftover_vertices = number_of_vertices % size;
-  //   VertexID number_of_local_vertices = (number_of_vertices / size)
-  //       + static_cast<VertexID>(rank < leftover_vertices);
-  //   VertexID from = (rank * number_of_local_vertices)
-  //       + static_cast<VertexID>(rank >= leftover_vertices ? leftover_vertices
-  //                                                         : 0);
-  //   VertexID to = from + number_of_local_vertices - 1;
+    // Read the lines i*ceil(n/size) to (i+1)*floor(n/size) lines of that file
+    // VertexID leftover_vertices = number_of_global_vertices % size;
+    // VertexID number_of_local_vertices = (number_of_global_vertices / size)
+    //     + static_cast<VertexID>(rank < leftover_vertices);
+    // VertexID from = (rank * number_of_local_vertices)
+    //     + static_cast<VertexID>(rank >= leftover_vertices ? leftover_vertices : 0);
+    // VertexID to = from + number_of_local_vertices - 1;
 
-  //   // Add datatype
-  //   MPI_Datatype MPI_COMP;
-  //   MPI_Type_vector(1, 2, 0, MPI_VERTEX, &MPI_COMP);
-  //   MPI_Type_commit(&MPI_COMP);
+    PEID leftover_partitions = number_of_partitions % size;
+    PEID number_of_local_partitions = (number_of_partitions / size)
+        + static_cast<PEID>(rank < leftover_partitions);
+    PEID from_partition = (rank * number_of_local_partitions)
+        + static_cast<PEID>(rank >= leftover_partitions ? leftover_partitions : 0);
+    PEID to_partition = from_partition + number_of_local_partitions - 1;
 
-  //   // Gather vertex distribution
-  //   std::pair<VertexID, VertexID> range(from, to + 1);
-  //   std::vector<std::pair<VertexID, VertexID>> vertex_dist(size);
-  //   MPI_Allgather(&range, 1, MPI_COMP,
-  //                 &vertex_dist[0], 1, MPI_COMP, comm);
-  //   std::cout << "rank " << rank << " from " << from << " to " << to
-  //             << " amount " << number_of_local_vertices << std::endl;
+    // Build offset array
+    VertexID vertices_in_partition;
+    VertexID from, to;
+    VertexID current_offset = 0;
+    for (VertexID i = 0; i < number_of_partitions; ++i) {
+      std::getline(in, line);
+      std::stringstream ss(line);
+      ss >> vertices_in_partition;
+      if (i == from_partition) from = current_offset;
+      current_offset += vertices_in_partition;
+      if (i == to_partition) to = current_offset - 1;
+    }
+    VertexID number_of_local_vertices = to - from + 1;
 
-  //   std::vector<std::vector<VertexID>> local_edge_lists;
-  //   local_edge_lists.resize(number_of_local_vertices);
+    // Add datatype
+    MPI_Datatype MPI_COMP;
+    MPI_Type_vector(1, 2, 0, MPI_VERTEX, &MPI_COMP);
+    MPI_Type_commit(&MPI_COMP);
+    
+    // Gather vertex distribution
+    std::pair<VertexID, VertexID> range(from, to + 1);
+    std::vector<std::pair<VertexID, VertexID>> vertex_dist(size);
+    MPI_Allgather(&range, 1, MPI_COMP,
+                  &vertex_dist[0], 1, MPI_COMP, comm);
 
-  //   VertexID counter = 0;
-  //   VertexID node_counter = 0;
-  //   EdgeID edge_counter = 0;
+    std::vector<std::pair<VertexID, VertexID>> edge_list;
+    google::dense_hash_set<VertexID> ghost_vertices; 
+    ghost_vertices.set_empty_key(-1);
 
-  //   char *old_str, *new_str;
-  //   while (std::getline(in, line)) {
-  //     if (counter > to) break;
-  //     if (line[0] == '%') continue;
+    VertexID counter = 0;
+    VertexID vertex_counter = 0;
+    EdgeID number_of_edges = 0;
 
-  //     if (counter >= from) {
-  //       old_str = &line[0];
-  //       new_str = nullptr;
+    char *old_str, *new_str;
+    while (std::getline(in, line)) {
+      if (counter > to) break;
+      if (line[0] == '%') continue;
 
-  //       for (;;) {
-  //         VertexID target;
-  //         target = (VertexID) strtol(old_str, &new_str, 10);
+      if (counter >= from) {
+        old_str = &line[0];
+        new_str = nullptr;
 
-  //         if (target == 0) break;
-  //         old_str = new_str;
+        VertexID source = from + vertex_counter;
+        for (;;) {
+          VertexID target; 
+          target = (VertexID) strtol(old_str, &new_str, 10);
+          if (target == 0) break;
+          old_str = new_str;
+          // Decrement target to get proper range
+          target--;
+          // Add edges
+          edge_list.emplace_back(source, target);
+          // std::cout << "R" << rank << " e (" << source << "," << target << ")" << std::endl;
+          if (from > target || target > to) {
+            if (ghost_vertices.find(target) == end(ghost_vertices)) {
+                ghost_vertices.insert(target);
+            } 
+            // We need the backwards edge here
+            edge_list.emplace_back(target, source);
+          } 
+          number_of_edges++;
+        }
+        vertex_counter++;
+      }
+      counter++;
+      if (in.eof()) break;
+    }
 
-  //         local_edge_lists[node_counter].push_back(target);
-  //         edge_counter++;
-  //       }
+    g.StartConstruct(number_of_local_vertices, 
+                     ghost_vertices.size(), 
+                     number_of_edges,
+                     from); 
+    g.SetOffsetArray(std::move(vertex_dist));
 
-  //       node_counter++;
-  //     }
+    // Initialize ghost vertices
+    for (auto &v : ghost_vertices) {
+      g.AddGhostVertex(v);
+    }
 
-  //     counter++;
+    std::sort(edge_list.begin(), edge_list.end(), [&](auto &left, auto &right) {
+        VertexID lhs_source = g.GetLocalID(left.first);
+        VertexID lhs_target = g.GetLocalID(left.second);
+        VertexID rhs_source = g.GetLocalID(right.first);
+        VertexID rhs_target = g.GetLocalID(right.second);
+        return (lhs_source < rhs_source
+                  || (lhs_source == rhs_source && lhs_target < rhs_target));
+    });
+    for (auto &edge : edge_list) {
+      g.AddEdge(g.GetLocalID(edge.first), edge.second, size);
+    }
 
-  //     if (in.eof()) break;
-  //   }
+    g.FinishConstruct();
+  }
 
-  //   MPI_Barrier(comm);
+  static void ReadDynamicDistributedFile(DynamicGraphAccess &g,
+                                         Config &config, PEID rank,
+                                         PEID size, const MPI_Comm &comm) {
+    std::string line;
+    std::string filename(config.input_file);
 
-  //   StaticGraphAccess G(rank, size);
-  //   // TODO: Add number of ghost vertices and reserve memory
-  //   // G.StartConstruct(number_of_local_vertices, from);
+    // open file for reading
+    std::ifstream in(filename.c_str());
+    if (!in) {
+      std::cerr << "Error opening " << filename << std::endl;
+      exit(0);
+    }
 
-  //   G.SetOffsetArray(std::move(vertex_dist));
+    VertexID number_of_global_vertices = 0;
+    EdgeID number_of_global_edges = 0;
+    PEID number_of_partitions = 0;
 
-  //   for (VertexID i = 0; i < number_of_local_vertices; ++i) {
-  //     VertexID v = G.AddVertex();
-  //     for (VertexID j : local_edge_lists[i])
-  //       G.AddEdge(v, j - 1, size);
-  //   }
-  //   G.FinishConstruct();
-  //   return G;
-  // }
+    std::getline(in, line);
+    while (line[0] == '%') std::getline(in, line);
+
+    std::stringstream ss(line);
+    ss >> number_of_global_vertices;
+    ss >> number_of_global_edges;
+    ss >> number_of_partitions;
+
+    config.n = number_of_global_vertices;
+    config.m = number_of_global_edges;
+
+    // Read the lines i*ceil(n/size) to (i+1)*floor(n/size) lines of that file
+    // VertexID leftover_vertices = number_of_global_vertices % size;
+    // VertexID number_of_local_vertices = (number_of_global_vertices / size)
+    //     + static_cast<VertexID>(rank < leftover_vertices);
+    // VertexID from = (rank * number_of_local_vertices)
+    //     + static_cast<VertexID>(rank >= leftover_vertices ? leftover_vertices : 0);
+    // VertexID to = from + number_of_local_vertices - 1;
+
+    PEID leftover_partitions = number_of_partitions % size;
+    PEID number_of_local_partitions = (number_of_partitions / size)
+        + static_cast<PEID>(rank < leftover_partitions);
+    PEID from_partition = (rank * number_of_local_partitions)
+        + static_cast<PEID>(rank >= leftover_partitions ? leftover_partitions : 0);
+    PEID to_partition = from_partition + number_of_local_partitions - 1;
+
+    // Build offset array
+    VertexID vertices_in_partition;
+    VertexID from, to;
+    VertexID current_offset = 0;
+    for (VertexID i = 0; i < number_of_partitions; ++i) {
+      std::getline(in, line);
+      std::stringstream ss(line);
+      ss >> vertices_in_partition;
+      if (i == from_partition) from = current_offset;
+      current_offset += vertices_in_partition;
+      if (i == to_partition) to = current_offset - 1;
+    }
+    VertexID number_of_local_vertices = to - from + 1;
+
+    // Add datatype
+    MPI_Datatype MPI_COMP;
+    MPI_Type_vector(1, 2, 0, MPI_VERTEX, &MPI_COMP);
+    MPI_Type_commit(&MPI_COMP);
+
+    // Gather vertex distribution
+    std::pair<VertexID, VertexID> range(from, to + 1);
+    std::vector<std::pair<VertexID, VertexID>> vertex_dist(size);
+    MPI_Allgather(&range, 1, MPI_COMP,
+                  &vertex_dist[0], 1, MPI_COMP, comm);
+
+    std::vector<std::pair<VertexID, VertexID>> edge_list;
+    google::dense_hash_set<VertexID> ghost_vertices; 
+    ghost_vertices.set_empty_key(-1);
+
+    VertexID counter = 0;
+    VertexID vertex_counter = 0;
+    EdgeID number_of_edges = 0;
+
+    char *old_str, *new_str;
+    while (std::getline(in, line)) {
+      if (counter > to) break;
+      if (line[0] == '%') continue;
+
+      if (counter >= from) {
+        old_str = &line[0];
+        new_str = nullptr;
+
+        VertexID source = from + vertex_counter;
+        for (;;) {
+          VertexID target;
+          target = (VertexID) strtol(old_str, &new_str, 10);
+          if (target == 0) break;
+          old_str = new_str;
+          // Decrement target to get proper range
+          target--;
+          // Add edges
+          edge_list.emplace_back(source, target);
+          if (from > target || target > to) {
+            if (ghost_vertices.find(target) == end(ghost_vertices)) {
+                ghost_vertices.insert(target);
+            } 
+            // We need the backwards edge here
+            edge_list.emplace_back(target, source);
+          } 
+          number_of_edges++;
+        }
+        vertex_counter++;
+      }
+      counter++;
+      if (in.eof()) break;
+    }
+
+    g.StartConstruct(number_of_local_vertices, 
+                     ghost_vertices.size(), 
+                     from);
+    g.SetOffsetArray(std::move(vertex_dist));
+
+    // Initialize local vertices
+    for (VertexID v = 0; v < number_of_local_vertices; v++) {
+        g.SetVertexLabel(v, from + v);
+        g.SetVertexRoot(v, rank);
+    }
+
+    // Initialize ghost vertices
+    // This will also set the payload
+    for (auto &v : ghost_vertices) {
+      g.AddGhostVertex(v);
+    }
+
+    for (auto &edge : edge_list) {
+      // std::cout << "R" << rank << " i (" << edge.first << "," << edge.second << ")" << std::endl;
+      g.AddEdge(g.GetLocalID(edge.first), edge.second, size);
+    }
+
+    g.FinishConstruct();
+  }
 
  private:
 };

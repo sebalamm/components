@@ -3,7 +3,7 @@
 
 #include "dynamic_graph_access.h"
 #include "vertex_communicator.h"
-
+  
 DynamicGraphAccess::DynamicGraphAccess(const PEID rank, const PEID size) 
     : rank_(rank),
       size_(size),
@@ -30,6 +30,12 @@ DynamicGraphAccess::DynamicGraphAccess(const PEID rank, const PEID size)
 DynamicGraphAccess::~DynamicGraphAccess() {
   delete ghost_comm_;
   ghost_comm_ = nullptr;
+}
+
+void DynamicGraphAccess::ResetCommunicator() {
+  delete ghost_comm_;
+  ghost_comm_ = new VertexCommunicator(rank_, size_, MPI_COMM_WORLD);
+  ghost_comm_->SetGraph(this);
 }
 
 void DynamicGraphAccess::StartConstruct(const VertexID local_n,
@@ -96,6 +102,7 @@ VertexID DynamicGraphAccess::AddGhostVertex(VertexID v) {
   // Set adjacent PE
   PEID neighbor = GetPEFromOffset(v);
   SetAdjacentPE(neighbor, true);
+  ghost_comm_->SetAdjacentPE(neighbor, true);
 
   // Set active
   is_active_[local_id] = true;

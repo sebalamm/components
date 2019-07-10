@@ -35,7 +35,7 @@ void ParseParameters(int argn, char **argv,
   conf.seed = args.Get<int>("seed", 1);
 
   // I/O
-  conf.input_file = args.Get<std::string>("in", "in");
+  conf.input_file = args.Get<std::string>("in", "null");
   conf.output_file = args.Get<std::string>("out", "out");
   conf.debug_output_file = args.Get<std::string>("debug_out", "tmp");
 
@@ -58,7 +58,7 @@ void ParseParameters(int argn, char **argv,
   conf.degree_limit = args.Get<unsigned int>("deg", 100);
 
   // Generator
-  conf.gen = args.Get<std::string>("gen", "gnm_undirected");
+  conf.gen = args.Get<std::string>("gen", "null");
   conf.gen_k = args.Get<PEID>("k", 0);
   bool exact_n = args.IsSet("exact_n");
   if (exact_n)

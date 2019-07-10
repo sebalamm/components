@@ -41,33 +41,42 @@ int main(int argn, char **argv) {
   Config conf;
   ParseParameters(argn, argv, conf);
 
-  // Parse for kagen input
-  kagen::KaGen gen(rank, size);
-  kagen::EdgeList edge_list;
-  if (conf.gen == "gnm_undirected")
-      edge_list = gen.GenerateUndirectedGNM(conf.gen_n, conf.gen_m, conf.gen_k);
-  else if (conf.gen == "rdg_2d")
-      edge_list = gen.Generate2DRDG(conf.gen_n, conf.gen_k);
-  else if (conf.gen == "rdg_3d")
-      edge_list = gen.Generate3DRDG(conf.gen_n, conf.gen_k);
-  else if (conf.gen == "rgg_2d")
-      edge_list = gen.Generate2DRGG(conf.gen_n, conf.gen_r, conf.gen_k);
-  else if (conf.gen == "rgg_3d")
-      edge_list = gen.Generate3DRGG(conf.gen_n, conf.gen_r, conf.gen_k);
-  else if (conf.gen == "rhg")
-      edge_list = gen.GenerateRHG(conf.gen_n, conf.gen_gamma, conf.gen_d, conf.gen_k);
-  else if (conf.gen == "ba")
-      edge_list = gen.GenerateRHG(conf.gen_n, conf.gen_d, conf.gen_k);
-  else {
+   DynamicGraphAccess G(rank, size);
+   if (conf.input_file != "null") {
+    // File I/O
+    GraphIO::ReadDynamicDistributedFile(G, conf, rank, size, MPI_COMM_WORLD);
+  } else if (conf.gen != "null") {
+    // Generator I/O
+    kagen::KaGen gen(rank, size);
+    kagen::EdgeList edge_list;
+    if (conf.gen == "gnm_undirected")
+        edge_list = gen.GenerateUndirectedGNM(conf.gen_n, conf.gen_m, conf.gen_k);
+    else if (conf.gen == "rdg_2d")
+        edge_list = gen.Generate2DRDG(conf.gen_n, conf.gen_k);
+    else if (conf.gen == "rdg_3d")
+        edge_list = gen.Generate3DRDG(conf.gen_n, conf.gen_k);
+    else if (conf.gen == "rgg_2d")
+        edge_list = gen.Generate2DRGG(conf.gen_n, conf.gen_r, conf.gen_k);
+    else if (conf.gen == "rgg_3d")
+        edge_list = gen.Generate3DRGG(conf.gen_n, conf.gen_r, conf.gen_k);
+    else if (conf.gen == "rhg")
+        edge_list = gen.GenerateRHG(conf.gen_n, conf.gen_gamma, conf.gen_d, conf.gen_k);
+    else if (conf.gen == "ba")
+        edge_list = gen.GenerateBA(conf.gen_n, conf.gen_d, conf.gen_k);
+    else {
+      if (rank == ROOT) 
+        std::cout << "Generator not supported" << std::endl;
+      MPI_Finalize();
+      exit(1);
+    }
+    if (rank == ROOT) std::cout << "Graph generated" << std::endl;
+    GraphIO::ReadDynamicDistributedEdgeList(G, conf, rank, size, MPI_COMM_WORLD, edge_list);
+  } else {
     if (rank == ROOT) 
-      std::cout << "generator not supported" << std::endl;
+      std::cout << "I/O type not supported" << std::endl;
     MPI_Finalize();
     exit(1);
   }
-  if (rank == ROOT) 
-    std::cout << "Graph generated" << std::endl;
-  DynamicGraphAccess G 
-    = GraphIO::ReadDynamicDistributedEdgeList(conf, rank, size, MPI_COMM_WORLD, edge_list);
 
   VertexID n = G.GatherNumberOfGlobalVertices();
   EdgeID m = G.GatherNumberOfGlobalEdges();
@@ -88,6 +97,15 @@ int main(int argn, char **argv) {
               << "m=" << m << ", "
               << "c(min,max)=" << min_cut << "," << max_cut << std::endl;
   }
+
+  // G.ForallGhostVertices([&](const VertexID v) {
+  //   G.ForallNeighbors(v, [&](const VertexID w) {
+  //     if (rank == ROOT) std::cout << "e (" << G.GetGlobalID(v) << "," << G.GetGlobalID(w) << ")" << std::endl;
+  //   });
+  // });
+
+  // MPI_Barrier(MPI_COMM_WORLD);
+  // exit(1);
 
   // Timers
   Timer t;

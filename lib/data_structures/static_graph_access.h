@@ -101,10 +101,6 @@ class StaticGraphAccess {
 
   virtual ~StaticGraphAccess() {};
 
-  StaticGraphAccess(StaticGraphAccess &&rhs) = default;
-
-  StaticGraphAccess(const StaticGraphAccess &rhs) = default;
-
   //////////////////////////////////////////////
   // Graph construction
   //////////////////////////////////////////////
