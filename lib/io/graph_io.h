@@ -130,7 +130,6 @@ class GraphIO {
     }
 
     VertexID number_of_ghost_vertices = ghost_vertices.size();
-    VertexID number_of_edges = edge_list.size();
 
     // Add datatype
     MPI_Datatype MPI_COMP;
@@ -243,7 +242,6 @@ class GraphIO {
 
     VertexID counter = 0;
     VertexID vertex_counter = 0;
-    EdgeID number_of_edges = 0;
 
     char *old_str, *new_str;
     while (std::getline(in, line)) {
@@ -272,7 +270,6 @@ class GraphIO {
             // We need the backwards edge here
             edge_list.emplace_back(target, source);
           } 
-          number_of_edges++;
         }
         vertex_counter++;
       }
@@ -282,7 +279,7 @@ class GraphIO {
 
     g.StartConstruct(number_of_local_vertices, 
                      ghost_vertices.size(), 
-                     number_of_edges,
+                     edge_list.size(),
                      from); 
     g.SetOffsetArray(std::move(vertex_dist));
 
@@ -380,7 +377,6 @@ class GraphIO {
 
     VertexID counter = 0;
     VertexID vertex_counter = 0;
-    EdgeID number_of_edges = 0;
 
     char *old_str, *new_str;
     while (std::getline(in, line)) {
@@ -408,7 +404,6 @@ class GraphIO {
             // We need the backwards edge here
             edge_list.emplace_back(target, source);
           } 
-          number_of_edges++;
         }
         vertex_counter++;
       }
