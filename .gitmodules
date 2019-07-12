@@ -1,3 +1,6 @@
 [submodule "extern/kagen"]
 	path = extern/kagen
 	url = https://github.com/sebalamm/KaGen
+[submodule "extern/KaHIP"]
+	path = extern/KaHIP
+	url = git@github.com:schulzchristian/KaHIP.git

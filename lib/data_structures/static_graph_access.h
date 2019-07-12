@@ -86,6 +86,7 @@ class StaticGraphAccess {
       number_of_local_vertices_(0),
       number_of_global_vertices_(0),
       number_of_edges_(0),
+      number_of_cut_edges_(0),
       number_of_global_edges_(0),
       max_degree_(0),
       max_degree_computed_(false),
@@ -99,10 +100,6 @@ class StaticGraphAccess {
   }
 
   virtual ~StaticGraphAccess() {};
-
-  StaticGraphAccess(StaticGraphAccess &&rhs) = default;
-
-  StaticGraphAccess(const StaticGraphAccess &rhs) = default;
 
   //////////////////////////////////////////////
   // Graph construction
@@ -285,6 +282,10 @@ class StaticGraphAccess {
 
   inline EdgeID GetNumberOfEdges() const { return number_of_edges_; }
 
+  inline EdgeID GetNumberOfCutEdges() const { return number_of_cut_edges_; }
+
+  inline void ResetNumberOfCutEdges() { number_of_cut_edges_ = 0; }
+
   inline EdgeID GetFirstEdge(const VertexID v) const {
     return vertices_[v].first_edge_;
   }
@@ -328,17 +329,17 @@ class StaticGraphAccess {
 
   inline VertexID AddGhostVertex(VertexID v) {
     AddVertex();
-    global_to_local_map_[v] = ghost_counter_++;
+    global_to_local_map_[v] = ghost_counter_;
 
     // Update data
-    local_vertices_data_[global_to_local_map_[v]].is_interface_vertex_ = false;
-    ghost_vertices_data_[global_to_local_map_[v] - ghost_offset_].rank_ = GetPEFromOffset(v);
-    ghost_vertices_data_[global_to_local_map_[v] - ghost_offset_].global_id_ = v;
+    local_vertices_data_[ghost_counter_].is_interface_vertex_ = false;
+    ghost_vertices_data_[ghost_counter_ - ghost_offset_].rank_ = GetPEFromOffset(v);
+    ghost_vertices_data_[ghost_counter_ - ghost_offset_].global_id_ = v;
 
     // Set adjacent PE
     SetAdjacentPE(GetPEFromOffset(v), true);
 
-    return global_to_local_map_[v];
+    return ghost_counter_++;
   }
 
   // TODO: Remove
@@ -353,6 +354,7 @@ class StaticGraphAccess {
       PEID neighbor = (rank == size_) ? GetPEFromOffset(to) : rank;
       local_vertices_data_[from].is_interface_vertex_ = true;
       if (IsGhostFromGlobal(to)) { // true if ghost already in map, otherwise false
+        number_of_cut_edges_++;
         AddLocalEdge(from, to);
       } else {
         std::cout << "This shouldn't happen" << std::endl;
@@ -363,14 +365,13 @@ class StaticGraphAccess {
     return edge_counter_;
   }
 
-  // TODO: Remove
   void AddLocalEdge(VertexID from, VertexID to) {
     edges_[edge_counter_++].target_ = GetLocalID(to);
     vertices_[from + 1].first_edge_ = edge_counter_;
   }
 
   // TODO: Remove
-  // void AddGhostEdge(VertexID from, VertexID to, PEID neighbor) {
+  // void AddGhostEdge(VertexID from, VertexID to, _PEID neighbor) {
   //   edges_[edge_counter_++].target_ = to;
   //   vertices_[from + 1].first_edge_ = edge_counter_;
   // }
@@ -551,6 +552,7 @@ class StaticGraphAccess {
   VertexID number_of_global_vertices_;
 
   EdgeID number_of_edges_;
+  EdgeID number_of_cut_edges_;
   EdgeID number_of_global_edges_;
 
   VertexID max_degree_;

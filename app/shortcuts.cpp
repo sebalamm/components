@@ -41,43 +41,71 @@ int main(int argn, char **argv) {
   Config conf;
   ParseParameters(argn, argv, conf);
 
-  // Parse for kagen input
-  kagen::KaGen gen(rank, size);
-  kagen::EdgeList edge_list;
-  if (conf.gen == "gnm_undirected")
-      edge_list = gen.GenerateUndirectedGNM(conf.gen_n, conf.gen_m, conf.gen_k);
-  else if (conf.gen == "rdg_2d")
-      edge_list = gen.Generate2DRDG(conf.gen_n, conf.gen_k);
-  else if (conf.gen == "rdg_3d")
-      edge_list = gen.Generate3DRDG(conf.gen_n, conf.gen_k);
-  else if (conf.gen == "rgg_2d")
-      edge_list = gen.Generate2DRGG(conf.gen_n, conf.gen_r, conf.gen_k);
-  else if (conf.gen == "rgg_3d")
-      edge_list = gen.Generate3DRGG(conf.gen_n, conf.gen_r, conf.gen_k);
-  else if (conf.gen == "rhg")
-      edge_list = gen.GenerateRHG(conf.gen_n, conf.gen_gamma, conf.gen_d, conf.gen_k);
-  else if (conf.gen == "ba")
-      edge_list = gen.GenerateRHG(conf.gen_n, conf.gen_d, conf.gen_k);
-  else {
+   DynamicGraphAccess G(rank, size);
+   if (conf.input_file != "null") {
+    // File I/O
+    GraphIO::ReadDynamicDistributedFile(G, conf, rank, size, MPI_COMM_WORLD);
+  } else if (conf.gen != "null") {
+    // Generator I/O
+    kagen::KaGen gen(rank, size);
+    kagen::EdgeList edge_list;
+    if (conf.gen == "gnm_undirected")
+        edge_list = gen.GenerateUndirectedGNM(conf.gen_n, conf.gen_m, conf.gen_k);
+    else if (conf.gen == "rdg_2d")
+        edge_list = gen.Generate2DRDG(conf.gen_n, conf.gen_k);
+    else if (conf.gen == "rdg_3d")
+        edge_list = gen.Generate3DRDG(conf.gen_n, conf.gen_k);
+    else if (conf.gen == "rgg_2d")
+        edge_list = gen.Generate2DRGG(conf.gen_n, conf.gen_r, conf.gen_k);
+    else if (conf.gen == "rgg_3d")
+        edge_list = gen.Generate3DRGG(conf.gen_n, conf.gen_r, conf.gen_k);
+    else if (conf.gen == "rhg")
+        edge_list = gen.GenerateRHG(conf.gen_n, conf.gen_gamma, conf.gen_d, conf.gen_k);
+    else if (conf.gen == "ba")
+        edge_list = gen.GenerateBA(conf.gen_n, conf.gen_d, conf.gen_k);
+    else {
+      if (rank == ROOT) 
+        std::cout << "Generator not supported" << std::endl;
+      MPI_Finalize();
+      exit(1);
+    }
+    if (rank == ROOT) std::cout << "Graph generated" << std::endl;
+    GraphIO::ReadDynamicDistributedEdgeList(G, conf, rank, size, MPI_COMM_WORLD, edge_list);
+  } else {
     if (rank == ROOT) 
-      std::cout << "generator not supported" << std::endl;
+      std::cout << "I/O type not supported" << std::endl;
     MPI_Finalize();
     exit(1);
   }
-  if (rank == ROOT) 
-    std::cout << "Graph generated" << std::endl;
-  DynamicGraphAccess G = GraphIO::ReadDistributedEdgeList(conf, rank, size, MPI_COMM_WORLD, edge_list);
-      //G = GraphIO::ReadDistributedGraph(conf, rank, size, MPI_COMM_WORLD);
 
   VertexID n = G.GatherNumberOfGlobalVertices();
   EdgeID m = G.GatherNumberOfGlobalEdges();
+
+  // Determine min/maximum cut size
+  EdgeID m_cut = G.GetNumberOfCutEdges();
+  EdgeID min_cut, max_cut;
+  MPI_Reduce(&m_cut, &min_cut, 1, MPI_VERTEX, MPI_MIN, ROOT,
+             MPI_COMM_WORLD);
+  MPI_Reduce(&m_cut, &max_cut, 1, MPI_VERTEX, MPI_MAX, ROOT,
+             MPI_COMM_WORLD);
+
   if (rank == ROOT) {
     std::cout << "INPUT "
               << "s=" << conf.seed << ", "
               << "p=" << size  << ", "
               << "n=" << n << ", "
-              << "m=" << m << std::endl;
+              << "m=" << m << ", "
+              << "c(min,max)=" << min_cut << "," << max_cut << std::endl;
   }
+
+  // G.ForallGhostVertices([&](const VertexID v) {
+  //   G.ForallNeighbors(v, [&](const VertexID w) {
+  //     if (rank == ROOT) std::cout << "e (" << G.GetGlobalID(v) << "," << G.GetGlobalID(w) << ")" << std::endl;
+  //   });
+  // });
+
+  // MPI_Barrier(MPI_COMM_WORLD);
+  // exit(1);
 
   // Timers
   Timer t;
@@ -87,6 +115,7 @@ int main(int argn, char **argv) {
   double total_time = 0.0;
 
   int user_seed = conf.seed;
+  std::vector<VertexID> labels(G.GetNumberOfVertices(), 0);
   for (int i = 0; i < conf.iterations; ++i) {
     MPI_Barrier(MPI_COMM_WORLD);
     t.Restart();
@@ -94,16 +123,16 @@ int main(int argn, char **argv) {
     // Determine labels
     conf.seed = user_seed + i;
     ShortcutPropagation comp(conf, rank, size);
-    comp.FindComponents(G);
+    comp.FindComponents(G, labels);
 
     // Gather total time
     local_time = t.Elapsed();
     MPI_Reduce(&local_time, &total_time, 1, MPI_DOUBLE, MPI_MAX, ROOT,
                MPI_COMM_WORLD);
     if (rank == ROOT) stats.Push(total_time);
-    
+   
     // Print labels
-    G.OutputComponents();
+    G.OutputComponents(labels);
   }
 
   if (rank == ROOT) {

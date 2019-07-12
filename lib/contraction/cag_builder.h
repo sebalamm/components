@@ -46,12 +46,12 @@ class CAGBuilder {
   virtual ~CAGBuilder() = default;
 
   DynamicGraphAccess BuildDynamicComponentAdjacencyGraph() {
-    PerformContraction(false);
+    PerformContraction();
     return BuildDynamicContractionGraph();
   }
 
   StaticGraphAccess BuildStaticComponentAdjacencyGraph() {
-    PerformContraction(true);
+    PerformContraction();
     return BuildStaticContractionGraph();
   }
 
@@ -79,11 +79,11 @@ class CAGBuilder {
 
   std::vector<bool> received_message_;
 
-  void PerformContraction(bool output_dynamic) {
+  void PerformContraction() {
     ComputeComponentPrefixSum();
     ComputeLocalContractionMapping();
     ExchangeGhostContractionMapping();
-    GenerateLocalContractionEdges(output_dynamic);
+    GenerateLocalContractionEdges();
   }
 
   void ComputeComponentPrefixSum() {
@@ -311,59 +311,119 @@ class CAGBuilder {
     }
   }
 
-  void GenerateLocalContractionEdges(bool backward) {
+  void GenerateLocalContractionEdges() {
     // Gather local edges (there shouldn't be any) O(m/P)
     g_.ForallLocalVertices([&](const VertexID v) {
       VertexID cv = g_.GetContractionVertex(v);
       g_.ForallNeighbors(v, [&](const VertexID w) {
         VertexID cw = g_.GetContractionVertex(w);
         if (cv != cw) {
-          // Forward edge
           auto h_edge = HashedEdge{num_global_components_, cv, cw, g_.GetPE(w)};
           if (local_edges_.find(h_edge) == end(local_edges_)) {
             local_edges_.insert(h_edge);
             edges_.emplace_back(cv, cw);
-          }
-          // Backward edge
-          if (backward) {
-            h_edge = HashedEdge{num_global_components_, cw, cv, rank_};
-            if (local_edges_.find(h_edge) == end(local_edges_)) {
-              local_edges_.insert(h_edge);
-              edges_.emplace_back(cw, cv);
-            }
+            edges_.emplace_back(cw, cv);
           }
         }
       });
     });
   }
 
+//   DynamicGraphAccess BuildDynamicContractionGraph() {
+//     VertexID from = num_smaller_components_;
+//     VertexID to = num_smaller_components_ + num_local_components_ - 1;
+// 
+//     VertexID number_of_ghost_vertices = 0;
+//     google::dense_hash_map<VertexID, VertexID> num_edges_for_vertex; 
+//     num_edges_for_vertex.set_empty_key(-1);
+// 
+//     for (auto &edge : local_edges_) {
+//       VertexID source = edge.source;
+//       VertexID target = edge.target;
+// 
+//       // Source
+//       if (num_edges_for_vertex.find(source) == end(num_edges_for_vertex)) {
+//           num_edges_for_vertex[source] = 0;
+//       }
+//       num_edges_for_vertex[source]++;
+// 
+//       // Target
+//       if (num_edges_for_vertex.find(target) == end(num_edges_for_vertex)) {
+//           num_edges_for_vertex[target] = 0;
+//           if (from > target || target > to) {
+//             number_of_ghost_vertices++;
+//           } 
+//       }
+//       num_edges_for_vertex[target]++;
+//     }
+// 
+//     // Add datatype
+//     MPI_Datatype MPI_COMP;
+//     MPI_Type_vector(1, 2, 0, MPI_VERTEX, &MPI_COMP);
+//     MPI_Type_commit(&MPI_COMP);
+// 
+//     // Gather vertex distribution
+//     std::pair<VertexID, VertexID> range(from, to + 1);
+//     std::vector<std::pair<VertexID, VertexID>> vertex_dist(size_);
+//     MPI_Allgather(&range, 1, MPI_COMP,
+//                   &vertex_dist[0], 1, MPI_COMP, MPI_COMM_WORLD);
+// 
+//     // Build graph
+//     DynamicGraphAccess cg(rank_, size_);
+//     cg.StartConstruct(num_local_components_, 
+//                      number_of_ghost_vertices, 
+//                      from);
+// 
+//     cg.SetOffsetArray(std::move(vertex_dist));
+// 
+//     for (auto &kv : num_edges_for_vertex) {
+//       VertexID global_id = kv.first;
+//       VertexID num_edges = kv.second;
+//       VertexID local_id = 0;
+//       if (from > global_id || global_id > to) {
+//         local_id = cg.AddGhostVertex(global_id);
+//       } else {
+//         local_id = cg.GetLocalID(global_id);
+//       }
+//     }
+// 
+//     // Add edges
+//     for (auto &edge : local_edges_) {
+//       VertexID source_local_id = cg.GetLocalID(edge.source);
+//       cg.AddEdge(source_local_id, edge.target, edge.rank);
+//       cg.SetVertexPayload(source_local_id, {cg.GetVertexDeviate(source_local_id), 
+//                                             edge.source, 
+// #ifdef TIEBREAK_DEGREE
+//                                             0,
+// #endif
+//                                             rank_});
+//     }
+// 
+//     cg.FinishConstruct();
+//     return cg;
+//   }
+
   DynamicGraphAccess BuildDynamicContractionGraph() {
     VertexID from = num_smaller_components_;
     VertexID to = num_smaller_components_ + num_local_components_ - 1;
 
-    VertexID number_of_ghost_vertices = 0;
-    google::dense_hash_map<VertexID, VertexID> num_edges_for_vertex; 
-    num_edges_for_vertex.set_empty_key(-1);
+    google::dense_hash_set<VertexID> ghost_vertices; 
+    ghost_vertices.set_empty_key(-1);
 
-    for (auto &edge : local_edges_) {
-      VertexID source = edge.source;
-      VertexID target = edge.target;
+    for (auto &e : edges_) {
+      VertexID source = e.first;
+      VertexID target = e.second;
 
       // Source
-      if (num_edges_for_vertex.find(source) == end(num_edges_for_vertex)) {
-          num_edges_for_vertex[source] = 0;
-      }
-      num_edges_for_vertex[source]++;
-
-      // Target
-      if (num_edges_for_vertex.find(target) == end(num_edges_for_vertex)) {
-          num_edges_for_vertex[target] = 0;
-          if (from > target || target > to) {
-            number_of_ghost_vertices++;
-          } 
-      }
-      num_edges_for_vertex[target]++;
+      if (from > target || target > to) {
+        if (ghost_vertices.find(target) == end(ghost_vertices)) {
+            ghost_vertices.insert(target);
+        } 
+      } 
     }
+
+    VertexID number_of_ghost_vertices = ghost_vertices.size();
+    VertexID number_of_edges = edges_.size();
 
     // Add datatype
     MPI_Datatype MPI_COMP;
@@ -376,40 +436,27 @@ class CAGBuilder {
     MPI_Allgather(&range, 1, MPI_COMP,
                   &vertex_dist[0], 1, MPI_COMP, MPI_COMM_WORLD);
 
-    // Build graph
     DynamicGraphAccess cg(rank_, size_);
-    cg.StartConstruct(num_local_components_, 
-                     number_of_ghost_vertices, 
-                     from);
+    cg.StartConstruct(num_local_components_,
+                      number_of_ghost_vertices,
+                      from);
 
     cg.SetOffsetArray(std::move(vertex_dist));
 
-    for (auto &kv : num_edges_for_vertex) {
-      VertexID global_id = kv.first;
-      VertexID num_edges = kv.second;
-      VertexID local_id = 0;
-      if (from > global_id || global_id > to) {
-        local_id = cg.AddGhostVertex(global_id);
-      } else {
-        local_id = cg.GetLocalID(global_id);
-      }
-      // cg.ReserveEdgesForVertex(local_id, num_edges);
+    // Initialize local vertices
+    for (VertexID v = 0; v < num_local_components_; v++) {
+        cg.SetVertexLabel(v, from + v);
+        cg.SetVertexRoot(v, rank_);
     }
 
-    // std::cout << "rank " << rank_ << " add edges" << std::endl;
-    // MPI_Barrier(MPI_COMM_WORLD);
+    // Initialize ghost vertices
+    // This will also set the payload
+    for (auto &v : ghost_vertices) {
+      cg.AddGhostVertex(v);
+    }
 
-    // Add edges
-    // for (VertexID v = 0; v < number_of_local_vertices; ++v) {
-    for (auto &edge : local_edges_) {
-      VertexID source_local_id = cg.GetLocalID(edge.source);
-      cg.AddEdge(source_local_id, edge.target, edge.rank);
-      cg.SetVertexPayload(source_local_id, {cg.GetVertexDeviate(source_local_id), 
-                                            edge.source, 
-#ifdef TIEBREAK_DEGREE
-                                            0,
-#endif
-                                            rank_});
+    for (auto &edge : edges_) {
+      cg.AddEdge(cg.GetLocalID(edge.first), edge.second, size_);
     }
 
     cg.FinishConstruct();
@@ -453,7 +500,7 @@ class CAGBuilder {
     cg.StartConstruct(num_local_components_,
                       number_of_ghost_vertices,
                       edges_.size(),
-                      num_smaller_components_);
+                      from);
 
     cg.SetOffsetArray(std::move(vertex_dist));
 
@@ -462,29 +509,15 @@ class CAGBuilder {
     }
 
     std::sort(edges_.begin(), edges_.end(), [&](const auto &left, const auto &right) {
-        VertexID offset = to + 1;
-        VertexID left_source_distance = (left.first < from ? 
-                                         left.first + offset : 
-                                         left.first) - from;
-        VertexID left_target_distance = (left.second < from ? 
-                                          left.second + offset : 
-                                          left.second) - from;
-        VertexID right_source_distance = (right.first < from ? 
-                                          right.first + offset : 
-                                          right.first) - from;
-        VertexID right_target_distance = (right.second < from ? 
-                                          right.second + offset : 
-                                          right.second) - from;
-
-        return (left_source_distance < right_source_distance
-                  || (left_source_distance == right_source_distance && left_target_distance < right_target_distance));
+        VertexID lhs_source = cg.GetLocalID(left.first);
+        VertexID lhs_target = cg.GetLocalID(left.second);
+        VertexID rhs_source = cg.GetLocalID(right.first);
+        VertexID rhs_target = cg.GetLocalID(right.second);
+        return (lhs_source < rhs_source
+                  || (lhs_source == rhs_source && lhs_target < rhs_target));
     });
 
-    // MPI_Barrier(MPI_COMM_WORLD);
-    // std::cout << "rank " << rank_ << " start adding " << edges_.size() << " edges" << std::endl;
     for (auto &edge : edges_) {
-      // std::cout << "rank " << rank_ << " add edge (" 
-      //           << edge.first << "," << edge.second << ")" << std::endl;
       cg.AddEdge(cg.GetLocalID(edge.first), edge.second, size_);
     }
 

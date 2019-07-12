@@ -3,7 +3,7 @@
 
 #include "dynamic_graph_access.h"
 #include "vertex_communicator.h"
-
+  
 DynamicGraphAccess::DynamicGraphAccess(const PEID rank, const PEID size) 
     : rank_(rank),
       size_(size),
@@ -11,6 +11,7 @@ DynamicGraphAccess::DynamicGraphAccess(const PEID rank, const PEID size)
       number_of_local_vertices_(0),
       number_of_global_vertices_(0),
       number_of_edges_(0),
+      number_of_cut_edges_(0),
       number_of_global_edges_(0),
       max_degree_(0),
       max_degree_computed_(false),
@@ -29,6 +30,12 @@ DynamicGraphAccess::DynamicGraphAccess(const PEID rank, const PEID size)
 DynamicGraphAccess::~DynamicGraphAccess() {
   delete ghost_comm_;
   ghost_comm_ = nullptr;
+}
+
+void DynamicGraphAccess::ResetCommunicator() {
+  delete ghost_comm_;
+  ghost_comm_ = new VertexCommunicator(rank_, size_, MPI_COMM_WORLD);
+  ghost_comm_->SetGraph(this);
 }
 
 void DynamicGraphAccess::StartConstruct(const VertexID local_n,
@@ -63,8 +70,8 @@ void DynamicGraphAccess::ReceiveAndSendGhostVertices() {
 }
 
 void DynamicGraphAccess::SetVertexPayload(const VertexID v,
-                                   VertexPayload &&msg,
-                                   bool propagate) {
+                                          VertexPayload &&msg,
+                                          bool propagate) {
   if (GetVertexMessage(v) != msg
       && local_vertices_data_[v].is_interface_vertex_
       && propagate)
@@ -95,6 +102,7 @@ VertexID DynamicGraphAccess::AddGhostVertex(VertexID v) {
   // Set adjacent PE
   PEID neighbor = GetPEFromOffset(v);
   SetAdjacentPE(neighbor, true);
+  ghost_comm_->SetAdjacentPE(neighbor, true);
 
   // Set active
   is_active_[local_id] = true;
@@ -118,7 +126,8 @@ EdgeID DynamicGraphAccess::AddEdge(VertexID from, VertexID to, PEID rank) {
     PEID neighbor = (rank == size_) ? GetPEFromOffset(to) : rank;
     local_vertices_data_[from].is_interface_vertex_ = true;
     if (IsGhostFromGlobal(to)) { // true if ghost already in map, otherwise false
-      AddGhostEdge(from, to, neighbor);
+      number_of_cut_edges_++;
+      AddGhostEdge(from, to);
     } else {
       std::cout << "This shouldn't happen" << std::endl;
       exit(1);
@@ -130,12 +139,12 @@ EdgeID DynamicGraphAccess::AddEdge(VertexID from, VertexID to, PEID rank) {
 
 void DynamicGraphAccess::AddLocalEdge(VertexID from, VertexID to) {
   adjacent_edges_[from].emplace_back(to - local_offset_);
-  adjacent_edges_[to - local_offset_].emplace_back(from);
+  // adjacent_edges_[to - local_offset_].emplace_back(from);
 }
 
-void DynamicGraphAccess::AddGhostEdge(VertexID from, VertexID to, PEID neighbor) {
+void DynamicGraphAccess::AddGhostEdge(VertexID from, VertexID to) {
   adjacent_edges_[from].emplace_back(global_to_local_map_[to]);
-  adjacent_edges_[global_to_local_map_[to]].emplace_back(from);
+  // adjacent_edges_[global_to_local_map_[to]].emplace_back(from);
 }
 
 void DynamicGraphAccess::RemoveAllEdges(const VertexID from) {
@@ -209,5 +218,83 @@ void DynamicGraphAccess::OutputGhosts() {
     std::cout << e.first << " ";
   }
   std::cout << "]" << std::endl;
+}
+
+void DynamicGraphAccess::OutputComponents(std::vector<VertexID> &labels) {
+  VertexID global_num_vertices = GatherNumberOfGlobalVertices();
+  // Gather component sizes
+  google::dense_hash_map<VertexID, VertexID> local_component_sizes; 
+  local_component_sizes.set_empty_key(-1);
+  ForallLocalVertices([&](const VertexID v) {
+    VertexID c = labels[v];
+    if (local_component_sizes.find(c) == end(local_component_sizes))
+      local_component_sizes[c] = 0;
+    local_component_sizes[c]++;
+  });
+
+  // Gather component message
+  std::vector<std::pair<VertexID, VertexID>> local_components;
+  // local_components.reserve(local_component_sizes.size());
+  for(auto &kv : local_component_sizes)
+    local_components.emplace_back(kv.first, kv.second);
+  // TODO [MEMORY]: Might be too small
+  int num_local_components = local_components.size();
+
+  // Exchange number of local components
+  std::vector<int> num_components(size_);
+  MPI_Gather(&num_local_components, 1, MPI_INT, &num_components[0], 1, MPI_INT, ROOT, MPI_COMM_WORLD);
+
+  // Compute diplacements
+  std::vector<int> displ_components(size_, 0);
+  // TODO [MEMORY]: Might be too small
+  int num_global_components = 0;
+  for (PEID i = 0; i < size_; ++i) {
+    displ_components[i] = num_global_components;
+    num_global_components += num_components[i];
+  }
+
+  // Add datatype
+  MPI_Datatype MPI_COMP;
+  MPI_Type_vector(1, 2, 0, MPI_VERTEX, &MPI_COMP);
+  MPI_Type_commit(&MPI_COMP);
+
+  // Exchange components
+  std::vector<std::pair<VertexID, VertexID>> global_components(num_global_components);
+  MPI_Gatherv(&local_components[0], num_local_components, MPI_COMP,
+              &global_components[0], &num_components[0], &displ_components[0], MPI_COMP,
+              ROOT, MPI_COMM_WORLD);
+
+  if (rank_ == ROOT) {
+    google::dense_hash_map<VertexID, VertexID> global_component_sizes; global_component_sizes.set_empty_key(-1);
+    for (auto &comp : global_components) {
+      VertexID c = comp.first;
+      VertexID size = comp.second;
+      if (global_component_sizes.find(c) == end(global_component_sizes))
+        global_component_sizes[c] = 0;
+      global_component_sizes[c] += size;
+    }
+
+    google::dense_hash_map<VertexID, VertexID> condensed_component_sizes; condensed_component_sizes.set_empty_key(-1);
+    for (auto &cs : global_component_sizes) {
+      VertexID c = cs.first;
+      VertexID size = cs.second;
+      if (condensed_component_sizes.find(size) == end(condensed_component_sizes)) {
+        condensed_component_sizes[size] = 0;
+      }
+      condensed_component_sizes[size]++;
+    }
+
+    // Build final vector
+    std::vector<std::pair<VertexID, VertexID>> components;
+    components.reserve(condensed_component_sizes.size());
+    for(auto &kv : condensed_component_sizes)
+      components.emplace_back(kv.first, kv.second);
+    std::sort(begin(components), end(components));
+
+    std::cout << "COMPONENTS [ ";
+    for (auto &comp : components)
+      std::cout << comp.first << "(" << comp.second << ") ";
+    std::cout << "]" << std::endl;
+  }
 }
 
