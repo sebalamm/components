@@ -94,6 +94,14 @@ VertexID DynamicGraphAccess::AddGhostVertex(VertexID v) {
   VertexID local_id = ghost_counter_++;
   global_to_local_map_[v] = local_id;
 
+  // Fix overflows
+  if (ghost_counter_ > local_vertices_data_.size()) {
+    local_vertices_data_.resize(ghost_counter_ + 1);
+    ghost_vertices_data_.resize(ghost_counter_ + 1);
+    is_active_.resize(ghost_counter_ + 1);
+    vertex_payload_.resize(ghost_counter_ + 1);
+  }
+
   // Update data
   local_vertices_data_[local_id].is_interface_vertex_ = false;
   ghost_vertices_data_[local_id - ghost_offset_].rank_ = GetPEFromOffset(v);
@@ -293,7 +301,7 @@ void DynamicGraphAccess::OutputComponents(std::vector<VertexID> &labels) {
 
     std::cout << "COMPONENTS [ ";
     for (auto &comp : components)
-      std::cout << comp.first << "(" << comp.second << ") ";
+      std::cout << "size=" << comp.first << " (num=" << comp.second << ") ";
     std::cout << "]" << std::endl;
   }
 }

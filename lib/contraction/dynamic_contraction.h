@@ -451,7 +451,10 @@ class DynamicContraction {
         VertexID wlabel = e.second;
         VertexID vlocal = g_.GetLocalID(vlabel);
         // TODO: Check if this is needed
-        if (!g_.IsGhostFromGlobal(wlabel)) g_.AddGhostVertex(wlabel);
+        if (!g_.IsGhostFromGlobal(wlabel)) {
+          g_.AddGhostVertex(wlabel);
+          inactive_level_.resize(inactive_level_.size() + 1);
+        }
         // Add edge
         g_.AddEdge(vlocal, wlabel, pe);
         VertexID wlocal = g_.GetLocalID(wlabel);
