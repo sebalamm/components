@@ -135,7 +135,7 @@ class StaticGraphAccess {
     vertices_.resize(vertex_counter_ + 1);
     edges_.resize(edge_counter_ + 1);
 
-    for (VertexID v = 1; v <= vertex_counter_ + 1; v++) {
+    for (VertexID v = 1; v <= vertex_counter_; v++) {
       if (vertices_[v].first_edge_ == std::numeric_limits<EdgeID>::max()) {
         vertices_[v].first_edge_ = vertices_[v - 1].first_edge_;
       }
@@ -366,7 +366,8 @@ class StaticGraphAccess {
   }
 
   void AddLocalEdge(VertexID from, VertexID to) {
-    edges_[edge_counter_++].target_ = GetLocalID(to);
+    edges_[edge_counter_].target_ = GetLocalID(to);
+    edge_counter_++;
     vertices_[from + 1].first_edge_ = edge_counter_;
   }
 
