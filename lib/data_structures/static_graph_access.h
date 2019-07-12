@@ -507,7 +507,8 @@ class StaticGraphAccess {
         global_component_sizes[c] += size;
       }
 
-      google::dense_hash_map<VertexID, VertexID> condensed_component_sizes; condensed_component_sizes.set_empty_key(-1);
+      google::dense_hash_map<VertexID, VertexID> condensed_component_sizes; 
+      condensed_component_sizes.set_empty_key(-1);
       for (auto &cs : global_component_sizes) {
         VertexID c = cs.first;
         VertexID size = cs.second;
@@ -526,7 +527,7 @@ class StaticGraphAccess {
 
       std::cout << "COMPONENTS [ ";
       for (auto &comp : components)
-        std::cout << comp.first << "(" << comp.second << ") ";
+        std::cout << "size=" << comp.first << " (num=" << comp.second << ") ";
       std::cout << "]" << std::endl;
     }
 
