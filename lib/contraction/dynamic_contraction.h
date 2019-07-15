@@ -192,8 +192,8 @@ class DynamicContraction {
       local_iterations++;
     }
     if (rank_ == ROOT) 
-    std::cout << "[STATUS] |--- Propagation done " 
-              << "[TIME] " << contract_timer.Elapsed() << std::endl;
+      std::cout << "[STATUS] |--- Propagation done " 
+                << "[TIME] " << contract_timer.Elapsed() << std::endl;
 
     // Insert edges and keep corresponding vertices
     g_.ForallLocalVertices([&](VertexID v) { g_.RemoveAllEdges(v); });
@@ -243,7 +243,7 @@ class DynamicContraction {
       });
     });
     // Sentinel
-    removed_edges_.emplace(std::numeric_limits<VertexID>::max(), std::numeric_limits<VertexID>::max());
+    removed_edges_.emplace(std::numeric_limits<VertexID>::max() - 1, std::numeric_limits<VertexID>::max() - 1);
   }
 
   void FindLocalConflictingEdges(VertexID num_global_vertices,
@@ -268,7 +268,7 @@ class DynamicContraction {
         removed_edges_.emplace(v, g_.GetGlobalID(w));
       });
     });
-    removed_edges_.emplace(std::numeric_limits<VertexID>::max(), std::numeric_limits<VertexID>::max());
+    removed_edges_.emplace(std::numeric_limits<VertexID>::max() - 1, std::numeric_limits<VertexID>::max() - 1);
   }
 
   PEID FindAdjacentPEs(std::vector<bool> &is_adj) {
@@ -289,7 +289,7 @@ class DynamicContraction {
     PEID messages_recv = 0;
     int message_length = 0;
     for (int i = 0; i < size_; ++i) receive_buffers[i].clear();
-    receive_buffers[rank_] = (*send_buffers)[rank_];
+    receive_buffers[rank_] = (*send_buffers)[rank_]; // copy (TODO: avoid)
     while (messages_recv < adjacent_pes) {
       MPI_Status st{};
       MPI_Probe(MPI_ANY_SOURCE, 0, MPI_COMM_WORLD, &st);
@@ -316,8 +316,12 @@ class DynamicContraction {
                     std::vector<MPI_Request*> &requests) {
     for (PEID pe = 0; pe < size_; ++pe) {
       if (is_adj[pe]) {
-        if ((*send_buffers)[pe].size() == 0) 
+        if ((*send_buffers)[pe].empty()) {
+          (*send_buffers)[pe].emplace_back(std::numeric_limits<VertexID>::max());
           (*send_buffers)[pe].emplace_back(0);
+          (*send_buffers)[pe].emplace_back(0);
+          (*send_buffers)[pe].emplace_back(0);
+        }
         auto *req = new MPI_Request();
         MPI_Isend((*send_buffers)[pe].data(), 
                   static_cast<int>((*send_buffers)[pe].size()), 
@@ -342,9 +346,12 @@ class DynamicContraction {
         VertexID wlabel = receive_buffers[pe][i + 1];
         VertexID wroot = receive_buffers[pe][i + 2];
         VertexID link = receive_buffers[pe][i + 3];
-        VertexID update_id = vlabel + num_global_vertices * wlabel;
+
+        // Check for dummy message
+        if (vlabel == std::numeric_limits<VertexID>::max()) continue;
 
         // Continue if already inserted
+        VertexID update_id = vlabel + num_global_vertices * wlabel;
         if (inserted_edges.find(update_id) != end(inserted_edges)) continue;
         if (propagated_edges.find(update_id) != end(propagated_edges)) continue;
 
@@ -578,7 +585,7 @@ class DynamicContraction {
     while (!removed_edges_.empty()) {
       auto e = removed_edges_.top();
       removed_edges_.pop();
-      if (std::get<0>(e) == std::numeric_limits<VertexID>::max()) break;
+      if (std::get<0>(e) == std::numeric_limits<VertexID>::max() - 1) break;
       g_.AddEdge(std::get<0>(e), std::get<1>(e), g_.GetPE(g_.GetLocalID(std::get<1>(e))));
     }
   }

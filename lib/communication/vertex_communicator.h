@@ -102,8 +102,12 @@ class VertexCommunicator {
     send_tag_++;
     for (PEID pe = 0; pe < size_; ++pe) {
       if (adjacent_pes_[pe]) {
-        if ((*current_send_buffers_)[pe].empty())
+        if ((*current_send_buffers_)[pe].empty()) {
+          (*current_send_buffers_)[pe].emplace_back(std::numeric_limits<VertexID>::max());
           (*current_send_buffers_)[pe].emplace_back(0);
+          (*current_send_buffers_)[pe].emplace_back(0);
+          (*current_send_buffers_)[pe].emplace_back(0);
+        }
         auto *request = new MPI_Request();
         MPI_Isend(&(*current_send_buffers_)[pe][0],
                   static_cast<int>((*current_send_buffers_)[pe].size()),

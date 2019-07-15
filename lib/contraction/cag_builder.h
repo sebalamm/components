@@ -192,7 +192,7 @@ class CAGBuilder {
 
     for (PEID i = 0; i < size_; ++i) {
       if (largest_component_size[i] > 0) {
-        node_buffers_[i].push_back(std::numeric_limits<VertexID>::max()); 
+        node_buffers_[i].push_back(std::numeric_limits<VertexID>::max() - 1); 
         node_buffers_[i].push_back(largest_component_id[i]); 
       }
     }
@@ -236,8 +236,10 @@ class CAGBuilder {
 
     for (PEID i = 0; i < size_; ++i) {
       if (g_.IsAdjacentPE(i)) {
-        if (node_buffers_[i].empty()) 
-          node_buffers_[i].push_back(0);
+        if (node_buffers_[i].empty()) {
+          node_buffers_[i].emplace_back(std::numeric_limits<VertexID>::max());
+          node_buffers_[i].emplace_back(0);
+        }
         auto *req = new MPI_Request();
         MPI_Isend(&node_buffers_[i][0],
                   static_cast<int>(node_buffers_[i].size()),
@@ -277,10 +279,14 @@ class CAGBuilder {
                &rst);
       recv_messages++;
 
+      if (message_length < 2) continue;
       for (int i = 0; i < message_length - 1; i += 2) {
         VertexID global_id = message[i];
         VertexID contraction_id = message[i + 1];
-        if (global_id == std::numeric_limits<VertexID>::max()) {
+
+        if (global_id == std::numeric_limits<VertexID>::max()) continue;
+
+        if (global_id == std::numeric_limits<VertexID>::max() - 1) {
           largest_component[st.MPI_SOURCE] = contraction_id;
         } else {
           vertex_message[g_.GetLocalID(global_id)] = contraction_id;

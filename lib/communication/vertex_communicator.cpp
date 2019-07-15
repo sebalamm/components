@@ -64,7 +64,7 @@ void VertexCommunicator::ReceiveMessages() {
     //                   << " "
     //                   << st.MPI_SOURCE 
     //                   << std::endl;
-      VertexID local_id = g_->GetLocalID(message[i]);
+      VertexID global_id = message[i];
       VertexID deviate = message[i + 1];
       VertexID label = message[i + 2];
       PEID root = static_cast<PEID>(message[i + 3]);
@@ -82,6 +82,10 @@ void VertexCommunicator::ReceiveMessages() {
 //                 << std::endl;
 //     }
 // #endif
+
+      if (global_id == std::numeric_limits<VertexID>::max()) continue;
+      VertexID local_id = g_->GetLocalID(global_id);
+
       g_->HandleGhostUpdate(local_id, 
                             label, 
                             deviate, 
