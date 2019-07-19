@@ -30,6 +30,8 @@
 #include <sstream>
 #include <vector>
 
+#include <sys/sysinfo.h>
+
 #include "config.h"
 #include "dynamic_graph_access.h"
 #include "static_graph_access.h"
@@ -63,6 +65,9 @@ class GraphIO {
       } 
     }
 
+    MPI_Barrier(MPI_COMM_WORLD);
+    if (rank == ROOT) std::cout << "done finding ghosts... mem " << GetFreePhysMem() << std::endl;
+
     VertexID number_of_ghost_vertices = ghost_vertices.size();
     VertexID number_of_edges = edge_list.size();
 
@@ -83,12 +88,19 @@ class GraphIO {
                      number_of_edges,
                      from);
 
+
+    MPI_Barrier(MPI_COMM_WORLD);
+    if (rank == ROOT) std::cout << "done start construct... mem " << GetFreePhysMem() << std::endl;
+
     g.SetOffsetArray(std::move(vertex_dist));
 
     // Initialize ghost vertices
     for (auto &v : ghost_vertices) {
       g.AddGhostVertex(v);
     }
+
+    MPI_Barrier(MPI_COMM_WORLD);
+    if (rank == ROOT) std::cout << "done adding ghosts... mem " << GetFreePhysMem() << std::endl;
 
     std::sort(edge_list.begin(), edge_list.end(), [&](auto &left, auto &right) {
         VertexID lhs_source = g.GetLocalID(left.first);
@@ -101,6 +113,9 @@ class GraphIO {
     for (auto &edge : edge_list) {
       g.AddEdge(g.GetLocalID(edge.first), edge.second, size);
     }
+
+    MPI_Barrier(MPI_COMM_WORLD);
+    if (rank == ROOT) std::cout << "done adding edges... mem " << GetFreePhysMem() << std::endl;
 
     g.FinishConstruct();
   }
@@ -435,6 +450,20 @@ class GraphIO {
 
     g.FinishConstruct();
   }
+
+  static long long GetFreePhysMem() {
+    struct sysinfo memInfo;
+    sysinfo (&memInfo);
+    long long totalPhysMem = memInfo.totalram;
+    long long freePhysMem = memInfo.freeram;
+
+    totalPhysMem *= memInfo.mem_unit;
+    freePhysMem *= memInfo.mem_unit;
+    totalPhysMem *= 1e-9;
+    freePhysMem *= 1e-9;
+
+    return freePhysMem;
+  } 
 
  private:
 };

@@ -26,6 +26,8 @@
 #include <random>
 #include <set>
 
+#include <sys/sysinfo.h>
+
 #include "config.h"
 #include "definitions.h"
 #include "graph_io.h"
@@ -309,9 +311,20 @@ class ExponentialContraction {
                   << "[TIME] " << round_timer.Elapsed() << std::endl;
     }
 
+    MPI_Barrier(MPI_COMM_WORLD);
+    if (rank_ == ROOT) std::cout << "done propagating... mem " << GetFreePhysMem() << std::endl;
+    
+
     // Determine remaining active vertices
     g.BuildLabelShortcuts();
+
+    MPI_Barrier(MPI_COMM_WORLD);
+    if (rank_ == ROOT) std::cout << "done shortcutting... mem " << GetFreePhysMem() << std::endl;
+
     exp_contraction_->ExponentialContraction();
+
+    MPI_Barrier(MPI_COMM_WORLD);
+    if (rank_ == ROOT) std::cout << "done contraction... mem " << GetFreePhysMem() << std::endl;
 
     OutputStats<DynamicGraphAccess>(g);
 
@@ -407,6 +420,20 @@ class ExponentialContraction {
                 << "c(min,max)=" << min_cut << "," << max_cut << std::endl;
     }
   }
+
+  static long long GetFreePhysMem() {
+    struct sysinfo memInfo;
+    sysinfo (&memInfo);
+    long long totalPhysMem = memInfo.totalram;
+    long long freePhysMem = memInfo.freeram;
+
+    totalPhysMem *= memInfo.mem_unit;
+    freePhysMem *= memInfo.mem_unit;
+    totalPhysMem *= 1e-9;
+    freePhysMem *= 1e-9;
+
+    return freePhysMem;
+  } 
 };
 
 #endif

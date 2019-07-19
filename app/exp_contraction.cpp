@@ -28,6 +28,8 @@
 #include "timer.h"
 #include "kagen_interface.h"
 
+#include <sys/sysinfo.h>
+
 #include "components/exponential_contraction.h"
 
 int main(int argn, char **argv) {
@@ -70,7 +72,20 @@ int main(int argn, char **argv) {
       exit(1);
     }
     if (rank == ROOT) std::cout << "Graph generated" << std::endl;
+
+    struct sysinfo memInfo;
+    sysinfo (&memInfo);
+    long long totalPhysMem = memInfo.totalram;
+    long long freePhysMem = memInfo.freeram;
+
+    totalPhysMem *= memInfo.mem_unit;
+    freePhysMem *= memInfo.mem_unit;
+    totalPhysMem *= 1e-9;
+    freePhysMem *= 1e-9;
+
+    if (rank == ROOT) std::cout << "done generating... mem " << freePhysMem << std::endl;
     GraphIO::ReadStaticDistributedEdgeList(G, conf, rank, size, MPI_COMM_WORLD, edge_list);
+    edge_list.clear();
   } else {
     if (rank == ROOT) 
       std::cout << "I/O type not supported" << std::endl;
@@ -136,3 +151,4 @@ int main(int argn, char **argv) {
   MPI_Barrier(MPI_COMM_WORLD);
   MPI_Finalize();
 }
+
