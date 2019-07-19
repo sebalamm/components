@@ -54,26 +54,46 @@ class ExponentialContraction {
 
   void FindComponents(StaticGraphAccess &g, std::vector<VertexID> &g_labels) {
     rng_offset_ = size_ + config_.seed;
+    contraction_timer_.Restart();
     FindLocalComponents(g, g_labels);
+    if (rank_ == ROOT) {
+      std::cout << "[STATUS] |- Finding local components on input took " 
+                << "[TIME] " << contraction_timer_.Elapsed() << std::endl;
+    }
     
     // First round of contraction
+    contraction_timer_.Restart();
     CAGBuilder<StaticGraphAccess> 
       first_contraction(g, g_labels, rank_, size_);
     StaticGraphAccess cag 
       = first_contraction.BuildStaticComponentAdjacencyGraph();
     OutputStats<StaticGraphAccess>(cag);
+    if (rank_ == ROOT) {
+      std::cout << "[STATUS] |- Building first cag took " 
+                << "[TIME] " << contraction_timer_.Elapsed() << std::endl;
+    }
 
     // TODO: Delete original graph?
     // Keep contraction labeling for later
+    contraction_timer_.Restart();
     std::vector<VertexID> cag_labels(cag.GetNumberOfVertices(), 0);
     FindLocalComponents(cag, cag_labels);
+    if (rank_ == ROOT) {
+      std::cout << "[STATUS] |- Finding local components on cag took " 
+                << "[TIME] " << contraction_timer_.Elapsed() << std::endl;
+    }
 
     // Second round of contraction
+    contraction_timer_.Restart();
     CAGBuilder<StaticGraphAccess> 
       second_contraction(cag, cag_labels, rank_, size_);
     DynamicGraphAccess ccag 
       = second_contraction.BuildDynamicComponentAdjacencyGraph();
     OutputStats<DynamicGraphAccess>(ccag);
+    if (rank_ == ROOT) {
+      std::cout << "[STATUS] |- Building second cag took " 
+                << "[TIME] " << contraction_timer_.Elapsed() << std::endl;
+    }
 
     // TODO: Delete intermediate graph?
     // Keep contraction labeling for later
@@ -81,7 +101,12 @@ class ExponentialContraction {
     exp_contraction_ = new DynamicContraction(ccag, rank_, size_);
 
     // Main decomposition algorithm
+    contraction_timer_.Restart(); 
     PerformDecomposition(ccag);
+    if (rank_ == ROOT) {
+      std::cout << "[STATUS] |- Resolving connectivity took " 
+                << "[TIME] " << contraction_timer_.Elapsed() << std::endl;
+    }
 
     ApplyToLocalComponents(ccag, cag, cag_labels);
     ApplyToLocalComponents(cag, cag_labels, g, g_labels);
@@ -104,6 +129,7 @@ class ExponentialContraction {
 
   // Statistics
   Timer iteration_timer_;
+  Timer contraction_timer_;
   
   // Contraction
   DynamicContraction *exp_contraction_;
@@ -292,19 +318,16 @@ class ExponentialContraction {
         g.SetVertexPayload(v, std::move(smallest_payload));
       });
 
-      // Check if all PEs are done
-      // if (++local_iterations % 6 == 0) {
-        MPI_Allreduce(&converged_locally,
-                      &converged_globally,
-                      1,
-                      MPI_INT,
-                      MPI_MIN,
-                      MPI_COMM_WORLD);
-        exchange_rounds++;
+      MPI_Allreduce(&converged_locally,
+                    &converged_globally,
+                    1,
+                    MPI_INT,
+                    MPI_MIN,
+                    MPI_COMM_WORLD);
+      exchange_rounds++;
 
-        // Receive variates
-        g.SendAndReceiveGhostVertices();
-      // } 
+      // Receive variates
+      g.SendAndReceiveGhostVertices();
 
       if (rank_ == ROOT) 
         std::cout << "[STATUS] |--- Round finished " 

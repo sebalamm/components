@@ -40,7 +40,7 @@ class CAGBuilder {
         num_smaller_components_(0),
         num_local_components_(0),
         num_global_components_(0),
-        node_buffers_(size) {
+        vertex_buffers_(size) {
     local_components_.set_empty_key(-1);
   }
   virtual ~CAGBuilder() = default;
@@ -75,15 +75,40 @@ class CAGBuilder {
   std::vector<std::pair<VertexID, VertexID>> edges_;
 
   // Send buffers
-  std::vector<std::vector<VertexID>> node_buffers_;
-
+  std::vector<std::vector<VertexID>> vertex_buffers_;
   std::vector<bool> received_message_;
 
+  // Statistics
+  Timer contraction_timer_;
+
   void PerformContraction() {
+    contraction_timer_.Restart();
     ComputeComponentPrefixSum();
+    if (rank_ == ROOT) {
+      std::cout << "[STATUS] |-- Computing component prefix sum took " 
+                << "[TIME] " << contraction_timer_.Elapsed() << std::endl;
+    }
+
+    contraction_timer_.Restart();
     ComputeLocalContractionMapping();
+    if (rank_ == ROOT) {
+      std::cout << "[STATUS] |-- Computing local contraction mapping took " 
+                << "[TIME] " << contraction_timer_.Elapsed() << std::endl;
+    }
+
+    contraction_timer_.Restart();
     ExchangeGhostContractionMapping();
+    if (rank_ == ROOT) {
+      std::cout << "[STATUS] |-- Exchanging ghost contraction mapping took " 
+                << "[TIME] " << contraction_timer_.Elapsed() << std::endl;
+    }
+    
+    contraction_timer_.Restart();
     GenerateLocalContractionEdges();
+    if (rank_ == ROOT) {
+      std::cout << "[STATUS] |-- Generating contraction edges took " 
+                << "[TIME] " << contraction_timer_.Elapsed() << std::endl;
+    }
   }
 
   void ComputeComponentPrefixSum() {
@@ -192,8 +217,8 @@ class CAGBuilder {
 
     for (PEID i = 0; i < size_; ++i) {
       if (largest_component_size[i] > 0) {
-        node_buffers_[i].push_back(std::numeric_limits<VertexID>::max() - 1); 
-        node_buffers_[i].push_back(largest_component_id[i]); 
+        vertex_buffers_[i].push_back(std::numeric_limits<VertexID>::max() - 1); 
+        vertex_buffers_[i].push_back(largest_component_id[i]); 
       }
     }
   }
@@ -212,15 +237,15 @@ class CAGBuilder {
           if (!g_.IsLocal(w)) {
             PEID target_pe = g_.GetPE(w);
             VertexID contraction_vertex = g_.GetContractionVertex(v);
-            VertexID largest_component = node_buffers_[target_pe][1];
+            VertexID largest_component = vertex_buffers_[target_pe][1];
             // Only send message if not part of largest component
             if (contraction_vertex != largest_component) {
               // Avoid duplicates by hashing the message
               VertexID comp_pair = pair(w, g_.GetContractionVertex(v));
               if (unique_neighbors.find(comp_pair) == end(unique_neighbors)) {
                 unique_neighbors.insert(comp_pair);
-                node_buffers_[target_pe].push_back(g_.GetGlobalID(v));
-                node_buffers_[target_pe].push_back(contraction_vertex);
+                vertex_buffers_[target_pe].push_back(g_.GetGlobalID(v));
+                vertex_buffers_[target_pe].push_back(contraction_vertex);
               }
             }
           }
@@ -236,13 +261,13 @@ class CAGBuilder {
 
     for (PEID i = 0; i < size_; ++i) {
       if (g_.IsAdjacentPE(i)) {
-        if (node_buffers_[i].empty()) {
-          node_buffers_[i].emplace_back(std::numeric_limits<VertexID>::max());
-          node_buffers_[i].emplace_back(0);
+        if (vertex_buffers_[i].empty()) {
+          vertex_buffers_[i].emplace_back(std::numeric_limits<VertexID>::max());
+          vertex_buffers_[i].emplace_back(0);
         }
         auto *req = new MPI_Request();
-        MPI_Isend(&node_buffers_[i][0],
-                  static_cast<int>(node_buffers_[i].size()),
+        MPI_Isend(&vertex_buffers_[i][0],
+                  static_cast<int>(vertex_buffers_[i].size()),
                   MPI_UNSIGNED_LONG,
                   i,
                   i + 6 * size_,
