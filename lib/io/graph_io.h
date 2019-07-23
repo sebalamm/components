@@ -65,7 +65,6 @@ class GraphIO {
       } 
     }
 
-    MPI_Barrier(MPI_COMM_WORLD);
     if (rank == ROOT) std::cout << "done finding ghosts... mem " << GetFreePhysMem() << std::endl;
 
     VertexID number_of_ghost_vertices = ghost_vertices.size();
@@ -89,7 +88,6 @@ class GraphIO {
                      from);
 
 
-    MPI_Barrier(MPI_COMM_WORLD);
     if (rank == ROOT) std::cout << "done start construct... mem " << GetFreePhysMem() << std::endl;
 
     g.SetOffsetArray(std::move(vertex_dist));
@@ -99,7 +97,6 @@ class GraphIO {
       g.AddGhostVertex(v);
     }
 
-    MPI_Barrier(MPI_COMM_WORLD);
     if (rank == ROOT) std::cout << "done adding ghosts... mem " << GetFreePhysMem() << std::endl;
 
     std::sort(edge_list.begin(), edge_list.end(), [&](auto &left, auto &right) {
@@ -114,7 +111,6 @@ class GraphIO {
       g.AddEdge(g.GetLocalID(edge.first), edge.second, size);
     }
 
-    MPI_Barrier(MPI_COMM_WORLD);
     if (rank == ROOT) std::cout << "done adding edges... mem " << GetFreePhysMem() << std::endl;
 
     g.FinishConstruct();

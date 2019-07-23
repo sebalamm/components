@@ -694,6 +694,7 @@ class DynamicGraphAccess {
     std::vector<VertexID> local_vertices;
     std::vector<VertexID> local_labels;
     std::vector<std::pair<VertexID, VertexID>> local_edges;
+    local_edges.reserve(GetNumberOfEdges());
     // TODO [MEMORY]: Might be too small
     int num_local_vertices = 0;
     // TODO [MEMORY]: Might be too small

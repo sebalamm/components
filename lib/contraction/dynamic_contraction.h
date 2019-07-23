@@ -48,9 +48,10 @@ class DynamicContraction {
 
   void ExponentialContraction() {
     // Statistics
-    Timer contract_timer;
-    contract_timer.Restart();
+    Timer propagation_timer;
+    propagation_timer.Restart();
 
+    contraction_timer_.Restart();
     VertexID num_global_vertices = g_.GatherNumberOfGlobalVertices();
     VertexID num_vertices = g_.GetNumberOfVertices();
 
@@ -77,11 +78,21 @@ class DynamicContraction {
     inserted_edges.set_empty_key(-1);
     std::vector<std::vector<std::pair<VertexID, VertexID>>> edges_to_add(size_);
 
+    if (rank_ == ROOT) {
+      std::cout << "[STATUS] |--- Allocation took " 
+                << "[TIME] " << contraction_timer_.Elapsed() << std::endl;
+    }
+
+    contraction_timer_.Restart();
     FindExponentialConflictingEdges(num_global_vertices, 
                                     inserted_edges, 
                                     edges_to_add, 
                                     send_ids, 
                                     current_send_buffers);
+    if (rank_ == ROOT) {
+      std::cout << "[STATUS] |--- Detecting conflicting edges took " 
+                << "[TIME] " << contraction_timer_.Elapsed() << std::endl;
+    }
 
     std::vector<bool> is_adj(size_);
     PEID num_adj = FindAdjacentPEs(is_adj);
@@ -93,15 +104,27 @@ class DynamicContraction {
     int local_iterations = 0;
     while (converged_globally == 0) {
 
+      contraction_timer_.Restart();
       SendMessages(is_adj, current_send_buffers, requests);
       ReceiveMessages(num_adj, requests, current_send_buffers, receive_buffers);
       SwapBuffers(current_send_buffers, send_buffers_a, send_buffers_b);
 
+      if (rank_ == ROOT) {
+        std::cout << "[STATUS] |---- Message exchange took " 
+                  << "[TIME] " << contraction_timer_.Elapsed() << std::endl;
+      }
+
+      contraction_timer_.Restart();
       int converged_locally = ProcessExponentialMessages(num_global_vertices, inserted_edges, edges_to_add, 
                                                          send_ids, receive_buffers, current_send_buffers);
+      if (rank_ == ROOT) {
+        std::cout << "[STATUS] |---- Processing messages took " 
+                  << "[TIME] " << contraction_timer_.Elapsed() << std::endl;
+      }
 
       // Check if all PEs are done
       // if (++local_iterations % 6 == 0) {
+      contraction_timer_.Restart();
       MPI_Allreduce(&converged_locally,
                     &converged_globally,
                     1,
@@ -110,14 +133,19 @@ class DynamicContraction {
                     MPI_COMM_WORLD);
       // } 
       local_iterations++;
+      if (rank_ == ROOT) {
+        std::cout << "[STATUS] |---- Convergence test took " 
+                  << "[TIME] " << contraction_timer_.Elapsed() << std::endl;
+      }
     }
 
     if (rank_ == ROOT) 
-      std::cout << "[STATUS] |--- Propagation done " 
+      std::cout << "[STATUS] |---- Propagation done " 
                 << "[INFO] rounds "  << local_iterations << " "
-                << "[TIME] " << contract_timer.Elapsed() << std::endl;
+                << "[TIME] " << propagation_timer.Elapsed() << std::endl;
 
     // Insert edges and keep corresponding vertices
+    contraction_timer_.Restart();
     g_.ForallLocalVertices([&](VertexID v) { g_.RemoveAllEdges(v); });
     contraction_level_++;
 
@@ -125,14 +153,19 @@ class DynamicContraction {
     g_.ResetNumberOfCutEdges();
     InsertEdges(edges_to_add);
 
+    if (rank_ == ROOT) {
+      std::cout << "[STATUS] |---- Updating edges took " 
+                << "[TIME] " << contraction_timer_.Elapsed() << std::endl;
+    }
+
     // max_degree_computed_ = false;
     UpdateGraphVertices();
   }
 
   void LocalContraction() {
     // Statistics
-    Timer contract_timer;
-    contract_timer.Restart();
+    Timer propagation_timer;
+    propagation_timer.Restart();
 
     VertexID num_global_vertices = g_.GatherNumberOfGlobalVertices();
     VertexID num_vertices = g_.GetNumberOfVertices();
@@ -192,8 +225,8 @@ class DynamicContraction {
       local_iterations++;
     }
     if (rank_ == ROOT) 
-      std::cout << "[STATUS] |--- Propagation done " 
-                << "[TIME] " << contract_timer.Elapsed() << std::endl;
+      std::cout << "[STATUS] |---- Propagation done " 
+                << "[TIME] " << propagation_timer.Elapsed() << std::endl;
 
     // Insert edges and keep corresponding vertices
     g_.ForallLocalVertices([&](VertexID v) { g_.RemoveAllEdges(v); });
@@ -513,6 +546,7 @@ class DynamicContraction {
     // Remove last sentinel
     removed_edges_.pop();
     while (contraction_level_ > 0) {
+      contraction_timer_.Restart();
       // Remove current edges from current level
       google::dense_hash_map<VertexID, VertexID> current_components; 
       current_components.set_empty_key(-1);
@@ -527,7 +561,12 @@ class DynamicContraction {
       EnableActiveVertices();
       AddRemovedEdges();
       UpdateGraphVertices();
+      if (rank_ == ROOT) {
+        std::cout << "[STATUS] |-- Updating edges took " 
+                  << "[TIME] " << contraction_timer_.Elapsed() << std::endl;
+      }
 
+      contraction_timer_.Restart();
       // Update local labels
       g_.ForallLocalVertices([&](VertexID v) {
         g_.ForceVertexPayload(v, {0, 
@@ -537,11 +576,16 @@ class DynamicContraction {
 #endif
                                rank_});
       });
+      if (rank_ == ROOT) {
+        std::cout << "[status] |-- Updating payloads took " 
+                  << "[time] " << contraction_timer_.Elapsed() << std::endl;
+      }
 
       // Propagate labels
       int converged_globally = 0;
       while (converged_globally == 0) {
         int converged_locally = 1;
+        contraction_timer_.Restart();
         // Receive variates
         g_.SendAndReceiveGhostVertices();
 
@@ -558,7 +602,12 @@ class DynamicContraction {
             converged_locally = 0;
           }
         });
+        if (rank_ == ROOT) {
+          std::cout << "[status] |--- Message exchange took " 
+                    << "[time] " << contraction_timer_.Elapsed() << std::endl;
+        }
 
+        contraction_timer_.Restart();
         // Check if all PEs are done
         MPI_Allreduce(&converged_locally,
                       &converged_globally,
@@ -566,6 +615,10 @@ class DynamicContraction {
                       MPI_INT,
                       MPI_MIN,
                       MPI_COMM_WORLD);
+        if (rank_ == ROOT) {
+          std::cout << "[status] |--- Convergence test took " 
+                    << "[time] " << contraction_timer_.Elapsed() << std::endl;
+        }
       }
 
       // Vertices at current level are roots at previous one
@@ -601,6 +654,9 @@ class DynamicContraction {
   VertexID contraction_level_;
   std::stack<std::pair<VertexID, VertexID>> removed_edges_;
   std::vector<short> inactive_level_;
+
+  // Statistics
+  Timer contraction_timer_;
 };
 
 #endif

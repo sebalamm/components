@@ -136,15 +136,27 @@ class ExponentialContraction {
 
   void PerformDecomposition(DynamicGraphAccess &g) {
     // if (rank_ == ROOT) std::cout << "[STATUS] |- Start exponential BFS" << std::endl;
+    contraction_timer_.Restart(); 
     VertexID global_vertices = g.GatherNumberOfGlobalVertices();
     if (global_vertices > 0) {
       iteration_timer_.Restart();
       iteration_++;
-      if (global_vertices < config_.sequential_limit) 
-        RunSequentialCC(g);
-      else RunContraction(g);
+      // if (global_vertices < config_.sequential_limit) 
+      //   RunSequentialCC(g);
+      // else 
+        RunContraction(g);
     }
+    if (rank_ == ROOT) {
+      std::cout << "[STATUS] |- Running contraction took " 
+                << "[TIME] " << contraction_timer_.Elapsed() << std::endl;
+    }
+
+    contraction_timer_.Restart(); 
     exp_contraction_->UndoContraction();
+    if (rank_ == ROOT) {
+      std::cout << "[STATUS] |- Undoing contraction took " 
+                << "[TIME] " << contraction_timer_.Elapsed() << std::endl;
+    }
   }
 
   void FindLocalComponents(StaticGraphAccess &g, std::vector<VertexID> &label) {
@@ -209,17 +221,18 @@ class ExponentialContraction {
   }
 
   void RunContraction(DynamicGraphAccess &g) {
-    VertexID global_vertices = g.GatherNumberOfGlobalVertices();
+    contraction_timer_.Restart();
+    // VertexID global_vertices = g.GatherNumberOfGlobalVertices();
     // TODO: Number of vertices seems correct so something is probably wrong with backwards edges
     if (rank_ == ROOT) {
       if (iteration_ == 1)
         std::cout << "[STATUS] |-- Iteration " << iteration_ 
-                  << " [TIME] " << "-" 
-                  << " [ADD] " << global_vertices << std::endl;
+                  << " [TIME] " << "-" << std::endl;
+                  // << " [ADD] " << global_vertices << std::endl;
       else
         std::cout << "[STATUS] |-- Iteration " << iteration_ 
-                  << " [TIME] " << iteration_timer_.Elapsed() 
-                  << " [ADD] " << global_vertices << std::endl;
+                  << " [TIME] " << iteration_timer_.Elapsed() << std::endl;
+                  // << " [ADD] " << global_vertices << std::endl;
     }
     iteration_timer_.Restart();
 
@@ -256,6 +269,10 @@ class ExponentialContraction {
 #endif
     });
     g.SendAndReceiveGhostVertices();
+    if (rank_ == ROOT) {
+      std::cout << "[STATUS] |-- Computing and exchanging deviates took " 
+                << "[TIME] " << contraction_timer_.Elapsed() << std::endl;
+    }
 
     // // Draw exponential deviate per local vertex
     // std::exponential_distribution<LPFloat> distribution(config_.beta);
@@ -290,6 +307,7 @@ class ExponentialContraction {
     Timer round_timer;
     while (converged_globally == 0) {
       round_timer.Restart();
+      contraction_timer_.Restart();
       int converged_locally = 1;
 
       // Perform update for local vertices
@@ -317,7 +335,12 @@ class ExponentialContraction {
         });
         g.SetVertexPayload(v, std::move(smallest_payload));
       });
+      if (rank_ == ROOT) {
+        std::cout << "[STATUS] |--- Updating payloads took " 
+                  << "[TIME] " << contraction_timer_.Elapsed() << std::endl;
+      }
 
+      contraction_timer_.Restart();
       MPI_Allreduce(&converged_locally,
                     &converged_globally,
                     1,
@@ -325,39 +348,56 @@ class ExponentialContraction {
                     MPI_MIN,
                     MPI_COMM_WORLD);
       exchange_rounds++;
+      if (rank_ == ROOT) {
+        std::cout << "[STATUS] |--- Convergence test took " 
+                  << "[TIME] " << contraction_timer_.Elapsed() << std::endl;
+      }
 
+      contraction_timer_.Restart();
       // Receive variates
       g.SendAndReceiveGhostVertices();
+      if (rank_ == ROOT) {
+        std::cout << "[STATUS] |--- Exchanging payloads took " 
+                  << "[TIME] " << contraction_timer_.Elapsed() << std::endl;
+      }
 
       if (rank_ == ROOT) 
         std::cout << "[STATUS] |--- Round finished " 
                   << "[TIME] " << round_timer.Elapsed() << std::endl;
     }
 
-    MPI_Barrier(MPI_COMM_WORLD);
     if (rank_ == ROOT) std::cout << "done propagating... mem " << GetFreePhysMem() << std::endl;
     
 
+    contraction_timer_.Restart();
     // Determine remaining active vertices
     g.BuildLabelShortcuts();
+    if (rank_ == ROOT) {
+      std::cout << "[STATUS] |-- Building shortcuts took " 
+                << "[TIME] " << contraction_timer_.Elapsed() << std::endl;
+    }
 
-    MPI_Barrier(MPI_COMM_WORLD);
     if (rank_ == ROOT) std::cout << "done shortcutting... mem " << GetFreePhysMem() << std::endl;
 
+    contraction_timer_.Restart();
     exp_contraction_->ExponentialContraction();
+    if (rank_ == ROOT) {
+      std::cout << "[STATUS] |-- Exponential contraction took " 
+                << "[TIME] " << contraction_timer_.Elapsed() << std::endl;
+    }
 
-    MPI_Barrier(MPI_COMM_WORLD);
     if (rank_ == ROOT) std::cout << "done contraction... mem " << GetFreePhysMem() << std::endl;
 
     OutputStats<DynamicGraphAccess>(g);
 
     // Count remaining number of vertices
-    global_vertices = g.GatherNumberOfGlobalVertices();
+    VertexID global_vertices = g.GatherNumberOfGlobalVertices();
     if (global_vertices > 0) {
       iteration_++;
-      if (global_vertices < config_.sequential_limit) 
-        RunSequentialCC(g);
-      else RunContraction(g);
+      // if (global_vertices < config_.sequential_limit) 
+      //   RunSequentialCC(g);
+      // else 
+        RunContraction(g);
     }
   }
 
@@ -380,13 +420,20 @@ class ExponentialContraction {
   }
 
   void RunSequentialCC(DynamicGraphAccess &g) {
+    contraction_timer_.Restart();
     // Perform gather of graph on root 
     std::vector<VertexID> vertices;
     std::vector<int> num_vertices_per_pe(size_);
     std::vector<VertexID> labels;
     std::vector<std::pair<VertexID, VertexID>> edges;
     g.GatherGraphOnRoot(vertices, num_vertices_per_pe, labels, edges);
+    if (rank_ == ROOT) {
+      std::cout << "[STATUS] |-- Gather on root took " 
+                << "[TIME] " << contraction_timer_.Elapsed() << std::endl;
+    }
+    
 
+    contraction_timer_.Restart();
     // Root computes labels
     if (rank_ == ROOT) {
       // Build vertex mapping 
@@ -416,9 +463,18 @@ class ExponentialContraction {
       sg.FinishConstruct();
       FindLocalComponents(sg, labels);
     }
+    if (rank_ == ROOT) {
+      std::cout << "[STATUS] |-- Local computation on root took " 
+                << "[TIME] " << contraction_timer_.Elapsed() << std::endl;
+    }
 
+    contraction_timer_.Restart();
     // Distribute labels to other PEs
     g.DistributeLabelsFromRoot(labels, num_vertices_per_pe);
+    if (rank_ == ROOT) {
+      std::cout << "[STATUS] |-- Distributing graph from root took " 
+                << "[TIME] " << contraction_timer_.Elapsed() << std::endl;
+    }
   }
 
   template <typename GraphType>

@@ -268,7 +268,7 @@ class CAGBuilder {
         auto *req = new MPI_Request();
         MPI_Isend(&vertex_buffers_[i][0],
                   static_cast<int>(vertex_buffers_[i].size()),
-                  MPI_UNSIGNED_LONG,
+                  MPI_VERTEX,
                   i,
                   i + 6 * size_,
                   MPI_COMM_WORLD,
