@@ -73,6 +73,8 @@ void ParseParameters(int argn, char **argv,
   conf.gen_r = args.Get<float>("r", 0.001);
   conf.gen_gamma = args.Get<float>("gamma", 2.2);
   conf.gen_d = args.Get<float>("d", 16.0);
+  conf.gen_p = args.Get<float>("p", 1.0);
+  conf.gen_periodic = args.IsSet("periodic");
 }
 
 #endif

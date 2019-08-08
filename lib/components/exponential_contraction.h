@@ -234,6 +234,8 @@ class ExponentialContraction {
                   << " [TIME] " << iteration_timer_.Elapsed() << std::endl;
                   // << " [ADD] " << global_vertices << std::endl;
     }
+    std::cout << "[STATUS] |-- R" << rank_ << " starting iteration " << std::endl;
+    MPI_Barrier(MPI_COMM_WORLD);
     iteration_timer_.Restart();
 
     // if (rank_ == ROOT) std::cout << "[STATUS] Find high degree" << std::endl;
@@ -268,11 +270,15 @@ class ExponentialContraction {
                 << std::endl;
 #endif
     });
+    // g.OutputLocal();
     g.SendAndReceiveGhostVertices();
     if (rank_ == ROOT) {
       std::cout << "[STATUS] |-- Computing and exchanging deviates took " 
                 << "[TIME] " << contraction_timer_.Elapsed() << std::endl;
     }
+    if (rank_ == 21 || rank_ == 13) g.OutputLocal();
+    MPI_Barrier(MPI_COMM_WORLD);
+    exit(1);
 
     // // Draw exponential deviate per local vertex
     // std::exponential_distribution<LPFloat> distribution(config_.beta);
@@ -297,6 +303,8 @@ class ExponentialContraction {
     // #endif
     // });
 
+    std::cout << "[STATUS] |-- R" << rank_ << " finish initial exchange " << std::endl;
+    MPI_Barrier(MPI_COMM_WORLD);
     if (rank_ == ROOT)
       std::cout << "[STATUS] |-- Pick deviates " 
                 << "[TIME] " << iteration_timer_.Elapsed() << std::endl;
@@ -340,6 +348,12 @@ class ExponentialContraction {
                   << "[TIME] " << contraction_timer_.Elapsed() << std::endl;
       }
 
+      contraction_timer_.Restart();
+      MPI_Barrier(MPI_COMM_WORLD);
+      if (rank_ == ROOT) {
+        std::cout << "[STATUS] |--- Barrier before convergence test took " 
+                  << "[TIME] " << contraction_timer_.Elapsed() << std::endl;
+      }
       contraction_timer_.Restart();
       MPI_Allreduce(&converged_locally,
                     &converged_globally,

@@ -42,6 +42,7 @@ void VertexCommunicator::ReceiveMessages() {
     MPI_Get_count(&st, MPI_VERTEX, &message_length);
 
     // if (rank_ == 11) std::cout << "start recv " << messages_recv << " " << recv_tag_ << std::endl;
+    // if (rank_ == 43) std::cout << "recv " << messages_recv << " from " << GetNumberOfAdjacentPEs() << std::endl;
     std::vector<VertexID> message(static_cast<unsigned long>(message_length));
     MPI_Status rst{};
     MPI_Recv(&message[0], message_length,

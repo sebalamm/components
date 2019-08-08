@@ -679,9 +679,10 @@ class DynamicGraphAccess {
     return adjacent_pes_[pe];
   }
 
-  inline void SetAdjacentPE(const PEID pe, const bool is_adj) {
-    adjacent_pes_[pe] = is_adj;
-  }
+  void SetAdjacentPE(const PEID pe, const bool is_adj);
+
+  void ResetAdjacentPEs();
+
 
   //////////////////////////////////////////////
   // Communication

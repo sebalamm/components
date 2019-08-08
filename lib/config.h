@@ -58,6 +58,8 @@ struct Config {
   VertexID gen_n;
   EdgeID gen_m;
   float gen_r;
+  float gen_p;
+  bool gen_periodic;
   PEID gen_k;
   float gen_gamma;
   float gen_d;

@@ -336,9 +336,6 @@ class StaticGraphAccess {
     ghost_vertices_data_[ghost_counter_ - ghost_offset_].rank_ = GetPEFromOffset(v);
     ghost_vertices_data_[ghost_counter_ - ghost_offset_].global_id_ = v;
 
-    // Set adjacent PE
-    SetAdjacentPE(GetPEFromOffset(v), true);
-
     return ghost_counter_++;
   }
 
@@ -356,6 +353,7 @@ class StaticGraphAccess {
       if (IsGhostFromGlobal(to)) { // true if ghost already in map, otherwise false
         number_of_cut_edges_++;
         AddLocalEdge(from, to);
+        SetAdjacentPE(neighbor, true);
       } else {
         std::cout << "This shouldn't happen" << std::endl;
         exit(1);
@@ -419,6 +417,7 @@ class StaticGraphAccess {
   }
 
   inline void SetAdjacentPE(const PEID pe, const bool is_adj) {
+    if (pe == rank_) return;
     adjacent_pes_[pe] = is_adj;
   }
 

@@ -51,8 +51,8 @@ class GraphIO {
     edge_list.erase(begin(edge_list));
 
     // Count ghost vertices
-    google::dense_hash_set<VertexID> ghost_vertices; 
-    ghost_vertices.set_empty_key(-1);
+    // google::dense_hash_set<VertexID> ghost_vertices; ghost_vertices.set_empty_key(-1);
+    google::sparse_hash_set<VertexID> ghost_vertices; 
     for (auto &edge : edge_list) {
       VertexID source = edge.first;
       VertexID target = edge.second;
@@ -126,8 +126,9 @@ class GraphIO {
     edge_list.erase(begin(edge_list));
 
     // Count ghost vertices
-    google::dense_hash_set<VertexID> ghost_vertices; 
-    ghost_vertices.set_empty_key(-1);
+    // google::dense_hash_set<VertexID> ghost_vertices; 
+    // ghost_vertices.set_empty_key(-1);
+    google::sparse_hash_set<VertexID> ghost_vertices; 
     for (auto &edge : edge_list) {
       VertexID source = edge.first;
       VertexID target = edge.second;
@@ -248,8 +249,9 @@ class GraphIO {
                   &vertex_dist[0], 1, MPI_COMP, comm);
 
     std::vector<std::pair<VertexID, VertexID>> edge_list;
-    google::dense_hash_set<VertexID> ghost_vertices; 
-    ghost_vertices.set_empty_key(-1);
+    // google::dense_hash_set<VertexID> ghost_vertices; 
+    // ghost_vertices.set_empty_key(-1);
+    google::sparse_hash_set<VertexID> ghost_vertices; 
 
     VertexID counter = 0;
     VertexID vertex_counter = 0;
@@ -383,8 +385,9 @@ class GraphIO {
                   &vertex_dist[0], 1, MPI_COMP, comm);
 
     std::vector<std::pair<VertexID, VertexID>> edge_list;
-    google::dense_hash_set<VertexID> ghost_vertices; 
-    ghost_vertices.set_empty_key(-1);
+    // google::dense_hash_set<VertexID> ghost_vertices; 
+    // ghost_vertices.set_empty_key(-1);
+    google::sparse_hash_set<VertexID> ghost_vertices; 
 
     VertexID counter = 0;
     VertexID vertex_counter = 0;

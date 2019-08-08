@@ -109,8 +109,6 @@ VertexID DynamicGraphAccess::AddGhostVertex(VertexID v) {
 
   // Set adjacent PE
   PEID neighbor = GetPEFromOffset(v);
-  SetAdjacentPE(neighbor, true);
-  ghost_comm_->SetAdjacentPE(neighbor, true);
 
   // Set active
   is_active_[local_id] = true;
@@ -136,6 +134,7 @@ EdgeID DynamicGraphAccess::AddEdge(VertexID from, VertexID to, PEID rank) {
     if (IsGhostFromGlobal(to)) { // true if ghost already in map, otherwise false
       number_of_cut_edges_++;
       AddGhostEdge(from, to);
+      SetAdjacentPE(neighbor, true);
     } else {
       std::cout << "This shouldn't happen" << std::endl;
       exit(1);
@@ -157,6 +156,18 @@ void DynamicGraphAccess::AddGhostEdge(VertexID from, VertexID to) {
 
 void DynamicGraphAccess::RemoveAllEdges(const VertexID from) {
   adjacent_edges_[from].clear();
+}
+
+void DynamicGraphAccess::SetAdjacentPE(const PEID pe, const bool is_adj) {
+    if (pe == rank_) return;
+    adjacent_pes_[pe] = is_adj;
+    ghost_comm_->SetAdjacentPE(pe, is_adj);
+}
+
+void DynamicGraphAccess::ResetAdjacentPEs() {
+  for (PEID i = 0; i < adjacent_pes_.size(); ++i) {
+    SetAdjacentPE(i, false);
+  }
 }
 
 bool DynamicGraphAccess::CheckDuplicates() {
