@@ -97,12 +97,6 @@ class ExponentialContraction {
 
     // TODO: Delete intermediate graph?
     // Keep contraction labeling for later
-    ccag.OutputLocal();
-    ccag.ForallLocalVertices([&](const VertexID v) {
-        ccag.ForceVertexPayload(v, {ccag.GetVertexDeviate(v) - 1,  ccag.GetVertexLabel(v), ccag.GetVertexRoot(v)});
-    });
-    ccag.SendAndReceiveGhostVertices();
-
     exp_contraction_ = new DynamicContraction(ccag, rank_, size_);
 
     // Main decomposition algorithm
