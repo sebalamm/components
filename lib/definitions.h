@@ -22,23 +22,23 @@
 #ifndef _GRAPH_DEFINITIONS_H_
 #define _GRAPH_DEFINITIONS_H_
 
-// #define MPI_VERTEX MPI_UNSIGNED_LONG_LONG
-#define MPI_VERTEX MPI_UNSIGNED
+#define MPI_VERTEX MPI_UNSIGNED_LONG_LONG
+// #define MPI_VERTEX MPI_UNSIGNED_LONG
 
 // Constants
 typedef int PEID;
 const PEID ROOT = 0;
 
 // High/low prec
-typedef float HPFloat;
-typedef float LPFloat;
-typedef int LONG;
-typedef unsigned int ULONG;
+// typedef float HPFloat;
+// typedef float LPFloat;
+// typedef int LONG;
+// typedef unsigned int ULONG;
 
-// typedef long double HPFloat;
-// typedef double LPFloat;
-// typedef long long LONG;
-// typedef unsigned long long ULONG;
+typedef long double HPFloat;
+typedef double LPFloat;
+typedef long long LONG;
+typedef unsigned long long ULONG;
 
 // Graph access
 typedef ULONG VertexID;

@@ -60,12 +60,12 @@ void ParseParameters(int argn, char **argv,
   // Generator
   conf.gen = args.Get<std::string>("gen", "null");
   conf.gen_k = args.Get<PEID>("k", 0);
-  bool exact_n = args.IsSet("exact_n");
+  bool exact_n = args.IsSet("exact_n") || conf.gen == "grid_2d";
   if (exact_n)
 	  conf.gen_n = args.Get<unsigned int>("n", 18);
   else 
 	  conf.gen_n = 1 << args.Get<unsigned int>("n", 18);
-  bool exact_m = args.IsSet("exact_m");
+  bool exact_m = args.IsSet("exact_m") || conf.gen == "grid_2d";
   if (exact_m)
 	  conf.gen_m = args.Get<unsigned int>("m", 18);
   else 

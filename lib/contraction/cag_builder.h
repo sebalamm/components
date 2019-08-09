@@ -42,6 +42,7 @@ class CAGBuilder {
         num_global_components_(0),
         vertex_buffers_(size) {
     local_components_.set_empty_key(-1);
+    offset_ = g_.GatherNumberOfGlobalVertices();
   }
   virtual ~CAGBuilder() = default;
 
@@ -63,6 +64,9 @@ class CAGBuilder {
   // Network information
   PEID rank_, size_;
 
+  // Offset for pairing
+  VertexID offset_;
+
   // Component information
   VertexID num_smaller_components_, 
            num_local_components_,
@@ -82,6 +86,9 @@ class CAGBuilder {
   Timer contraction_timer_;
 
   void PerformContraction() {
+    MPI_Barrier(MPI_COMM_WORLD);
+    g_.OutputLocal();
+    MPI_Barrier(MPI_COMM_WORLD);
     contraction_timer_.Restart();
     ComputeComponentPrefixSum();
     if (rank_ == ROOT) {
@@ -160,6 +167,7 @@ class CAGBuilder {
     g_.ForallLocalVertices([&](const VertexID v) {
       VertexID component = label_map[vertex_labels_[v]];
       g_.SetContractionVertex(v, component);
+      std::cout << "R" << rank_ << " v " << g_.GetGlobalID(v) << " cv " << component << " l " << vertex_labels_[v] << std::endl;
     });
   }
 
@@ -226,11 +234,12 @@ class CAGBuilder {
   void AddComponentMessages() {
     // Helper functions
     auto pair = [&](VertexID x, VertexID y) {
-      return static_cast<VertexID>((0.5 * ((x + y) * (x + y + 1))) + y);
+      // return static_cast<VertexID>((0.5 * ((x + y) * (x + y + 1))) + y);
+      return x * offset_ + y;
     };
 
     // Gather components with the same neighbor
-    google::sparse_hash_set<VertexID> unique_neighbors;
+    std::vector<google::sparse_hash_set<VertexID>> unique_neighbors(size_);
     g_.ForallLocalVertices([&](const VertexID v) {
       if (g_.IsInterface(v)) {
         g_.ForallNeighbors(v, [&](const VertexID w) {
@@ -238,12 +247,15 @@ class CAGBuilder {
             PEID target_pe = g_.GetPE(w);
             VertexID contraction_vertex = g_.GetContractionVertex(v);
             VertexID largest_component = vertex_buffers_[target_pe][1];
+            VertexID comp_pair = pair(v, g_.GetContractionVertex(v));
+            std::cout << "R" << rank_ << " try send v " << g_.GetGlobalID(v) << " cid " << contraction_vertex << " to " << target_pe << " hash " << comp_pair << " largest " << largest_component << std::endl;
             // Only send message if not part of largest component
             if (contraction_vertex != largest_component) {
               // Avoid duplicates by hashing the message
-              VertexID comp_pair = pair(w, g_.GetContractionVertex(v));
-              if (unique_neighbors.find(comp_pair) == end(unique_neighbors)) {
-                unique_neighbors.insert(comp_pair);
+              // VertexID comp_pair = pair(g_.GetGlobalID(v), g_.GetContractionVertex(v));
+              if (unique_neighbors[target_pe].find(comp_pair) == end(unique_neighbors[target_pe])) {
+                // std::cout << "R" << rank_ << " send v " << g_.GetGlobalID(v) << " cid " << contraction_vertex << " to " << target_pe << std::endl;
+                unique_neighbors[target_pe].insert(comp_pair);
                 vertex_buffers_[target_pe].push_back(g_.GetGlobalID(v));
                 vertex_buffers_[target_pe].push_back(contraction_vertex);
               }
@@ -252,7 +264,6 @@ class CAGBuilder {
         });
       }
     });
-
   }
 
   std::vector<MPI_Request*> SendBuffers() {
@@ -326,6 +337,7 @@ class CAGBuilder {
     g_.ForallGhostVertices([&](VertexID v) {
       PEID pe = g_.GetPE(v);
       VertexID cid = vertex_message[v];
+      std::cout << "R" << rank_ << " recv v " << g_.GetGlobalID(v) << " cid " << cid << std::endl;
       if (received_message_[v]) {
         g_.SetContractionVertex(v, cid);
       } else {
@@ -351,6 +363,9 @@ class CAGBuilder {
         if (cv != cw) {
           auto h_edge = HashedEdge{num_global_components_, cv, cw, g_.GetPE(w)};
           if (local_edges_.find(h_edge) == end(local_edges_)) {
+            if (rank_ == 6 || rank_ == 10) {
+              std::cout << "R" << rank_ << " edge " << cv << "(" << g_.GetGlobalID(v) << ")" << " <-> " << cw << "(" << g_.GetGlobalID(w) << ")" << std::endl;
+            }
             local_edges_.insert(h_edge);
             edges_.emplace_back(cv, cw);
             edges_.emplace_back(cw, cv);
