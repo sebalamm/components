@@ -86,9 +86,6 @@ class CAGBuilder {
   Timer contraction_timer_;
 
   void PerformContraction() {
-    MPI_Barrier(MPI_COMM_WORLD);
-    g_.OutputLocal();
-    MPI_Barrier(MPI_COMM_WORLD);
     contraction_timer_.Restart();
     ComputeComponentPrefixSum();
     if (rank_ == ROOT) {

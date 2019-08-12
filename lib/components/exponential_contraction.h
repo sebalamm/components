@@ -233,8 +233,6 @@ class ExponentialContraction {
                   << " [TIME] " << iteration_timer_.Elapsed() << std::endl;
                   // << " [ADD] " << global_vertices << std::endl;
     }
-    // std::cout << "[STATUS] |-- R" << rank_ << " starting iteration " << std::endl;
-    // MPI_Barrier(MPI_COMM_WORLD);
     iteration_timer_.Restart();
 
     // if (rank_ == ROOT) std::cout << "[STATUS] Find high degree" << std::endl;
@@ -277,31 +275,6 @@ class ExponentialContraction {
                 << "[TIME] " << contraction_timer_.Elapsed() << std::endl;
     }
 
-    // // Draw exponential deviate per local vertex
-    // std::exponential_distribution<LPFloat> distribution(config_.beta);
-    // g.ForallVertices([&](const VertexID v) {
-    //   // Set preliminary deviate
-    //   std::mt19937
-    //       generator(static_cast<unsigned int>(config_.seed + g.GetVertexLabel(v)
-    //       + iteration_ * rng_offset_));
-    //   if (g.IsLocal(v)) g.SetParent(v, g.GetGlobalID(v));
-
-    //   // Weigh distribution towards high degree vertices
-    //   // TODO: Test different weighing functions 
-    //   // LPFloat weight = static_cast<LPFloat>(log2(g.GetNumberOfGlobalVertices()) / g.GetVertexDegree(v));
-    //   LPFloat weight = 1.;
-    //   g.SetVertexPayload(v, {static_cast<VertexID>(weight * distribution(generator)),
-    //                          g.GetVertexLabel(v), g.GetVertexRoot(v)}, 
-    //                      false);
-    // #ifndef NDEBUG
-    //   std::cout << "[R" << rank_ << ":" << iteration_ << "] update deviate "
-    //             << g.GetGlobalID(v) << " -> " << g.GetVertexDeviate(v)
-    //             << std::endl;
-    // #endif
-    // });
-
-    // std::cout << "[STATUS] |-- R" << rank_ << " finish initial exchange " << std::endl;
-    // MPI_arrier(MPI_COMM_WORLD);
     if (rank_ == ROOT)
       std::cout << "[STATUS] |-- Pick deviates " 
                 << "[TIME] " << iteration_timer_.Elapsed() << std::endl;
