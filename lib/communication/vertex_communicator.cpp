@@ -17,11 +17,6 @@ void VertexCommunicator::AddMessage(const VertexID v,
         (*current_send_buffers_)[neighbor].emplace_back(msg.degree_);
 #endif
         packed_pes_[neighbor] = true;
-
-        // if (g_->GetGlobalID(v) == 6) {
-        //   g_->OutputLocal();
-        //   std::cout << rank_ << std::endl;
-        // }
       }
     }
   });
@@ -41,15 +36,12 @@ void VertexCommunicator::ReceiveMessages() {
     int message_length;
     MPI_Get_count(&st, MPI_VERTEX, &message_length);
 
-    // if (rank_ == 11) std::cout << "start recv " << messages_recv << " " << recv_tag_ << std::endl;
-    // if (rank_ == 43) std::cout << "recv " << messages_recv << " from " << GetNumberOfAdjacentPEs() << std::endl;
     std::vector<VertexID> message(static_cast<unsigned long>(message_length));
     MPI_Status rst{};
     MPI_Recv(&message[0], message_length,
              MPI_VERTEX, st.MPI_SOURCE,
              recv_tag_, communicator_, &rst);
     messages_recv++;
-    // if (rank_ == 11) std::cout << "start ml " << message_length << std::endl;
 
 #ifdef TIEBREAK_DEGREE
     if (message_length < 5) continue;

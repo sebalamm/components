@@ -38,6 +38,7 @@
 #include "utils.h"
 #include "union_find.h"
 #include "propagation.h"
+#include "all_reduce.h"
 
 class ExponentialContraction {
  public:
@@ -134,7 +135,6 @@ class ExponentialContraction {
   DynamicContraction *exp_contraction_;
 
   void PerformDecomposition(DynamicGraphAccess &g) {
-    // if (rank_ == ROOT) std::cout << "[STATUS] |- Start exponential BFS" << std::endl;
     contraction_timer_.Restart(); 
     VertexID global_vertices = g.GatherNumberOfGlobalVertices();
     if (global_vertices > 0) {
@@ -404,61 +404,70 @@ class ExponentialContraction {
   }
 
   void RunSequentialCC(DynamicGraphAccess &g) {
-    contraction_timer_.Restart();
-    // Perform gather of graph on root 
-    std::vector<VertexID> vertices;
-    std::vector<int> num_vertices_per_pe(size_);
-    std::vector<VertexID> labels;
-    std::vector<std::pair<VertexID, VertexID>> edges;
-    g.GatherGraphOnRoot(vertices, num_vertices_per_pe, labels, edges);
-    if (rank_ == ROOT) {
-      std::cout << "[STATUS] |-- Gather on root took " 
-                << "[TIME] " << contraction_timer_.Elapsed() << std::endl;
-    }
-    
+    // Init labels
+    std::vector<VertexID> labels(g.GetNumberOfLocalVertices());
+    g.ForallLocalVertices([&](const VertexID v) {
+      labels[v] = g.GetVertexLabel(v);
+    });
 
-    contraction_timer_.Restart();
-    // Root computes labels
-    if (rank_ == ROOT) {
-      // Build vertex mapping 
-      std::unordered_map<VertexID, int> vertex_map;
-      std::unordered_map<int, VertexID> reverse_vertex_map;
-      // TODO: Might be too small
-      int current_vertex = 0;
-      for (const VertexID &v : vertices) {
-        vertex_map[v] = current_vertex;
-        reverse_vertex_map[current_vertex++] = v;
-      }
+    // Run all-reduce
+    AllReduce<DynamicGraphAccess> ar(config_, rank_, size_);
+    ar.FindComponents(g, labels);
+    // contraction_timer_.Restart();
+    // // Perform gather of graph on root 
+    // std::vector<VertexID> vertices;
+    // std::vector<int> num_vertices_per_pe(size_);
+    // std::vector<VertexID> labels;
+    // std::vector<std::pair<VertexID, VertexID>> edges;
+    // g.GatherGraphOnRoot(vertices, num_vertices_per_pe, labels, edges);
+    // if (rank_ == ROOT) {
+    //   std::cout << "[STATUS] |-- Gather on root took " 
+    //             << "[TIME] " << contraction_timer_.Elapsed() << std::endl;
+    // }
+    // 
 
-      // Build edge lists
-      std::vector<std::vector<int>> edge_lists(vertices.size());
-      for (const auto &e : edges) 
-        edge_lists[vertex_map[e.first]].push_back(vertex_map[e.second]);
+    // contraction_timer_.Restart();
+    // // Root computes labels
+    // if (rank_ == ROOT) {
+    //   // Build vertex mapping 
+    //   std::unordered_map<VertexID, int> vertex_map;
+    //   std::unordered_map<int, VertexID> reverse_vertex_map;
+    //   // TODO: Might be too small
+    //   int current_vertex = 0;
+    //   for (const VertexID &v : vertices) {
+    //     vertex_map[v] = current_vertex;
+    //     reverse_vertex_map[current_vertex++] = v;
+    //   }
 
-      // Construct temporary graph
-      StaticGraphAccess sg(ROOT, 1);
+    //   // Build edge lists
+    //   std::vector<std::vector<int>> edge_lists(vertices.size());
+    //   for (const auto &e : edges) 
+    //     edge_lists[vertex_map[e.first]].push_back(vertex_map[e.second]);
 
-      sg.StartConstruct(vertices.size(), 0, edges.size(), ROOT);
-      for (int v = 0; v < vertices.size(); ++v) {
-        // sg.ReserveEdgesForVertex(v, edge_lists[v].size());
-        for (const int &e : edge_lists[v]) 
-          sg.AddEdge(v, e, ROOT);
-      }
-      sg.FinishConstruct();
-      FindLocalComponents(sg, labels);
-    }
-    if (rank_ == ROOT) {
-      std::cout << "[STATUS] |-- Local computation on root took " 
-                << "[TIME] " << contraction_timer_.Elapsed() << std::endl;
-    }
+    //   // Construct temporary graph
+    //   StaticGraphAccess sg(ROOT, 1);
 
-    contraction_timer_.Restart();
-    // Distribute labels to other PEs
-    g.DistributeLabelsFromRoot(labels, num_vertices_per_pe);
-    if (rank_ == ROOT) {
-      std::cout << "[STATUS] |-- Distributing graph from root took " 
-                << "[TIME] " << contraction_timer_.Elapsed() << std::endl;
-    }
+    //   sg.StartConstruct(vertices.size(), 0, edges.size(), ROOT);
+    //   for (int v = 0; v < vertices.size(); ++v) {
+    //     // sg.ReserveEdgesForVertex(v, edge_lists[v].size());
+    //     for (const int &e : edge_lists[v]) 
+    //       sg.AddEdge(v, e, ROOT);
+    //   }
+    //   sg.FinishConstruct();
+    //   FindLocalComponents(sg, labels);
+    // }
+    // if (rank_ == ROOT) {
+    //   std::cout << "[STATUS] |-- Local computation on root took " 
+    //             << "[TIME] " << contraction_timer_.Elapsed() << std::endl;
+    // }
+
+    // contraction_timer_.Restart();
+    // // Distribute labels to other PEs
+    // g.DistributeLabelsFromRoot(labels, num_vertices_per_pe);
+    // if (rank_ == ROOT) {
+    //   std::cout << "[STATUS] |-- Distributing graph from root took " 
+    //             << "[TIME] " << contraction_timer_.Elapsed() << std::endl;
+    // }
   }
 
   template <typename GraphType>

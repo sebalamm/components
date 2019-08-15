@@ -208,14 +208,6 @@ class GraphIO {
     config.n = number_of_global_vertices;
     config.m = number_of_global_edges;
 
-    // Read the lines i*ceil(n/size) to (i+1)*floor(n/size) lines of that file
-    // VertexID leftover_vertices = number_of_global_vertices % size;
-    // VertexID number_of_local_vertices = (number_of_global_vertices / size)
-    //     + static_cast<VertexID>(rank < leftover_vertices);
-    // VertexID from = (rank * number_of_local_vertices)
-    //     + static_cast<VertexID>(rank >= leftover_vertices ? leftover_vertices : 0);
-    // VertexID to = from + number_of_local_vertices - 1;
-
     PEID leftover_partitions = number_of_partitions % size;
     PEID number_of_local_partitions = (number_of_partitions / size)
         + static_cast<PEID>(rank < leftover_partitions);
@@ -344,14 +336,6 @@ class GraphIO {
     config.n = number_of_global_vertices;
     config.m = number_of_global_edges;
 
-    // Read the lines i*ceil(n/size) to (i+1)*floor(n/size) lines of that file
-    // VertexID leftover_vertices = number_of_global_vertices % size;
-    // VertexID number_of_local_vertices = (number_of_global_vertices / size)
-    //     + static_cast<VertexID>(rank < leftover_vertices);
-    // VertexID from = (rank * number_of_local_vertices)
-    //     + static_cast<VertexID>(rank >= leftover_vertices ? leftover_vertices : 0);
-    // VertexID to = from + number_of_local_vertices - 1;
-
     PEID leftover_partitions = number_of_partitions % size;
     PEID number_of_local_partitions = (number_of_partitions / size)
         + static_cast<PEID>(rank < leftover_partitions);
@@ -443,7 +427,6 @@ class GraphIO {
     }
 
     for (auto &edge : edge_list) {
-      // std::cout << "R" << rank << " i (" << edge.first << "," << edge.second << ")" << std::endl;
       g.AddEdge(g.GetLocalID(edge.first), edge.second, size);
     }
 

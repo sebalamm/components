@@ -80,11 +80,6 @@ class DynamicContraction {
     std::vector<std::vector<std::pair<VertexID, VertexID>>> edges_to_add(size_);
 
     // if (rank_ == ROOT) {
-    //   std::cout << "[STATUS] |--- Allocation took " 
-    //             << "[TIME] " << contraction_timer_.Elapsed() << std::endl;
-    // }
-
-    // if (rank_ == ROOT) {
       std::cout << "[STATUS] |--- R" << rank_ << " Allocation took " 
                 << "[TIME] " << contraction_timer_.Elapsed() << std::endl;
     // }
@@ -96,10 +91,6 @@ class DynamicContraction {
                                     edges_to_add, 
                                     send_ids, 
                                     current_send_buffers);
-    // if (rank_ == ROOT) {
-    //   std::cout << "[STATUS] |--- Detecting conflicting edges took " 
-    //             << "[TIME] " << contraction_timer_.Elapsed() << std::endl;
-    // }
     
     // if (rank_ == ROOT) {
       std::cout << "[STATUS] |--- R" << rank_ << " Detecting conflicting edges took " 
@@ -122,11 +113,6 @@ class DynamicContraction {
       SwapBuffers(current_send_buffers, send_buffers_a, send_buffers_b);
 
       // if (rank_ == ROOT) {
-      //   std::cout << "[STATUS] |---- Message exchange took " 
-      //             << "[TIME] " << contraction_timer_.Elapsed() << std::endl;
-      // }
-
-      // if (rank_ == ROOT) {
         std::cout << "[STATUS] |---- R" << rank_ << " Message exchange took " 
                   << "[TIME] " << contraction_timer_.Elapsed() << std::endl;
       // }
@@ -137,11 +123,6 @@ class DynamicContraction {
       // if (rank_ == ROOT) {
         std::cout << "[STATUS] |---- R" << rank_ << " Processing messages took " 
                   << "[TIME] " << contraction_timer_.Elapsed() << std::endl;
-      // }
-
-      // if (rank_ == ROOT) {
-      //   std::cout << "[STATUS] |---- Processing messages took " 
-      //             << "[TIME] " << contraction_timer_.Elapsed() << std::endl;
       // }
 
       // if (rank_ == ROOT) {

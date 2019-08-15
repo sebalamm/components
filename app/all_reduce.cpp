@@ -30,7 +30,7 @@
 
 #include <sys/sysinfo.h>
 
-#include "components/exponential_contraction.h"
+#include "components/all_reduce.h"
 
 int main(int argn, char **argv) {
   // Init MPI
@@ -111,8 +111,8 @@ int main(int argn, char **argv) {
 
     // Determine labels
     std::vector<VertexID> labels(G.GetNumberOfVertices(), 0);
-    ExponentialContraction comp(conf, rank, size);
-    comp.FindComponents(G, labels);
+    AllReduce<StaticGraphAccess> ar(conf, rank, size);
+    ar.FindComponents(G, labels);
   }
   MPI_Barrier(MPI_COMM_WORLD);
 
@@ -205,8 +205,8 @@ int main(int argn, char **argv) {
     t.Restart();
 
     // Determine labels
-    ExponentialContraction comp(conf, rank, size);
-    comp.FindComponents(G, labels);
+    AllReduce<StaticGraphAccess> ar(conf, rank, size);
+    ar.FindComponents(G, labels);
 
     // Gather total time
     local_time = t.Elapsed();
