@@ -43,7 +43,6 @@
 
 #include "config.h"
 #include "timer.h"
-#include "static_graph_access.h"
 
 struct VertexPayload {
   VertexID deviate_;
@@ -94,8 +93,42 @@ struct VertexPayload {
   }
 };
 
+
 class VertexCommunicator;
 class DynamicGraphAccess {
+  struct Vertex {
+    EdgeID first_edge_;
+
+    Vertex() : first_edge_(std::numeric_limits<EdgeID>::max()) {}
+    explicit Vertex(EdgeID e) : first_edge_(e) {}
+  };
+
+  struct LocalVertexData {
+    bool is_interface_vertex_;
+
+    LocalVertexData()
+        : is_interface_vertex_(false) {}
+    LocalVertexData(const VertexID id, bool interface)
+        : is_interface_vertex_(interface) {}
+  };
+
+  struct GhostVertexData {
+    PEID rank_;
+    VertexID global_id_;
+
+    GhostVertexData()
+        : rank_(0), global_id_(0) {}
+    GhostVertexData(PEID rank, VertexID global_id)
+        : rank_(rank), global_id_(global_id) {}
+  };
+
+  struct Edge {
+    VertexID target_;
+
+    Edge() : target_(0) {}
+    explicit Edge(VertexID target) : target_(target) {}
+  };
+
  public:
   DynamicGraphAccess(const PEID rank, const PEID size);
 

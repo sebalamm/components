@@ -114,7 +114,8 @@ int main(int argn, char **argv) {
     ExponentialContraction comp(conf, rank, size);
     comp.FindComponents(G, labels);
   }
-  MPI_Barrier(MPI_COMM_WORLD);
+  // MPI_Barrier(MPI_COMM_WORLD);
+  // exit(2);
 
   // ACTUAL RUN
   // ACTUAL RUN
@@ -123,7 +124,7 @@ int main(int argn, char **argv) {
   Statistics stats;
   
   for (int i = 0; i < conf.iterations; ++i) {
-    int round_seed = initial_seed + i + 1000;
+    int round_seed = initial_seed + i;
     StaticGraphAccess G(rank, size);
     if (conf.input_file != "null") {
       // File I/O

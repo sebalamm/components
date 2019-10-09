@@ -39,6 +39,7 @@
 #include "union_find.h"
 #include "propagation.h"
 #include "all_reduce.h"
+#include "reduce_contraction.h"
 
 class ExponentialContraction {
  public:
@@ -140,9 +141,9 @@ class ExponentialContraction {
     if (global_vertices > 0) {
       iteration_timer_.Restart();
       iteration_++;
-      // if (global_vertices < config_.sequential_limit) 
-      //   RunSequentialCC(g);
-      // else 
+      if (global_vertices < config_.sequential_limit) 
+        RunSequentialCC(g);
+      else 
         RunContraction(g);
     }
     if (rank_ == ROOT) {
@@ -152,6 +153,9 @@ class ExponentialContraction {
 
     contraction_timer_.Restart(); 
     exp_contraction_->UndoContraction();
+    // g.OutputLocal();
+    // MPI_Barrier(MPI_COMM_WORLD);
+    // exit(1);
     if (rank_ == ROOT) {
       std::cout << "[STATUS] |- Undoing contraction took " 
                 << "[TIME] " << contraction_timer_.Elapsed() << std::endl;
@@ -352,6 +356,11 @@ class ExponentialContraction {
 
     if (rank_ == ROOT) std::cout << "done propagating... mem " << GetFreePhysMem() << std::endl;
     
+    if (iteration_ == 3) {
+      g.OutputLocal();
+      MPI_Barrier(MPI_COMM_WORLD);
+      exit(3);
+    }
 
     contraction_timer_.Restart();
     // Determine remaining active vertices
@@ -374,13 +383,18 @@ class ExponentialContraction {
 
     OutputStats<DynamicGraphAccess>(g);
 
+    // if (iteration_ == 2) {
+    //   g.OutputLocal();
+    //   MPI_Barrier(MPI_COMM_WORLD);
+    //   exit(3);
+    // }
     // Count remaining number of vertices
     VertexID global_vertices = g.GatherNumberOfGlobalVertices();
     if (global_vertices > 0) {
       iteration_++;
-      // if (global_vertices < config_.sequential_limit) 
-      //   RunSequentialCC(g);
-      // else 
+      if (global_vertices < config_.sequential_limit) 
+        RunSequentialCC(g);
+      else 
         RunContraction(g);
     }
   }
@@ -404,8 +418,22 @@ class ExponentialContraction {
   }
 
   void RunSequentialCC(DynamicGraphAccess &g) {
+    // Build vertex mapping 
+    google::dense_hash_map<VertexID, int> vertex_map; 
+    vertex_map.set_empty_key(-1);
+    google::dense_hash_map<int, VertexID> reverse_vertex_map; 
+    reverse_vertex_map.set_empty_key(-1);
+    int current_vertex = 0;
+    g.ForallLocalVertices([&](const VertexID v) {
+      vertex_map[v] = current_vertex;
+      reverse_vertex_map[current_vertex++] = v;
+    });
+
     // Init labels
     std::vector<VertexID> labels(g.GetNumberOfLocalVertices());
+    for (VertexID i = 0; i < labels.size(); ++i) {
+      labels[i] = g.GetVertexLabel(reverse_vertex_map[i]);
+    }
     g.ForallLocalVertices([&](const VertexID v) {
       labels[v] = g.GetVertexLabel(v);
     });
@@ -413,6 +441,15 @@ class ExponentialContraction {
     // Run all-reduce
     AllReduce<DynamicGraphAccess> ar(config_, rank_, size_);
     ar.FindComponents(g, labels);
+
+    g.ForallLocalVertices([&](const VertexID v) {
+      g.SetVertexLabel(v, labels[vertex_map[v]]);
+      // std::cout << "R" << rank_ << " v " << g.GetGlobalID(v) << " gl " << g.GetVertexLabel(v) << std::endl;
+    });
+
+    // ReduceContraction<DynamicGraphAccess> rc(config_, rank_, size_);
+    // rc.FindComponents(g, labels);
+    
     // contraction_timer_.Restart();
     // // Perform gather of graph on root 
     // std::vector<VertexID> vertices;

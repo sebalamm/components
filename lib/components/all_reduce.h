@@ -54,6 +54,9 @@ class AllReduce {
   void FindComponents(GraphType &g, std::vector<VertexID> &g_labels) {
     rng_offset_ = size_ + config_.seed;
     contraction_timer_.Restart();
+    // g.OutputLocal();
+    // MPI_Barrier(MPI_COMM_WORLD);
+    // exit(1);
     // Init local data
     InitLocalData(g, g_labels);
 
@@ -126,20 +129,25 @@ class AllReduce {
 
       // Build edge lists
       std::vector<std::vector<int>> edge_lists(global_vertices_.size());
-      for (const auto &e : global_edges_) 
+      for (const auto &e : global_edges_) {
         edge_lists[vertex_map[e.first]].push_back(vertex_map[e.second]);
+      }
 
       // Construct temporary graph
       StaticGraphAccess sg(ROOT, 1);
 
       sg.StartConstruct(global_vertices_.size(), 0, global_edges_.size(), ROOT);
       for (int v = 0; v < global_vertices_.size(); ++v) {
-        for (const int &e : edge_lists[v]) 
+        for (const int &e : edge_lists[v]) {
           sg.AddEdge(v, e, ROOT);
+        }
       }
       sg.FinishConstruct();
       FindLocalComponents(sg, global_labels_);
+
     }
+    // MPI_Barrier(MPI_COMM_WORLD);
+    // exit(1);
   }
 
   void FindLocalComponents(StaticGraphAccess &g, std::vector<VertexID> &label) {
@@ -147,7 +155,7 @@ class AllReduce {
     std::vector<VertexID> parent(g.GetNumberOfVertices(), 0);
 
     g.ForallVertices([&](const VertexID v) {
-      label[v] = g.GetGlobalID(v);
+      label[v] = global_labels_[v];
     });
 
     // Compute components
@@ -231,6 +239,7 @@ class AllReduce {
     for (int i = 0; i < num_local_vertices; ++i) {
       VertexID v = local_vertices_[i];
       g_labels[i] = local_labels_[i];
+      // std::cout << "R" << rank_ << " v " << v << " l " << g_labels[i] << std::endl;
     }
   }
 

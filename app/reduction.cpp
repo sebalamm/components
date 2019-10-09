@@ -113,6 +113,7 @@ int main(int argn, char **argv) {
     std::vector<VertexID> labels(G.GetNumberOfVertices(), 0);
     ReduceContraction<StaticGraphAccess> rc(conf, rank, size);
     rc.FindComponents(G, labels);
+    G.OutputComponents(labels);
   }
   MPI_Barrier(MPI_COMM_WORLD);
 

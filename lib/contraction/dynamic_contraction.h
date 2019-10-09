@@ -652,11 +652,13 @@ class DynamicContraction {
                     << "[time] " << contraction_timer_.Elapsed() << std::endl;
         }
       }
-
       // Vertices at current level are roots at previous one
       g_.ForallLocalVertices([&](VertexID v) {
         g_.SetParent(v, g_.GetGlobalID(v));
       });
+
+      // g_.OutputLocal();
+      // MPI_Barrier(MPI_COMM_WORLD);
     }
   }
 
@@ -683,7 +685,7 @@ class DynamicContraction {
   PEID rank_, size_;
 
   // Variables
-  VertexID contraction_level_;
+  int contraction_level_;
   std::stack<std::pair<VertexID, VertexID>> removed_edges_;
   std::vector<short> inactive_level_;
 

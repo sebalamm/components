@@ -24,6 +24,7 @@
 
 #include <queue>
 
+#include "minimal_graph_access.h"
 #include "dynamic_graph_access.h"
 #include "static_graph_access.h"
 
