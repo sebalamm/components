@@ -79,10 +79,8 @@ class DynamicContraction {
     inserted_edges.set_empty_key(-1);
     std::vector<std::vector<std::pair<VertexID, VertexID>>> edges_to_add(size_);
 
-    // if (rank_ == ROOT) {
-      std::cout << "[STATUS] |--- R" << rank_ << " Allocation took " 
-                << "[TIME] " << contraction_timer_.Elapsed() << std::endl;
-    // }
+    std::cout << "[STATUS] |--- R" << rank_ << " Allocation took " 
+              << "[TIME] " << contraction_timer_.Elapsed() << std::endl;
 
 
     contraction_timer_.Restart();
@@ -92,10 +90,8 @@ class DynamicContraction {
                                     send_ids, 
                                     current_send_buffers);
     
-    // if (rank_ == ROOT) {
-      std::cout << "[STATUS] |--- R" << rank_ << " Detecting conflicting edges took " 
-                << "[TIME] " << contraction_timer_.Elapsed() << std::endl;
-    // }
+    std::cout << "[STATUS] |--- R" << rank_ << " Detecting conflicting edges took " 
+              << "[TIME] " << contraction_timer_.Elapsed() << std::endl;
 
     std::vector<bool> is_adj(size_);
     PEID num_adj = FindAdjacentPEs(is_adj);
@@ -112,23 +108,17 @@ class DynamicContraction {
       ReceiveMessages(num_adj, requests, current_send_buffers, receive_buffers);
       SwapBuffers(current_send_buffers, send_buffers_a, send_buffers_b);
 
-      // if (rank_ == ROOT) {
-        std::cout << "[STATUS] |---- R" << rank_ << " Message exchange took " 
-                  << "[TIME] " << contraction_timer_.Elapsed() << std::endl;
-      // }
+      std::cout << "[STATUS] |---- R" << rank_ << " Message exchange took " 
+                << "[TIME] " << contraction_timer_.Elapsed() << std::endl;
 
       contraction_timer_.Restart();
       int converged_locally = ProcessExponentialMessages(num_global_vertices, inserted_edges, edges_to_add, 
                                                          send_ids, receive_buffers, current_send_buffers);
-      // if (rank_ == ROOT) {
-        std::cout << "[STATUS] |---- R" << rank_ << " Processing messages took " 
-                  << "[TIME] " << contraction_timer_.Elapsed() << std::endl;
-      // }
+      std::cout << "[STATUS] |---- R" << rank_ << " Processing messages took " 
+                << "[TIME] " << contraction_timer_.Elapsed() << std::endl;
 
-      // if (rank_ == ROOT) {
-        std::cout << "[STATUS] |---- R" << rank_ << " Processing messages took " 
-                  << "[TIME] " << contraction_timer_.Elapsed() << std::endl;
-      // }
+      std::cout << "[STATUS] |---- R" << rank_ << " Processing messages took " 
+                << "[TIME] " << contraction_timer_.Elapsed() << std::endl;
 
       // Check if all PEs are done
       // if (++local_iterations % 6 == 0) {
@@ -141,28 +131,13 @@ class DynamicContraction {
                     MPI_COMM_WORLD);
       // } 
       local_iterations++;
-      // if (rank_ == ROOT) {
-      //   std::cout << "[STATUS] |---- Convergence test took " 
-      //             << "[TIME] " << contraction_timer_.Elapsed() << std::endl;
-      // }
-      
-      // if (rank_ == ROOT) {
         std::cout << "[STATUS] |---- R" << rank_ << " Convergence test took " 
                   << "[TIME] " << contraction_timer_.Elapsed() << std::endl;
-      // }
     }
 
-    // if (rank_ == ROOT) {
-    //   std::cout << "[STATUS] |---- Propagation done " 
-    //             << "[INFO] rounds "  << local_iterations << " "
-    //             << "[TIME] " << propagation_timer.Elapsed() << std::endl;
-    // }
-
-    // if (rank_ == ROOT) {
-      std::cout << "[STATUS] |---- R" << rank_ << " Propagation done " 
-                << "[INFO] rounds "  << local_iterations << " "
-                << "[TIME] " << propagation_timer.Elapsed() << std::endl;
-    // }
+    std::cout << "[STATUS] |---- R" << rank_ << " Propagation done " 
+              << "[INFO] rounds "  << local_iterations << " "
+              << "[TIME] " << propagation_timer.Elapsed() << std::endl;
 
     // Insert edges and keep corresponding vertices
     contraction_timer_.Restart();
@@ -174,16 +149,9 @@ class DynamicContraction {
     g_.ResetAdjacentPEs();
     InsertEdges(edges_to_add);
 
-    // if (rank_ == ROOT) {
-    //   std::cout << "[STATUS] |---- Updating edges took " 
-    //             << "[TIME] " << contraction_timer_.Elapsed() << std::endl;
-    // }
-
-    // if (rank_ == ROOT) {
-      std::cout << "[STATUS] |---- R" << rank_ << " Updating edges took " 
-                << "[TIME] " << contraction_timer_.Elapsed() 
-                << " " << edge_counter_ << " edges" << std::endl;
-    // }
+    std::cout << "[STATUS] |---- R" << rank_ << " Updating edges took " 
+              << "[TIME] " << contraction_timer_.Elapsed() 
+              << " " << edge_counter_ << " edges" << std::endl;
 
     // max_degree_computed_ = false;
     UpdateGraphVertices();
@@ -319,12 +287,14 @@ class DynamicContraction {
         if (vlabel != wlabel) {
           VertexID update_id = vlabel + num_global_vertices * wlabel;
 
+          // TODO: This differs from exponential
           if (sent_edges.find(update_id) == sent_edges.end()) {
             // Local propagation
             VertexID parent = g_.GetParent(v);
             PEID pe = g_.GetPE(g_.GetLocalID(parent));
             // Send edge
             sent_edges.insert(update_id);
+            std::cout << "R" << rank_ << " conflicting edge (" << vlabel << "," << wlabel << ")" << std::endl;
             PlaceInBuffer(pe, vlabel, wlabel, g_.GetVertexRoot(w), parent, send_buffers);
           }
         }
@@ -390,6 +360,10 @@ class DynamicContraction {
                   static_cast<int>((*send_buffers)[pe].size()), 
                   MPI_VERTEX, pe, 0, MPI_COMM_WORLD, req);
         requests.emplace_back(req);
+        if (pe == rank_) {
+          std::cout << "R" << rank_ << " ERROR selfmessage" << std::endl;
+          exit(1);
+        }
       }
     }
   }
@@ -459,11 +433,15 @@ class DynamicContraction {
         VertexID wlabel = receive_buffers[pe][i + 1];
         VertexID wroot = receive_buffers[pe][i + 2];
         VertexID link = receive_buffers[pe][i + 3];
-        VertexID update_id = vlabel + num_global_vertices * wlabel;
+
+        // Check for dummy message
+        if (vlabel == std::numeric_limits<VertexID>::max()) continue;
 
         // Continue if already inserted
+        VertexID update_id = vlabel + num_global_vertices * wlabel;
         if (inserted_edges.find(update_id) != end(inserted_edges)) continue;
         if (propagated_edges.find(update_id) != end(propagated_edges)) continue;
+        std::cout << "R" << rank_ << " recv edge (" << vlabel << "," << wlabel << "), link=" << link << std::endl;
 
         // Get link information
         VertexID parent = g_.GetParent(g_.GetLocalID(link));
@@ -478,10 +456,14 @@ class DynamicContraction {
             inserted_edges.insert(wlabel + num_global_vertices * vlabel);
             propagated_edges.insert(wlabel + num_global_vertices * vlabel);
           }
+          // std::cout << "R" << rank_ << " insert edge (" << vlabel << "," << wlabel << ")" << std::endl;
         } else {
+          // TODO: This differs from exponential
+          // std::cout << "R" << rank_ << " try propagate edge (" << vlabel << "," << wlabel << ")" << std::endl;
           if (g_.GetVertexLabel(g_.GetLocalID(link)) == vlabel) {
             propagated_edges.insert(update_id);
             PlaceInBuffer(pe, vlabel, wlabel, wroot, parent, send_buffers);
+            // std::cout << "R" << rank_ << " done(1) propagate edge (" << vlabel << "," << wlabel << ")" << std::endl;
             propagate = 1;
           } else {
             // Parent has to be connected to vlabel (N(N(v))
@@ -490,12 +472,13 @@ class DynamicContraction {
             // Send edge
             propagated_edges.insert(update_id);
             PlaceInBuffer(pe, vlabel, wlabel, wroot, parent, send_buffers);
+            std::cout << "R" << rank_ << " done(2) propagate edge (" << vlabel << "," << wlabel << ")" << std::endl;
             propagate = 1;
           }
         }
       }
     }
-    return ! propagate;
+    return !propagate;
   }
 
   void PlaceInBuffer(PEID pe,
@@ -685,7 +668,7 @@ class DynamicContraction {
   PEID rank_, size_;
 
   // Variables
-  int contraction_level_;
+  VertexID contraction_level_;
   std::stack<std::pair<VertexID, VertexID>> removed_edges_;
   std::vector<short> inactive_level_;
 

@@ -45,8 +45,6 @@ int main(int argn, char **argv) {
   int initial_seed = conf.seed;
 
   // WARMUP RUN
-  // WARMUP RUN
-  // WARMUP RUN
   if (rank == ROOT) std::cout << "WARMUP RUN" << std::endl;
 
   {
@@ -111,20 +109,19 @@ int main(int argn, char **argv) {
 
     // Determine labels
     std::vector<VertexID> labels(G.GetNumberOfVertices(), 0);
+    G.ForallLocalVertices([&](const VertexID v) {
+      labels[v] = G.GetGlobalID(v);
+    });
     ExponentialContraction comp(conf, rank, size);
     comp.FindComponents(G, labels);
   }
-  // MPI_Barrier(MPI_COMM_WORLD);
-  // exit(2);
 
-  // ACTUAL RUN
-  // ACTUAL RUN
   // ACTUAL RUN
   if (rank == ROOT) std::cout << "BENCH RUN" << std::endl;
   Statistics stats;
   
   for (int i = 0; i < conf.iterations; ++i) {
-    int round_seed = initial_seed + i;
+    int round_seed = initial_seed + i + 1000;
     StaticGraphAccess G(rank, size);
     if (conf.input_file != "null") {
       // File I/O
@@ -202,6 +199,9 @@ int main(int argn, char **argv) {
     double total_time = 0.0;
 
     std::vector<VertexID> labels(G.GetNumberOfVertices(), 0);
+    G.ForallLocalVertices([&](const VertexID v) {
+      labels[v] = G.GetGlobalID(v);
+    });
     conf.seed = round_seed;
     t.Restart();
 

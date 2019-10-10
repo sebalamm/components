@@ -39,7 +39,6 @@
 #include "union_find.h"
 #include "propagation.h"
 #include "all_reduce.h"
-#include "reduce_contraction.h"
 
 class ExponentialContraction {
  public:
@@ -57,60 +56,71 @@ class ExponentialContraction {
   void FindComponents(StaticGraphAccess &g, std::vector<VertexID> &g_labels) {
     rng_offset_ = size_ + config_.seed;
     contraction_timer_.Restart();
-    FindLocalComponents(g, g_labels);
-    if (rank_ == ROOT) {
-      std::cout << "[STATUS] |- Finding local components on input took " 
-                << "[TIME] " << contraction_timer_.Elapsed() << std::endl;
-    }
-    
-    // First round of contraction
-    contraction_timer_.Restart();
-    CAGBuilder<StaticGraphAccess> 
-      first_contraction(g, g_labels, rank_, size_);
-    StaticGraphAccess cag 
-      = first_contraction.BuildStaticComponentAdjacencyGraph();
-    OutputStats<StaticGraphAccess>(cag);
-    if (rank_ == ROOT) {
-      std::cout << "[STATUS] |- Building first cag took " 
-                << "[TIME] " << contraction_timer_.Elapsed() << std::endl;
-    }
+    if (config_.use_contraction) {
+      FindLocalComponents(g, g_labels);
+      if (rank_ == ROOT) {
+        std::cout << "[STATUS] |- Finding local components on input took " 
+                  << "[TIME] " << contraction_timer_.Elapsed() << std::endl;
+      }
+      
+      // First round of contraction
+      contraction_timer_.Restart();
+      CAGBuilder<StaticGraphAccess> 
+        first_contraction(g, g_labels, rank_, size_);
+      StaticGraphAccess cag 
+        = first_contraction.BuildStaticComponentAdjacencyGraph();
+      OutputStats<StaticGraphAccess>(cag);
+      if (rank_ == ROOT) {
+        std::cout << "[STATUS] |- Building first cag took " 
+                  << "[TIME] " << contraction_timer_.Elapsed() << std::endl;
+      }
 
-    // TODO: Delete original graph?
-    // Keep contraction labeling for later
-    contraction_timer_.Restart();
-    std::vector<VertexID> cag_labels(cag.GetNumberOfVertices(), 0);
-    FindLocalComponents(cag, cag_labels);
-    if (rank_ == ROOT) {
-      std::cout << "[STATUS] |- Finding local components on cag took " 
-                << "[TIME] " << contraction_timer_.Elapsed() << std::endl;
+      // TODO: Delete original graph?
+      // Keep contraction labeling for later
+      contraction_timer_.Restart();
+      std::vector<VertexID> cag_labels(cag.GetNumberOfVertices(), 0);
+      FindLocalComponents(cag, cag_labels);
+      if (rank_ == ROOT) {
+        std::cout << "[STATUS] |- Finding local components on cag took " 
+                  << "[TIME] " << contraction_timer_.Elapsed() << std::endl;
+      }
+
+      // Second round of contraction
+      contraction_timer_.Restart();
+      CAGBuilder<StaticGraphAccess> 
+        second_contraction(cag, cag_labels, rank_, size_);
+      DynamicGraphAccess ccag 
+        = second_contraction.BuildDynamicComponentAdjacencyGraph();
+      OutputStats<DynamicGraphAccess>(ccag);
+      if (rank_ == ROOT) {
+        std::cout << "[STATUS] |- Building second cag took " 
+                  << "[TIME] " << contraction_timer_.Elapsed() << std::endl;
+      }
+
+      // TODO: Delete intermediate graph?
+      // Keep contraction labeling for later
+      exp_contraction_ = new DynamicContraction(ccag, rank_, size_);
+
+      // Main decomposition algorithm
+      contraction_timer_.Restart(); 
+      PerformDecomposition(ccag);
+      if (rank_ == ROOT) {
+        std::cout << "[STATUS] |- Resolving connectivity took " 
+                  << "[TIME] " << contraction_timer_.Elapsed() << std::endl;
+      }
+
+      ApplyToLocalComponents(ccag, cag, cag_labels);
+      ApplyToLocalComponents(cag, cag_labels, g, g_labels);
+    } else {
+      // TODO: Contraction does not work on static graph
+      // exp_contraction_ = new DynamicContraction(g, rank_, size_);
+
+      // PerformDecomposition(g);
+
+      // g.ForallLocalVertices([&](const VertexID v) {
+      //     g_labels[v] = g.GetVertexLabel(v);
+      // });
     }
-
-    // Second round of contraction
-    contraction_timer_.Restart();
-    CAGBuilder<StaticGraphAccess> 
-      second_contraction(cag, cag_labels, rank_, size_);
-    DynamicGraphAccess ccag 
-      = second_contraction.BuildDynamicComponentAdjacencyGraph();
-    OutputStats<DynamicGraphAccess>(ccag);
-    if (rank_ == ROOT) {
-      std::cout << "[STATUS] |- Building second cag took " 
-                << "[TIME] " << contraction_timer_.Elapsed() << std::endl;
-    }
-
-    // TODO: Delete intermediate graph?
-    // Keep contraction labeling for later
-    exp_contraction_ = new DynamicContraction(ccag, rank_, size_);
-
-    // Main decomposition algorithm
-    contraction_timer_.Restart(); 
-    PerformDecomposition(ccag);
-    if (rank_ == ROOT) {
-      std::cout << "[STATUS] |- Resolving connectivity took " 
-                << "[TIME] " << contraction_timer_.Elapsed() << std::endl;
-    }
-
-    ApplyToLocalComponents(ccag, cag, cag_labels);
-    ApplyToLocalComponents(cag, cag_labels, g, g_labels);
   }
 
   void Output(DynamicGraphAccess &g) {
@@ -153,9 +163,6 @@ class ExponentialContraction {
 
     contraction_timer_.Restart(); 
     exp_contraction_->UndoContraction();
-    // g.OutputLocal();
-    // MPI_Barrier(MPI_COMM_WORLD);
-    // exit(1);
     if (rank_ == ROOT) {
       std::cout << "[STATUS] |- Undoing contraction took " 
                 << "[TIME] " << contraction_timer_.Elapsed() << std::endl;
@@ -271,8 +278,6 @@ class ExponentialContraction {
                 << std::endl;
 #endif
     });
-    // MPI_Barrier(MPI_COMM_WORLD);
-    // g.OutputLocal();
     g.SendAndReceiveGhostVertices();
     if (rank_ == ROOT) {
       std::cout << "[STATUS] |-- Computing and exchanging deviates took " 
@@ -383,11 +388,6 @@ class ExponentialContraction {
 
     OutputStats<DynamicGraphAccess>(g);
 
-    // if (iteration_ == 2) {
-    //   g.OutputLocal();
-    //   MPI_Barrier(MPI_COMM_WORLD);
-    //   exit(3);
-    // }
     // Count remaining number of vertices
     VertexID global_vertices = g.GatherNumberOfGlobalVertices();
     if (global_vertices > 0) {
@@ -444,67 +444,7 @@ class ExponentialContraction {
 
     g.ForallLocalVertices([&](const VertexID v) {
       g.SetVertexLabel(v, labels[vertex_map[v]]);
-      // std::cout << "R" << rank_ << " v " << g.GetGlobalID(v) << " gl " << g.GetVertexLabel(v) << std::endl;
     });
-
-    // ReduceContraction<DynamicGraphAccess> rc(config_, rank_, size_);
-    // rc.FindComponents(g, labels);
-    
-    // contraction_timer_.Restart();
-    // // Perform gather of graph on root 
-    // std::vector<VertexID> vertices;
-    // std::vector<int> num_vertices_per_pe(size_);
-    // std::vector<VertexID> labels;
-    // std::vector<std::pair<VertexID, VertexID>> edges;
-    // g.GatherGraphOnRoot(vertices, num_vertices_per_pe, labels, edges);
-    // if (rank_ == ROOT) {
-    //   std::cout << "[STATUS] |-- Gather on root took " 
-    //             << "[TIME] " << contraction_timer_.Elapsed() << std::endl;
-    // }
-    // 
-
-    // contraction_timer_.Restart();
-    // // Root computes labels
-    // if (rank_ == ROOT) {
-    //   // Build vertex mapping 
-    //   std::unordered_map<VertexID, int> vertex_map;
-    //   std::unordered_map<int, VertexID> reverse_vertex_map;
-    //   // TODO: Might be too small
-    //   int current_vertex = 0;
-    //   for (const VertexID &v : vertices) {
-    //     vertex_map[v] = current_vertex;
-    //     reverse_vertex_map[current_vertex++] = v;
-    //   }
-
-    //   // Build edge lists
-    //   std::vector<std::vector<int>> edge_lists(vertices.size());
-    //   for (const auto &e : edges) 
-    //     edge_lists[vertex_map[e.first]].push_back(vertex_map[e.second]);
-
-    //   // Construct temporary graph
-    //   StaticGraphAccess sg(ROOT, 1);
-
-    //   sg.StartConstruct(vertices.size(), 0, edges.size(), ROOT);
-    //   for (int v = 0; v < vertices.size(); ++v) {
-    //     // sg.ReserveEdgesForVertex(v, edge_lists[v].size());
-    //     for (const int &e : edge_lists[v]) 
-    //       sg.AddEdge(v, e, ROOT);
-    //   }
-    //   sg.FinishConstruct();
-    //   FindLocalComponents(sg, labels);
-    // }
-    // if (rank_ == ROOT) {
-    //   std::cout << "[STATUS] |-- Local computation on root took " 
-    //             << "[TIME] " << contraction_timer_.Elapsed() << std::endl;
-    // }
-
-    // contraction_timer_.Restart();
-    // // Distribute labels to other PEs
-    // g.DistributeLabelsFromRoot(labels, num_vertices_per_pe);
-    // if (rank_ == ROOT) {
-    //   std::cout << "[STATUS] |-- Distributing graph from root took " 
-    //             << "[TIME] " << contraction_timer_.Elapsed() << std::endl;
-    // }
   }
 
   template <typename GraphType>

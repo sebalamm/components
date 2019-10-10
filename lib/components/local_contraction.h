@@ -36,6 +36,7 @@
 #include "utils.h"
 #include "union_find.h"
 #include "propagation.h"
+#include "all_reduce.h"
 
 class LocalContraction {
  public:
@@ -59,8 +60,6 @@ class LocalContraction {
         first_contraction(g, g_labels, rank_, size_);
       DynamicGraphAccess cag = first_contraction.BuildDynamicComponentAdjacencyGraph();
 
-      // TODO: Delete original graph?
-      // Keep contraction labeling for later
       std::vector<VertexID> cag_labels(cag.GetNumberOfVertices(), 0);
       FindLocalComponents(cag, cag_labels);
       OutputStats<DynamicGraphAccess>(cag);
@@ -70,6 +69,8 @@ class LocalContraction {
       DynamicGraphAccess ccag = second_contraction.BuildDynamicComponentAdjacencyGraph();
       OutputStats<DynamicGraphAccess>(ccag);
 
+      // TODO: Delete intermediate graph?
+      // Keep contraction labeling for later
       local_contraction_ = new DynamicContraction(ccag, rank_, size_);
 
       PerformDecomposition(ccag);
@@ -153,7 +154,8 @@ class LocalContraction {
       iteration_++;
       if (global_vertices < config_.sequential_limit) 
         RunSequentialCC(g);
-      else RunContraction(g);
+      else 
+        RunContraction(g);
     }
     local_contraction_->UndoContraction();
   }
@@ -172,7 +174,7 @@ class LocalContraction {
     }
     iteration_timer_.Restart();
 
-    // Draw exponential deviate per local vertex
+    // Draw uniform deviate per local vertex
     std::uniform_int_distribution<unsigned int> distribution(0, 99);
     std::mt19937
         generator(static_cast<unsigned int>(rank_ + config_.seed + iteration_ * rng_offset_));
@@ -196,8 +198,8 @@ class LocalContraction {
 
     // Perform update for local vertices
     // Find smallest label in N(v)
-    std::vector<VertexPayload> n_smallest_neighbor(g.GetNumberOfVertices());
-    std::vector<VertexPayload> n_smallest_update(g.GetNumberOfVertices());
+    std::vector<VertexPayload> n_smallest_neighbor(g.GetNumberOfLocalVertices());
+    std::vector<VertexPayload> n_smallest_update(g.GetNumberOfLocalVertices());
     g.ForallLocalVertices([&](VertexID v) {
       n_smallest_neighbor[v] = g.GetVertexMessage(v);
       n_smallest_update[v] = g.GetVertexMessage(v);
@@ -207,6 +209,12 @@ class LocalContraction {
             (g.GetVertexDeviate(w) == n_smallest_neighbor[v].deviate_ &&
                 g.GetVertexLabel(w) < n_smallest_neighbor[v].label_)) {
           g.SetParent(v, g.GetGlobalID(w));
+          n_smallest_neighbor[v] = {g.GetVertexDeviate(w), 
+                                    g.GetVertexLabel(w),
+#ifdef TIEBREAK_DEGREE
+                                    g.GetVertexDegree(w),
+#endif
+                                    g.GetVertexRoot(w)};
           n_smallest_update[v] = {g.GetVertexDeviate(w), 
                                   g.GetVertexLabel(w),
 #ifdef TIEBREAK_DEGREE
@@ -226,8 +234,8 @@ class LocalContraction {
 
     // Perform update for local vertices
     // Find smallest label in N(N(v))
-    std::vector<VertexPayload> nn_smallest_neighbor(g.GetNumberOfVertices());
-    std::vector<VertexPayload> nn_smallest_update(g.GetNumberOfVertices());
+    std::vector<VertexPayload> nn_smallest_neighbor(g.GetNumberOfLocalVertices());
+    std::vector<VertexPayload> nn_smallest_update(g.GetNumberOfLocalVertices());
     g.ForallLocalVertices([&](VertexID v) {
       nn_smallest_neighbor[v] = g.GetVertexMessage(v);
       nn_smallest_update[v] = g.GetVertexMessage(v);
@@ -237,6 +245,12 @@ class LocalContraction {
             (g.GetVertexDeviate(w) == nn_smallest_neighbor[v].deviate_ &&
                 g.GetVertexLabel(w) < nn_smallest_neighbor[v].label_)) {
           g.SetParent(v, g.GetGlobalID(w));
+          nn_smallest_neighbor[v] = {g.GetVertexDeviate(w), 
+                                     g.GetVertexLabel(w),
+#ifdef TIEBREAK_DEGREE
+                                     g.GetVertexDegree(w),
+#endif
+                                     g.GetVertexRoot(w)};
           nn_smallest_update[v] = {g.GetVertexDeviate(w), 
                                    g.GetVertexLabel(w),
 #ifdef TIEBREAK_DEGREE
@@ -254,9 +268,15 @@ class LocalContraction {
     // Receive variates
     g.SendAndReceiveGhostVertices();
 
+    if (iteration_ == 2) {
+      g.OutputLocal();
+      MPI_Barrier(MPI_COMM_WORLD);
+      exit(1);
+    }
+
     // Determine remaining active vertices
     // TODO: Build shortcuts?
-    local_contraction_->ExponentialContraction();
+    local_contraction_->LocalContraction();
 
     OutputStats<DynamicGraphAccess>(g);
 
@@ -266,7 +286,8 @@ class LocalContraction {
       iteration_++;
       if (global_vertices < config_.sequential_limit) 
         RunSequentialCC(g);
-      else RunContraction(g);
+      else 
+        RunContraction(g);
     }
     local_contraction_->UndoContraction();
   }
@@ -290,45 +311,33 @@ class LocalContraction {
   }
 
   void RunSequentialCC(DynamicGraphAccess &g) {
-    // Perform gather of graph on root 
-    std::vector<VertexID> vertices;
-    std::vector<int> num_vertices_per_pe(size_);
-    std::vector<VertexID> labels;
-    std::vector<std::pair<VertexID, VertexID>> edges;
-    g.GatherGraphOnRoot(vertices, num_vertices_per_pe, labels, edges);
+    // Build vertex mapping 
+    google::dense_hash_map<VertexID, int> vertex_map; 
+    vertex_map.set_empty_key(-1);
+    google::dense_hash_map<int, VertexID> reverse_vertex_map; 
+    reverse_vertex_map.set_empty_key(-1);
+    int current_vertex = 0;
+    g.ForallLocalVertices([&](const VertexID v) {
+      vertex_map[v] = current_vertex;
+      reverse_vertex_map[current_vertex++] = v;
+    });
 
-    // Root computes labels
-    if (rank_ == ROOT) {
-      // Build vertex mapping 
-      std::unordered_map<VertexID, int> vertex_map;
-      std::unordered_map<int, VertexID> reverse_vertex_map;
-      // TODO: Might be too small
-      int current_vertex = 0;
-      for (const VertexID &v : vertices) {
-        vertex_map[v] = current_vertex;
-        reverse_vertex_map[current_vertex++] = v;
-      }
-
-      // Build edge lists
-      std::vector<std::vector<int>> edge_lists(vertices.size());
-      for (const auto &e : edges) 
-        edge_lists[vertex_map[e.first]].push_back(vertex_map[e.second]);
-
-      // Construct temporary graph
-      StaticGraphAccess sg(ROOT, 1);
-
-      sg.StartConstruct(vertices.size(), 0, edges.size(), ROOT);
-      for (int v = 0; v < vertices.size(); ++v) {
-        // sg.ReserveEdgesForVertex(v, edge_lists[v].size());
-        for (const int &e : edge_lists[v]) 
-          sg.AddEdge(v, e, ROOT);
-      }
-      sg.FinishConstruct();
-      FindLocalComponentsStatic(sg, labels);
+    // Init labels
+    std::vector<VertexID> labels(g.GetNumberOfLocalVertices());
+    for (VertexID i = 0; i < labels.size(); ++i) {
+      labels[i] = g.GetVertexLabel(reverse_vertex_map[i]);
     }
+    g.ForallLocalVertices([&](const VertexID v) {
+      labels[v] = g.GetVertexLabel(v);
+    });
 
-    // Distribute labels to other PEs
-    g.DistributeLabelsFromRoot(labels, num_vertices_per_pe);
+    // Run all-reduce
+    AllReduce<DynamicGraphAccess> ar(config_, rank_, size_);
+    ar.FindComponents(g, labels);
+
+    g.ForallLocalVertices([&](const VertexID v) {
+      g.SetVertexLabel(v, labels[vertex_map[v]]);
+    });
   }
 
   template <typename GraphType>

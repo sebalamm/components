@@ -45,8 +45,6 @@ int main(int argn, char **argv) {
   int initial_seed = conf.seed;
 
   // WARMUP RUN
-  // WARMUP RUN
-  // WARMUP RUN
   if (rank == ROOT) std::cout << "WARMUP RUN" << std::endl;
 
   {
@@ -111,13 +109,13 @@ int main(int argn, char **argv) {
 
     // Determine labels
     std::vector<VertexID> labels(G.GetNumberOfVertices(), 0);
+    G.ForallLocalVertices([&](const VertexID v) {
+      labels[v] = G.GetGlobalID(v);
+    });
     ShortcutPropagation comp(conf, rank, size);
     comp.FindComponents(G, labels);
   }
-  MPI_Barrier(MPI_COMM_WORLD);
 
-  // ACTUAL RUN
-  // ACTUAL RUN
   // ACTUAL RUN
   if (rank == ROOT) std::cout << "BENCH RUN" << std::endl;
   Statistics stats;
@@ -201,6 +199,9 @@ int main(int argn, char **argv) {
     double total_time = 0.0;
 
     std::vector<VertexID> labels(G.GetNumberOfVertices(), 0);
+    G.ForallLocalVertices([&](const VertexID v) {
+      labels[v] = G.GetGlobalID(v);
+    });
     conf.seed = round_seed;
     t.Restart();
 
@@ -219,7 +220,7 @@ int main(int argn, char **argv) {
   }
 
   if (rank == ROOT) {
-    std::cout << "RESULT runner=short"
+    std::cout << "RESULT runner=local"
               << " time=" << stats.Avg() << " stddev=" << stats.Stddev()
               << " iterations=" << conf.iterations << std::endl;
   }
