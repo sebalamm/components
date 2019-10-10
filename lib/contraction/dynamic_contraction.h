@@ -188,10 +188,11 @@ class DynamicContraction {
     inserted_edges.set_empty_key(-1);
     std::vector<std::vector<std::pair<VertexID, VertexID>>> edges_to_add(size_);
 
-    // TODO: Factor out in new method
     FindLocalConflictingEdges(num_global_vertices, 
-                              send_ids, 
-                              current_send_buffers);
+                                    inserted_edges, 
+                                    edges_to_add, 
+                                    send_ids, 
+                                    current_send_buffers);
 
     std::vector<bool> is_adj(size_);
     PEID num_adj = FindAdjacentPEs(is_adj);
@@ -278,6 +279,8 @@ class DynamicContraction {
   }
 
   void FindLocalConflictingEdges(VertexID num_global_vertices,
+                                 google::dense_hash_set<VertexID> &inserted_edges, 
+                                 std::vector<std::vector<std::pair<VertexID, VertexID>>> &local_edges,
                                  google::dense_hash_set<VertexID> &sent_edges,
                                  std::vector<std::vector<VertexID>> *send_buffers) {
     g_.ForallLocalVertices([&](VertexID v) {
@@ -286,15 +289,26 @@ class DynamicContraction {
         VertexID wlabel = g_.GetVertexLabel(w);
         if (vlabel != wlabel) {
           VertexID update_id = vlabel + num_global_vertices * wlabel;
+          PEID wroot = g_.GetVertexRoot(w);
 
-          // TODO: This differs from exponential
-          if (sent_edges.find(update_id) == sent_edges.end()) {
+          if (inserted_edges.find(update_id) == end(inserted_edges) 
+                && g_.IsLocalFromGlobal(vlabel)) {
+            local_edges[wroot].emplace_back(vlabel, wlabel);
+            edge_counter_++;
+            inserted_edges.insert(update_id);
+            sent_edges.insert(update_id);
+            if (wroot == rank_) {
+              local_edges[rank_].emplace_back(wlabel, vlabel);
+              edge_counter_++;
+              inserted_edges.insert(wlabel + num_global_vertices * vlabel);
+              sent_edges.insert(wlabel + num_global_vertices * vlabel);
+            }
+          } else if (sent_edges.find(update_id) == sent_edges.end()) {
             // Local propagation
             VertexID parent = g_.GetParent(v);
             PEID pe = g_.GetPE(g_.GetLocalID(parent));
             // Send edge
             sent_edges.insert(update_id);
-            std::cout << "R" << rank_ << " conflicting edge (" << vlabel << "," << wlabel << ")" << std::endl;
             PlaceInBuffer(pe, vlabel, wlabel, g_.GetVertexRoot(w), parent, send_buffers);
           }
         }
@@ -441,12 +455,9 @@ class DynamicContraction {
         VertexID update_id = vlabel + num_global_vertices * wlabel;
         if (inserted_edges.find(update_id) != end(inserted_edges)) continue;
         if (propagated_edges.find(update_id) != end(propagated_edges)) continue;
-        std::cout << "R" << rank_ << " recv edge (" << vlabel << "," << wlabel << "), link=" << link << std::endl;
 
         // Get link information
-        VertexID parent = g_.GetParent(g_.GetLocalID(link));
-        PEID pe = g_.GetPE(g_.GetLocalID(parent));
-
+        // TODO: We use this parent as link, this is wrong if the current (link) vertex points to a different partition
         if (g_.IsLocalFromGlobal(vlabel)) {
           new_edges[wroot].emplace_back(vlabel, wlabel);
           inserted_edges.insert(update_id);
@@ -456,14 +467,12 @@ class DynamicContraction {
             inserted_edges.insert(wlabel + num_global_vertices * vlabel);
             propagated_edges.insert(wlabel + num_global_vertices * vlabel);
           }
-          // std::cout << "R" << rank_ << " insert edge (" << vlabel << "," << wlabel << ")" << std::endl;
         } else {
-          // TODO: This differs from exponential
-          // std::cout << "R" << rank_ << " try propagate edge (" << vlabel << "," << wlabel << ")" << std::endl;
           if (g_.GetVertexLabel(g_.GetLocalID(link)) == vlabel) {
+            VertexID parent = g_.GetParent(g_.GetLocalID(link));
+            PEID pe = g_.GetPE(g_.GetLocalID(parent));
             propagated_edges.insert(update_id);
             PlaceInBuffer(pe, vlabel, wlabel, wroot, parent, send_buffers);
-            // std::cout << "R" << rank_ << " done(1) propagate edge (" << vlabel << "," << wlabel << ")" << std::endl;
             propagate = 1;
           } else {
             // Parent has to be connected to vlabel (N(N(v))
@@ -471,8 +480,7 @@ class DynamicContraction {
             pe = g_.GetPE(local_vlabel);
             // Send edge
             propagated_edges.insert(update_id);
-            PlaceInBuffer(pe, vlabel, wlabel, wroot, parent, send_buffers);
-            std::cout << "R" << rank_ << " done(2) propagate edge (" << vlabel << "," << wlabel << ")" << std::endl;
+            PlaceInBuffer(pe, vlabel, wlabel, wroot, vlabel, send_buffers);
             propagate = 1;
           }
         }

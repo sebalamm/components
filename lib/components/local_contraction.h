@@ -268,12 +268,6 @@ class LocalContraction {
     // Receive variates
     g.SendAndReceiveGhostVertices();
 
-    if (iteration_ == 2) {
-      g.OutputLocal();
-      MPI_Barrier(MPI_COMM_WORLD);
-      exit(1);
-    }
-
     // Determine remaining active vertices
     // TODO: Build shortcuts?
     local_contraction_->LocalContraction();
