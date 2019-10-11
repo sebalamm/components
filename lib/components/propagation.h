@@ -23,34 +23,116 @@
 #define _PROPAGATION_H_
 
 #include <iostream>
+#include <unordered_set>
+#include <random>
+#include <set>
 
 #include "config.h"
 #include "definitions.h"
 #include "graph_io.h"
+#include "cag_builder.h"
+#include "utils.h"
+#include "union_find.h"
 #include "dynamic_graph_access.h"
 
 class Propagation {
  public:
-  Propagation() = default;
+  Propagation(const Config &conf, const PEID rank, const PEID size)
+    : rank_(rank),
+      size_(size),
+      config_(conf),
+      iteration_(0) { }
+
   virtual ~Propagation() = default;
 
-  void FindComponents(DynamicGraphAccess &g, const Config &conf, const PEID rank) {
-    // Iterate for fixed number of rounds
-    for (unsigned int i = 0; i < conf.prop_iterations; ++i) {
-      FindLocalComponents(g);
-      // Propagate ghost vertex labels
-      g.SendAndReceiveGhostVertices();
-      // Sync to prevent race conditions
-      MPI_Barrier(MPI_COMM_WORLD);
+  void FindComponents(DynamicGraphAccess &g, std::vector<VertexID> &g_labels) {
+    if (config_.use_contraction) {
+      FindLocalComponents(g, g_labels);
+
+      CAGBuilder<DynamicGraphAccess> 
+        first_contraction(g, g_labels, rank_, size_);
+      DynamicGraphAccess cag = first_contraction.BuildDynamicComponentAdjacencyGraph();
+      OutputStats<DynamicGraphAccess>(cag);
+
+      // TODO: Delete original graph?
+      // Keep contraction labeling for later
+      std::vector<VertexID> cag_labels(cag.GetNumberOfVertices(), 0);
+      FindLocalComponents(cag, cag_labels);
+
+      CAGBuilder<DynamicGraphAccess> 
+        second_contraction(cag, cag_labels, rank_, size_);
+      DynamicGraphAccess ccag = second_contraction.BuildDynamicComponentAdjacencyGraph();
+      OutputStats<DynamicGraphAccess>(ccag);
+
+      PerformPropagation(ccag);
+
+      ApplyToLocalComponents(ccag, cag, cag_labels);
+      ApplyToLocalComponents(cag, cag_labels, g, g_labels);
+    } else {
+      PerformPropagation(g);
+      g.ForallLocalVertices([&](const VertexID v) {
+          g_labels[v] = g.GetVertexLabel(v);
+      });
     }
   }
 
   void Output(DynamicGraphAccess &g) {
-    GatherComponents(g);
+    g.OutputLabels();
   }
 
  private:
-  void FindLocalComponents(DynamicGraphAccess &g) {
+  // Network information
+  PEID rank_, size_;
+
+  // Configuration
+  Config config_;
+
+  // Counters
+  unsigned int iteration_;
+
+  // Local labels
+  std::vector<VertexID> prev_labels_;
+
+  void PerformPropagation(DynamicGraphAccess &g) {
+    prev_labels_.resize(g.GetNumberOfLocalVertices());
+    // Iterate until converged
+    do {
+      PropagateLabels(g);
+      FindMinLabels(g);
+
+      OutputStats<DynamicGraphAccess>(g);
+
+      iteration_++;
+    } while (!CheckConvergence(g));
+  }
+
+  void FindLocalComponents(DynamicGraphAccess &g, std::vector<VertexID> &label) {
+    std::vector<bool> marked(g.GetNumberOfVertices(), false);
+    std::vector<VertexID> parent(g.GetNumberOfVertices(), 0);
+
+    g.ForallVertices([&](const VertexID v) {
+      label[v] = g.GetVertexLabel(v);
+    });
+
+    // Compute components
+    g.ForallLocalVertices([&](const VertexID v) {
+      if (!marked[v]) Utility<DynamicGraphAccess>::BFS(g, v, marked, parent);
+    });
+
+    // Set vertex label for contraction
+    g.ForallLocalVertices([&](const VertexID v) {
+      label[v] = label[parent[v]];
+    });
+  }
+
+  void PropagateLabels(DynamicGraphAccess &g) {
+    g.ForallLocalVertices([&](const VertexID v) { 
+      prev_labels_[v] = g.GetVertexLabel(v); 
+    });
+    g.SendAndReceiveGhostVertices();
+  }
+
+  void FindMinLabels(DynamicGraphAccess &g) {
     g.ForallLocalVertices([&](VertexID v) {
       // Gather min label of all neighbors
       VertexID min_label = g.GetVertexLabel(v);
@@ -68,72 +150,64 @@ class Propagation {
     });
   }
 
-  void GatherComponents(DynamicGraphAccess &g) {
-    // Gather local components
-    std::vector<VertexID> local_components(g.GetNumberOfLocalVertices());
-    g.ForallLocalVertices([&](VertexID v) {
-      local_components[v] = g.GetVertexLabel(v);
+  bool CheckConvergence(DynamicGraphAccess &g) {
+    int converged_globally = 0;
+
+    // Check local convergence
+    int converged_locally = 1;
+    g.ForallLocalVertices([&](const VertexID v) {
+      if (g.GetVertexLabel(v) != prev_labels_[v]) converged_locally = 0;
     });
 
-    // Eliminate duplicates
-    sort(local_components.begin(), local_components.end());
-    local_components.erase(unique(local_components.begin(),
-                                  local_components.end()),
-                           local_components.end());
-    unsigned long num_local_components = local_components.size();
-
-    // Gather number of components for each PE
-    PEID rank, size;
-    MPI_Comm_rank(MPI_COMM_WORLD, &rank);
-    MPI_Comm_size(MPI_COMM_WORLD, &size);
-    std::vector<VertexID> num_components(static_cast<unsigned long>(size));
-    MPI_Allgather(&num_local_components,
+    MPI_Allreduce(&converged_locally,
+                  &converged_globally,
                   1,
-                  MPI_VERTEX,
-                  &num_components[0],
-                  1,
-                  MPI_VERTEX,
+                  MPI_INT,
+                  MPI_MIN,
                   MPI_COMM_WORLD);
 
-    VertexID num_total_components = 0;
-    for (VertexID &comps : num_components) num_total_components += comps;
+    return converged_globally;
+  }
 
-    // Concatenate components on root
-    std::vector<VertexID> global_components(num_total_components);
-    std::vector<VertexID> displ(static_cast<unsigned long>(size));
+  void ApplyToLocalComponents(DynamicGraphAccess &cag, 
+                              DynamicGraphAccess &g, std::vector<VertexID> &g_label) {
+    g.ForallLocalVertices([&](const VertexID v) {
+      VertexID cv = cag.GetLocalID(g.GetContractionVertex(v));
+      g_label[v] = cag.GetVertexLabel(cv);
+    });
+  }
 
-    if (rank == ROOT) {
-      VertexID sum = 0;
-      for (PEID i = 0; i < size; i++) {
-        displ[i] = sum;
-        sum += num_components[i];
-      }
+  void ApplyToLocalComponents(DynamicGraphAccess &cag, 
+                              std::vector<VertexID> &cag_label, 
+                              DynamicGraphAccess &g, 
+                              std::vector<VertexID> &g_label) {
+    g.ForallLocalVertices([&](const VertexID v) {
+      VertexID cv = cag.GetLocalID(g.GetContractionVertex(v));
+      g_label[v] = cag_label[cv];
+    });
+  }
+
+  template <typename GraphType>
+  void OutputStats(GraphType &g) {
+    VertexID n = g.GatherNumberOfGlobalVertices();
+    EdgeID m = g.GatherNumberOfGlobalEdges();
+
+    // Determine min/maximum cut size
+    EdgeID m_cut = g.GetNumberOfCutEdges();
+    EdgeID min_cut, max_cut;
+    MPI_Reduce(&m_cut, &min_cut, 1, MPI_VERTEX, MPI_MIN, ROOT,
+               MPI_COMM_WORLD);
+    MPI_Reduce(&m_cut, &max_cut, 1, MPI_VERTEX, MPI_MAX, ROOT,
+               MPI_COMM_WORLD);
+
+    if (rank_ == ROOT) {
+      std::cout << "TEMP "
+                << "s=" << config_.seed << ", "
+                << "p=" << size_  << ", "
+                << "n=" << n << ", "
+                << "m=" << m << ", "
+                << "c(min,max)=" << min_cut << "," << max_cut << std::endl;
     }
-
-    MPI_Gatherv(&local_components[0],
-                static_cast<int>(num_components[rank]),
-                MPI_LONG,
-                &global_components[0],
-                reinterpret_cast<int *>(&num_components[0]),
-                reinterpret_cast<int *>(&displ[0]),
-                MPI_LONG,
-                ROOT,
-                MPI_COMM_WORLD);
-    sort(global_components.begin(), global_components.end());
-    global_components.erase(unique(global_components.begin(),
-                                   global_components.end()),
-                            global_components.end());
-
-    // Output
-    if (rank == ROOT) {
-      std::cout << "num ccs " << global_components.size() << std::endl;
-      std::cout << "ccs (";
-      for (VertexID i = 0; i < global_components.size() - 1; ++i)
-        std::cout << global_components[i] << " ";
-      std::cout << global_components[global_components.size() - 1] << ")"
-                << std::endl;
-    }
-
   }
 };
 
