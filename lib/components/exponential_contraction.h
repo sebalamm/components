@@ -360,12 +360,6 @@ class ExponentialContraction {
     }
 
     if (rank_ == ROOT) std::cout << "done propagating... mem " << GetFreePhysMem() << std::endl;
-    
-    if (iteration_ == 3) {
-      g.OutputLocal();
-      MPI_Barrier(MPI_COMM_WORLD);
-      exit(3);
-    }
 
     contraction_timer_.Restart();
     // Determine remaining active vertices

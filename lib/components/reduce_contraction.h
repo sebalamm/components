@@ -66,7 +66,6 @@ class ReduceContraction {
     // Turn into minimal graph type
     MinimalGraphAccess mg(rank_, size_);
     ConvertGraph(g, mg);
-    // g.OutputLocal();
 
     // Perform successive reductions
     google::sparse_hash_map<VertexID, VertexID> labels;
@@ -468,7 +467,6 @@ class ReduceContraction {
         }
       });
     });
-    g.OutputLocal();
   }
 
   void FindLocalComponents(MinimalGraphAccess &g, google::sparse_hash_map<VertexID, VertexID> &label) {
@@ -584,8 +582,6 @@ class ReduceContraction {
     for (auto &e : contracted_edges) {
       cg.AddEdge(e.source, e.target);
     }
-    // TODO: Vertex 18 is missing edge to 33 on R0 at end of contraction
-    // cg.OutputLocal();
 
     g = cg;
   }
