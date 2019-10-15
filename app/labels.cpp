@@ -220,7 +220,7 @@ int main(int argn, char **argv) {
   }
 
   if (rank == ROOT) {
-    std::cout << "RESULT runner=local"
+    std::cout << "RESULT runner=label"
               << " time=" << stats.Avg() << " stddev=" << stats.Stddev()
               << " iterations=" << conf.iterations << std::endl;
   }
