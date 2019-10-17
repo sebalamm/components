@@ -313,7 +313,6 @@ class ExponentialContraction {
             smallest_payload = {g.GetVertexDeviate(w) + 1, 
                                 g.GetVertexLabel(w),
 #ifdef TIEBREAK_DEGREE
-                                // TODO: Retrieve degree from non-local vertices
                                 g.GetVertexDegree(w),
 #endif
                                 g.GetVertexRoot(w)};
@@ -415,8 +414,7 @@ class ExponentialContraction {
     // Build vertex mapping 
     google::dense_hash_map<VertexID, int> vertex_map; 
     vertex_map.set_empty_key(-1);
-    google::dense_hash_map<int, VertexID> reverse_vertex_map; 
-    reverse_vertex_map.set_empty_key(-1);
+    std::vector<VertexID> reverse_vertex_map(g.GetNumberOfLocalVertices());
     int current_vertex = 0;
     g.ForallLocalVertices([&](const VertexID v) {
       vertex_map[v] = current_vertex;

@@ -119,8 +119,7 @@ class AllReduce {
       // Build vertex mapping 
       google::dense_hash_map<VertexID, int> vertex_map; 
       vertex_map.set_empty_key(-1);
-      google::dense_hash_map<int, VertexID> reverse_vertex_map; 
-      reverse_vertex_map.set_empty_key(-1);
+      std::vector<VertexID> reverse_vertex_map(global_vertices_.size());
       int current_vertex = 0;
       for (const VertexID &v : global_vertices_) {
         vertex_map[v] = current_vertex;
@@ -146,8 +145,6 @@ class AllReduce {
       FindLocalComponents(sg, global_labels_);
 
     }
-    // MPI_Barrier(MPI_COMM_WORLD);
-    // exit(1);
   }
 
   void FindLocalComponents(StaticGraphAccess &g, std::vector<VertexID> &label) {

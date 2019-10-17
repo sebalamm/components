@@ -66,7 +66,6 @@ class VertexCommunicator {
     for (PEID i = 0; i < adjacent_pes_.size(); i++) {
       bool is_adj = adjacent_pes_[i];
       if (is_adj) {
-        if (rank_ == 43) std::cout << "R" << rank_ << " adj " << i << std::endl;
         counter++;
       }
     }

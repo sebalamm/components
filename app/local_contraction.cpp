@@ -183,6 +183,7 @@ int main(int argn, char **argv) {
     MPI_Reduce(&m_cut, &max_cut, 1, MPI_VERTEX, MPI_MAX, ROOT,
                MPI_COMM_WORLD);
 
+    conf.seed = round_seed;
     if (rank == ROOT) {
       std::cout << "INPUT "
                 << "s=" << conf.seed << ", "
@@ -200,7 +201,6 @@ int main(int argn, char **argv) {
     G.ForallLocalVertices([&](const VertexID v) {
       labels[v] = G.GetGlobalID(v);
     });
-    conf.seed = round_seed;
     t.Restart();
 
     // Determine labels

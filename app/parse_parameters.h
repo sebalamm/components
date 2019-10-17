@@ -45,6 +45,9 @@ void ParseParameters(int argn, char **argv,
   // Label propagation
   conf.prop_iterations = args.Get<unsigned int>("pi", 3);
 
+  // Shortcut propagation
+  conf.number_of_hitters = args.Get<unsigned int>("heavy-hitters", 0);
+
   // Decomposition
   conf.beta = args.Get<double>("beta", 0.1);
 

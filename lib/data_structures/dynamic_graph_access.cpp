@@ -146,12 +146,10 @@ EdgeID DynamicGraphAccess::AddEdge(VertexID from, VertexID to, PEID rank) {
 
 void DynamicGraphAccess::AddLocalEdge(VertexID from, VertexID to) {
   adjacent_edges_[from].emplace_back(to - local_offset_);
-  // adjacent_edges_[to - local_offset_].emplace_back(from);
 }
 
 void DynamicGraphAccess::AddGhostEdge(VertexID from, VertexID to) {
   adjacent_edges_[from].emplace_back(global_to_local_map_[to]);
-  // adjacent_edges_[global_to_local_map_[to]].emplace_back(from);
 }
 
 void DynamicGraphAccess::RemoveAllEdges(const VertexID from) {

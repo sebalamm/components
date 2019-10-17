@@ -276,7 +276,7 @@ class CAGBuilder {
                   static_cast<int>(vertex_buffers_[i].size()),
                   MPI_VERTEX,
                   i,
-                  i + 6 * size_,
+                  i + 42 * size_,
                   MPI_COMM_WORLD,
                   req);
         requests.emplace_back(req);
@@ -294,7 +294,7 @@ class CAGBuilder {
     PEID recv_messages = 0;
     while (recv_messages < num_adjacent_pes) {
       MPI_Status st{};
-      MPI_Probe(MPI_ANY_SOURCE, rank_ + 6 * size_, MPI_COMM_WORLD, &st);
+      MPI_Probe(MPI_ANY_SOURCE, rank_ + 42 * size_, MPI_COMM_WORLD, &st);
 
       int message_length;
       MPI_Get_count(&st, MPI_VERTEX, &message_length);
@@ -305,7 +305,7 @@ class CAGBuilder {
                message_length,
                MPI_VERTEX,
                st.MPI_SOURCE,
-               rank_ + 6 * size_,
+               rank_ + 42 * size_,
                MPI_COMM_WORLD,
                &rst);
       recv_messages++;
@@ -320,6 +320,7 @@ class CAGBuilder {
         if (global_id == std::numeric_limits<VertexID>::max() - 1) {
           largest_component[st.MPI_SOURCE] = contraction_id;
         } else {
+          // if (rank_ == 13) std::cout << "R" << rank_ << " recv " << global_id << " cid " << contraction_id << " from " << st.MPI_SOURCE << std::endl;
           vertex_message[g_.GetLocalID(global_id)] = contraction_id;
           received_message_[g_.GetLocalID(global_id)] = true;
         }

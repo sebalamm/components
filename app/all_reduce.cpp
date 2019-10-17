@@ -190,6 +190,7 @@ int main(int argn, char **argv) {
     MPI_Reduce(&m_cut, &max_cut, 1, MPI_VERTEX, MPI_MAX, ROOT,
                MPI_COMM_WORLD);
 
+    conf.seed = round_seed;
     if (rank == ROOT) {
       std::cout << "INPUT "
                 << "s=" << conf.seed << ", "
@@ -207,7 +208,6 @@ int main(int argn, char **argv) {
     G.ForallLocalVertices([&](const VertexID v) {
       labels[v] = G.GetGlobalID(v);
     });
-    conf.seed = round_seed;
     t.Restart();
 
     // Determine labels
@@ -225,7 +225,7 @@ int main(int argn, char **argv) {
   }
 
   if (rank == ROOT) {
-    std::cout << "RESULT runner=exp"
+    std::cout << "RESULT runner=allreduce"
               << " time=" << stats.Avg() << " stddev=" << stats.Stddev()
               << " iterations=" << conf.iterations << std::endl;
   }

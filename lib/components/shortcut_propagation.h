@@ -42,7 +42,9 @@ class ShortcutPropagation {
       size_(size),
       config_(conf),
       iteration_(0),
-      number_of_hitters_(0) { }
+      number_of_hitters_(conf.number_of_hitters) { 
+    heavy_hitters_.set_empty_key(-1);
+  }
 
   virtual ~ShortcutPropagation() = default;
 
@@ -97,7 +99,7 @@ class ShortcutPropagation {
 
   // Heavy hitters
   VertexID number_of_hitters_;
-  std::unordered_set<VertexID> heavy_hitters_;
+  google::dense_hash_set<VertexID> heavy_hitters_;
 
   void PerformShortcutting(DynamicGraphAccess &g) {
     // Init 
@@ -108,6 +110,7 @@ class ShortcutPropagation {
     // Iterate until converged
     do {
       PropagateLabels(g);
+      FindMinLabels(g);
       if (number_of_hitters_ > 0) 
         FindHeavyHitters(g);
       Shortcut(g);
@@ -123,7 +126,7 @@ class ShortcutPropagation {
     std::vector<VertexID> parent(g.GetNumberOfVertices(), 0);
 
     g.ForallVertices([&](const VertexID v) {
-      label[v] = g.GetVertexLabel(v);
+      label[v] = g.GetGlobalID(v);
     });
 
     // Compute components
@@ -148,6 +151,9 @@ class ShortcutPropagation {
                                ranks_[v]});
     });
     g.SendAndReceiveGhostVertices();
+  } 
+
+  void FindMinLabels(DynamicGraphAccess &g) {
     g.ForallLocalVertices([&](VertexID v) {
       // Gather min label of all neighbors
       VertexID min_label = g.GetVertexLabel(v);
@@ -161,16 +167,17 @@ class ShortcutPropagation {
       labels_[v] = min_label;
       ranks_[v] = min_rank;
     });
-  } 
+  }
 
   void FindHeavyHitters(DynamicGraphAccess &g) {
-    std::unordered_map<VertexID, VertexID> number_hits;
+    google::dense_hash_map<VertexID, VertexID> number_hits;
+    number_hits.set_empty_key(-1);
     g.ForallLocalVertices([&](const VertexID v) {
       const VertexID target = labels_[v];
       if (number_hits.find(target) == end(number_hits))
         number_hits[target] = 0;
       if (++number_hits[target] > g.GetNumberOfLocalVertices() / number_of_hitters_) {
-        heavy_hitters_.emplace(labels_[v]);
+        heavy_hitters_.insert(labels_[v]);
         if (heavy_hitters_.size() >= number_of_hitters_) return;
       }
     });
@@ -179,8 +186,10 @@ class ShortcutPropagation {
   void Shortcut(DynamicGraphAccess &g) {
     std::vector<std::vector<std::tuple<VertexID, VertexID, VertexID>>> update_buffers(size_);
     std::vector<std::vector<VertexID>> request_buffers(size_);
-    std::unordered_map<VertexID, std::vector<VertexID>> update_lists;
-    std::unordered_set<VertexID> request_set;
+    google::dense_hash_map<VertexID, std::vector<VertexID>> update_lists;
+    update_lists.set_empty_key(-1);
+    google::dense_hash_set<VertexID> request_set;
+    request_set.set_empty_key(-1);
     g.ForallLocalVertices([&](const VertexID v) {
       if (labels_[v] < g.GetVertexLabel(v)) {
         // Send l'(v) to l(v)
@@ -191,7 +200,7 @@ class ShortcutPropagation {
       if (number_of_hitters_ == 0 || (number_of_hitters_ > 0 && heavy_hitters_.find(labels_[v]) != end(heavy_hitters_))) {
         // Check for uniqueness
         if (request_set.find(labels_[v]) == end(request_set)) {
-          request_set.emplace(labels_[v]);
+          request_set.insert(labels_[v]);
           request_buffers[ranks_[v]].emplace_back(labels_[v]);
         }
       } 
@@ -203,24 +212,28 @@ class ShortcutPropagation {
     MPI_Type_commit(&MPI_LABEL_UPDATE);
 
     // Send updates and requests
+    std::vector<MPI_Request*> answer_requests;
+    std::vector<MPI_Request*> update_requests;
+    answer_requests.clear();
+    update_requests.clear();
     for (PEID i = 0; i < size_; ++i) {
+      // if (i == rank_) continue;
       {
-        MPI_Request req;
+        auto *req = new MPI_Request();
         MPI_Isend(&update_buffers[i][0], update_buffers[i].size(), MPI_LABEL_UPDATE, i, 
-                  6 * size_ + i, MPI_COMM_WORLD, &req);
-        MPI_Request_free(&req);
+                  6 * size_ + i, MPI_COMM_WORLD, req);
+        update_requests.emplace_back(req);
       }
 
       {
-        MPI_Request req;
+        auto *req = new MPI_Request();
         MPI_Isend(&request_buffers[i][0], request_buffers[i].size(), MPI_LONG, i, 
-                  7 * size_ + i, MPI_COMM_WORLD, &req);
-        MPI_Request_free(&req);
+                  7 * size_ + i, MPI_COMM_WORLD, req);
+        answer_requests.emplace_back(req);
       }
     }
 
     // Receive request and send shortcuts 
-    MPI_Barrier(MPI_COMM_WORLD);
     std::vector<std::vector<std::tuple<VertexID, VertexID, VertexID>>> answers(size_);
     MPI_Status st{};
     int flag = 1;
@@ -243,16 +256,18 @@ class ShortcutPropagation {
       }
     } while (flag);
 
+    WaitForRequests(answer_requests);
+    MPI_Barrier(MPI_COMM_WORLD);
     for (PEID i = 0; i < size_; ++i) {
+      // if (i == rank_) continue;
       {
-        MPI_Request req;
-        MPI_Isend(&answers[i][0], answers[i].size(), MPI_LABEL_UPDATE, i, 6 * size_ + i, MPI_COMM_WORLD, &req);
-        MPI_Request_free(&req);
+        auto *req = new MPI_Request();
+        MPI_Isend(&answers[i][0], answers[i].size(), MPI_LABEL_UPDATE, i, 6 * size_ + i, MPI_COMM_WORLD, req);
+        update_requests.emplace_back(req);
       }
     }
 
     // Process request answers
-    MPI_Barrier(MPI_COMM_WORLD);
     flag = 1;
     do {
       // Probe for updates
@@ -280,8 +295,16 @@ class ShortcutPropagation {
         } else std::cout << "Unexpected tag." << std::endl;
       }
     } while (flag);
-
+    WaitForRequests(update_requests);
     MPI_Barrier(MPI_COMM_WORLD);
+  }
+
+  void WaitForRequests(std::vector<MPI_Request*>& requests) {
+    for (unsigned int i = 0; i < requests.size(); ++i) {
+      MPI_Status st;
+      MPI_Wait(requests[i], &st);
+      delete requests[i];
+    }
   }
 
   bool CheckConvergence(DynamicGraphAccess &g) {

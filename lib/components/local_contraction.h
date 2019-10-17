@@ -114,7 +114,7 @@ class LocalContraction {
     std::vector<VertexID> parent(g.GetNumberOfVertices(), 0);
 
     g.ForallVertices([&](const VertexID v) {
-      label[v] = g.GetVertexLabel(v);
+      label[v] = g.GetGlobalID(v);
     });
 
     // Compute components
@@ -308,8 +308,7 @@ class LocalContraction {
     // Build vertex mapping 
     google::dense_hash_map<VertexID, int> vertex_map; 
     vertex_map.set_empty_key(-1);
-    google::dense_hash_map<int, VertexID> reverse_vertex_map; 
-    reverse_vertex_map.set_empty_key(-1);
+    std::vector<VertexID> reverse_vertex_map(g.GetNumberOfLocalVertices());
     int current_vertex = 0;
     g.ForallLocalVertices([&](const VertexID v) {
       vertex_map[v] = current_vertex;
