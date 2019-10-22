@@ -101,6 +101,10 @@ class ShortcutPropagation {
   VertexID number_of_hitters_;
   google::dense_hash_set<VertexID> heavy_hitters_;
 
+  // Statistics
+  Timer iteration_timer_;
+  Timer shortcut_timer_;
+
   void PerformShortcutting(DynamicGraphAccess &g) {
     // Init 
     labels_.resize(g.GetNumberOfLocalVertices());
@@ -109,12 +113,17 @@ class ShortcutPropagation {
 
     // Iterate until converged
     do {
+      iteration_timer_.Restart();
+      if (rank_ == ROOT) std::cout << "[STATUS] Starting iteration " << iteration_ << std::endl;
       PropagateLabels(g);
       FindMinLabels(g);
       if (number_of_hitters_ > 0) 
         FindHeavyHitters(g);
+      if (rank_ == ROOT) std::cout << "[STATUS] |- Propagating labels took " 
+                                   << "[TIME] " << iteration_timer_.Elapsed() << std::endl;
       Shortcut(g);
-
+      if (rank_ == ROOT) std::cout << "[STATUS] |- Building shortcuts took " 
+                                   << "[TIME] " << iteration_timer_.Elapsed() << std::endl;
       OutputStats<DynamicGraphAccess>(g);
 
       iteration_++;
@@ -190,6 +199,8 @@ class ShortcutPropagation {
     update_lists.set_empty_key(-1);
     google::dense_hash_set<VertexID> request_set;
     request_set.set_empty_key(-1);
+
+    shortcut_timer_.Restart();
     g.ForallLocalVertices([&](const VertexID v) {
       if (labels_[v] < g.GetVertexLabel(v)) {
         // Send l'(v) to l(v)
@@ -207,6 +218,9 @@ class ShortcutPropagation {
       update_lists[labels_[v]].emplace_back(v);
     });
 
+    if (rank_ == ROOT) std::cout << "[STATUS] |-- Filling buffers took " 
+                                 << "[TIME] " << shortcut_timer_.Elapsed() << std::endl;
+
     MPI_Datatype MPI_LABEL_UPDATE;
     MPI_Type_vector(1, 3, 0, MPI_LONG, &MPI_LABEL_UPDATE);
     MPI_Type_commit(&MPI_LABEL_UPDATE);
@@ -216,6 +230,8 @@ class ShortcutPropagation {
     std::vector<MPI_Request*> update_requests;
     answer_requests.clear();
     update_requests.clear();
+
+    shortcut_timer_.Restart();
     for (PEID i = 0; i < size_; ++i) {
       if (i == rank_) continue;
       {
@@ -233,17 +249,27 @@ class ShortcutPropagation {
       }
     }
 
+    if (rank_ == ROOT) std::cout << "[STATUS] |-- Sending buffers took " 
+                                 << "[TIME] " << shortcut_timer_.Elapsed() << std::endl;
+
     // Receive request and send shortcuts 
     std::vector<std::vector<std::tuple<VertexID, VertexID, VertexID>>> answers(size_);
+
     // Process local requests
+    shortcut_timer_.Restart();
     if (request_buffers[rank_].size() > 0) {
       for (const VertexID &request : request_buffers[rank_]) {
         update_buffers[rank_].emplace_back(request, g.GetVertexLabel(g.GetLocalID(request)), g.GetVertexRoot(g.GetLocalID(request)));
       }
     }
+
+    if (rank_ == ROOT) std::cout << "[STATUS] |-- Resolving local requests took " 
+                                 << "[TIME] " << shortcut_timer_.Elapsed() << std::endl;
+
     // Process remote requests
     MPI_Status st{};
     int flag = 1;
+    shortcut_timer_.Restart();
     do {
       // Probe for requests
       MPI_Iprobe(MPI_ANY_SOURCE, 7 * size_ + rank_, MPI_COMM_WORLD, &flag, &st);
@@ -264,7 +290,11 @@ class ShortcutPropagation {
     } while (flag);
 
     WaitForRequests(answer_requests);
-    MPI_Barrier(MPI_COMM_WORLD);
+
+    if (rank_ == ROOT) std::cout << "[STATUS] |-- Resolving remote requests took " 
+                                 << "[TIME] " << shortcut_timer_.Elapsed() << std::endl;
+
+    shortcut_timer_.Restart();
     for (PEID i = 0; i < size_; ++i) {
       if (i == rank_) continue;
       {
@@ -274,8 +304,12 @@ class ShortcutPropagation {
       }
     }
 
+    if (rank_ == ROOT) std::cout << "[STATUS] |-- Sending answers took " 
+                                 << "[TIME] " << shortcut_timer_.Elapsed() << std::endl;
+
     // Process request answers
     // Process local answers
+    shortcut_timer_.Restart();
     if (update_buffers[rank_].size() > 0) {
       for (const auto &update : update_buffers[rank_]) {
         const VertexID target = std::get<0>(update);
@@ -289,14 +323,21 @@ class ShortcutPropagation {
         }
       }
     }
+
+    if (rank_ == ROOT) std::cout << "[STATUS] |-- Resolving local answers took " 
+                                 << "[TIME] " << shortcut_timer_.Elapsed() << std::endl;
+
     // Process remote answers
     flag = 1;
+    shortcut_timer_.Restart();
+    MPI_Barrier(MPI_COMM_WORLD);
     do {
       // Probe for updates
       MPI_Iprobe(MPI_ANY_SOURCE, 6 * size_ + rank_, MPI_COMM_WORLD, &flag, &st);
       if (flag) {
         int message_length;
         MPI_Get_count(&st, MPI_LABEL_UPDATE, &message_length);
+        // std::cout << "R" << 
         std::vector<std::tuple<VertexID, VertexID, VertexID>> message(message_length);
         MPI_Status rst{};
         MPI_Recv(&message[0], message_length, MPI_LABEL_UPDATE, st.MPI_SOURCE,
@@ -318,7 +359,10 @@ class ShortcutPropagation {
       }
     } while (flag);
     WaitForRequests(update_requests);
-    MPI_Barrier(MPI_COMM_WORLD);
+
+    if (rank_ == ROOT) std::cout << "[STATUS] |-- Resolving remote answers took " 
+                                 << "[TIME] " << shortcut_timer_.Elapsed() << std::endl;
+
   }
 
   void WaitForRequests(std::vector<MPI_Request*>& requests) {
