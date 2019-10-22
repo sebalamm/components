@@ -217,7 +217,7 @@ class ShortcutPropagation {
     answer_requests.clear();
     update_requests.clear();
     for (PEID i = 0; i < size_; ++i) {
-      // if (i == rank_) continue;
+      if (i == rank_) continue;
       {
         auto *req = new MPI_Request();
         MPI_Isend(&update_buffers[i][0], update_buffers[i].size(), MPI_LABEL_UPDATE, i, 
@@ -235,6 +235,13 @@ class ShortcutPropagation {
 
     // Receive request and send shortcuts 
     std::vector<std::vector<std::tuple<VertexID, VertexID, VertexID>>> answers(size_);
+    // Process local requests
+    if (request_buffers[rank_].size() > 0) {
+      for (const VertexID &request : request_buffers[rank_]) {
+        update_buffers[rank_].emplace_back(request, g.GetVertexLabel(g.GetLocalID(request)), g.GetVertexRoot(g.GetLocalID(request)));
+      }
+    }
+    // Process remote requests
     MPI_Status st{};
     int flag = 1;
     do {
@@ -259,7 +266,7 @@ class ShortcutPropagation {
     WaitForRequests(answer_requests);
     MPI_Barrier(MPI_COMM_WORLD);
     for (PEID i = 0; i < size_; ++i) {
-      // if (i == rank_) continue;
+      if (i == rank_) continue;
       {
         auto *req = new MPI_Request();
         MPI_Isend(&answers[i][0], answers[i].size(), MPI_LABEL_UPDATE, i, 6 * size_ + i, MPI_COMM_WORLD, req);
@@ -268,6 +275,21 @@ class ShortcutPropagation {
     }
 
     // Process request answers
+    // Process local answers
+    if (update_buffers[rank_].size() > 0) {
+      for (const auto &update : update_buffers[rank_]) {
+        const VertexID target = std::get<0>(update);
+        const VertexID label = std::get<1>(update);
+        const VertexID root = std::get<2>(update);
+        for (const VertexID v : update_lists[target]) {
+          if (label < labels_[v]) {
+            labels_[v] = label;
+            ranks_[v] = root;
+          }
+        }
+      }
+    }
+    // Process remote answers
     flag = 1;
     do {
       // Probe for updates
