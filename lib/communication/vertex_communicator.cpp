@@ -90,9 +90,8 @@ void VertexCommunicator::ReceiveMessages() {
     // if (rank_ == 11) std::cout << "done" << std::endl;
   }
   for (unsigned int i = 0; i < isend_requests_.size(); ++i) {
-    MPI_Status st;
+    MPI_Status st{};
     MPI_Wait(isend_requests_[i], &st);
-    // MPI_Request_free(isend_requests_[i]);
   }
   isend_requests_.clear();
 }

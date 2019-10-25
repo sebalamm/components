@@ -372,7 +372,7 @@ class CAGBuilder {
 
   void WaitForRequests(std::vector<MPI_Request*>& requests) {
     for (unsigned int i = 0; i < requests.size(); ++i) {
-      MPI_Status st;
+      MPI_Status st{};
       MPI_Wait(requests[i], &st);
       // MPI_Request_free(requests[i]);
     }
