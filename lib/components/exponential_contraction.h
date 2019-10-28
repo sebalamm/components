@@ -31,8 +31,8 @@
 #include "config.h"
 #include "definitions.h"
 #include "graph_io.h"
-#include "dynamic_graph_access.h"
-#include "static_graph_access.h"
+#include "dynamic_graph_comm.h"
+#include "static_graph.h"
 #include "cag_builder.h"
 #include "dynamic_contraction.h"
 #include "utils.h"
@@ -53,7 +53,7 @@ class ExponentialContraction {
     exp_contraction_ = nullptr;
   };
 
-  void FindComponents(StaticGraphAccess &g, std::vector<VertexID> &g_labels) {
+  void FindComponents(StaticGraph &g, std::vector<VertexID> &g_labels) {
     rng_offset_ = size_ + config_.seed;
     contraction_timer_.Restart();
     if (config_.use_contraction) {
@@ -65,11 +65,11 @@ class ExponentialContraction {
       
       // First round of contraction
       contraction_timer_.Restart();
-      CAGBuilder<StaticGraphAccess> 
+      CAGBuilder<StaticGraph> 
         first_contraction(g, g_labels, rank_, size_);
-      StaticGraphAccess cag 
+      StaticGraph cag 
         = first_contraction.BuildStaticComponentAdjacencyGraph();
-      OutputStats<StaticGraphAccess>(cag);
+      OutputStats<StaticGraph>(cag);
       if (rank_ == ROOT) {
         std::cout << "[STATUS] |- Building first cag took " 
                   << "[TIME] " << contraction_timer_.Elapsed() << std::endl;
@@ -87,11 +87,11 @@ class ExponentialContraction {
 
       // Second round of contraction
       contraction_timer_.Restart();
-      CAGBuilder<StaticGraphAccess> 
+      CAGBuilder<StaticGraph> 
         second_contraction(cag, cag_labels, rank_, size_);
-      DynamicGraphAccess ccag 
+      DynamicGraphCommunicator ccag 
         = second_contraction.BuildDynamicComponentAdjacencyGraph();
-      OutputStats<DynamicGraphAccess>(ccag);
+      OutputStats<DynamicGraphCommunicator>(ccag);
       if (rank_ == ROOT) {
         std::cout << "[STATUS] |- Building second cag took " 
                   << "[TIME] " << contraction_timer_.Elapsed() << std::endl;
@@ -123,7 +123,7 @@ class ExponentialContraction {
     }
   }
 
-  void Output(DynamicGraphAccess &g) {
+  void Output(DynamicGraphCommunicator &g) {
     g.OutputLabels();
   }
 
@@ -145,7 +145,7 @@ class ExponentialContraction {
   // Contraction
   DynamicContraction *exp_contraction_;
 
-  void PerformDecomposition(DynamicGraphAccess &g) {
+  void PerformDecomposition(DynamicGraphCommunicator &g) {
     contraction_timer_.Restart(); 
     VertexID global_vertices = g.GatherNumberOfGlobalVertices();
     if (global_vertices > 0) {
@@ -169,7 +169,7 @@ class ExponentialContraction {
     }
   }
 
-  void FindLocalComponents(StaticGraphAccess &g, std::vector<VertexID> &label) {
+  void FindLocalComponents(StaticGraph &g, std::vector<VertexID> &label) {
     std::vector<bool> marked(g.GetNumberOfVertices(), false);
     std::vector<VertexID> parent(g.GetNumberOfVertices(), 0);
 
@@ -179,7 +179,7 @@ class ExponentialContraction {
 
     // Compute components
     g.ForallLocalVertices([&](const VertexID v) {
-      if (!marked[v]) Utility<StaticGraphAccess>::BFS(g, v, marked, parent);
+      if (!marked[v]) Utility<StaticGraph>::BFS(g, v, marked, parent);
     });
 
     // Set vertex label for contraction
@@ -188,7 +188,7 @@ class ExponentialContraction {
     });
   }
 
-  void FindHighDegreeVertices(DynamicGraphAccess &g) {
+  void FindHighDegreeVertices(DynamicGraphCommunicator &g) {
     std::vector<VertexID> local_vertices;
     std::vector<VertexID> local_degrees;
     // TODO: Might be too small
@@ -230,7 +230,7 @@ class ExponentialContraction {
                    MPI_COMM_WORLD);
   }
 
-  void RunContraction(DynamicGraphAccess &g) {
+  void RunContraction(DynamicGraphCommunicator &g) {
     contraction_timer_.Restart();
     // VertexID global_vertices = g.GatherNumberOfGlobalVertices();
     // TODO: Number of vertices seems correct so something is probably wrong with backwards edges
@@ -379,7 +379,7 @@ class ExponentialContraction {
 
     if (rank_ == ROOT) std::cout << "done contraction... mem " << GetFreePhysMem() << std::endl;
 
-    OutputStats<DynamicGraphAccess>(g);
+    OutputStats<DynamicGraphCommunicator>(g);
 
     // Count remaining number of vertices
     VertexID global_vertices = g.GatherNumberOfGlobalVertices();
@@ -392,17 +392,17 @@ class ExponentialContraction {
     }
   }
 
-  void ApplyToLocalComponents(DynamicGraphAccess &cag, 
-                              StaticGraphAccess &g, std::vector<VertexID> &g_label) {
+  void ApplyToLocalComponents(DynamicGraphCommunicator &cag, 
+                              StaticGraph &g, std::vector<VertexID> &g_label) {
     g.ForallLocalVertices([&](const VertexID v) {
       VertexID cv = cag.GetLocalID(g.GetContractionVertex(v));
       g_label[v] = cag.GetVertexLabel(cv);
     });
   }
 
-  void ApplyToLocalComponents(StaticGraphAccess &cag, 
+  void ApplyToLocalComponents(StaticGraph &cag, 
                               std::vector<VertexID> &cag_label, 
-                              StaticGraphAccess &g, 
+                              StaticGraph &g, 
                               std::vector<VertexID> &g_label) {
     g.ForallLocalVertices([&](const VertexID v) {
       VertexID cv = cag.GetLocalID(g.GetContractionVertex(v));
@@ -410,7 +410,7 @@ class ExponentialContraction {
     });
   }
 
-  void RunSequentialCC(DynamicGraphAccess &g) {
+  void RunSequentialCC(DynamicGraphCommunicator &g) {
     // Build vertex mapping 
     google::dense_hash_map<VertexID, int> vertex_map; 
     vertex_map.set_empty_key(-1);
@@ -431,7 +431,7 @@ class ExponentialContraction {
     });
 
     // Run all-reduce
-    AllReduce<DynamicGraphAccess> ar(config_, rank_, size_);
+    AllReduce<DynamicGraphCommunicator> ar(config_, rank_, size_);
     ar.FindComponents(g, labels);
 
     g.ForallLocalVertices([&](const VertexID v) {

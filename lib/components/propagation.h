@@ -33,7 +33,8 @@
 #include "cag_builder.h"
 #include "utils.h"
 #include "union_find.h"
-#include "dynamic_graph_access.h"
+#include "dynamic_graph_comm.h"
+#include "static_graph_comm.h"
 
 class Propagation {
  public:
@@ -45,29 +46,29 @@ class Propagation {
 
   virtual ~Propagation() = default;
 
-  void FindComponents(DynamicGraphAccess &g, std::vector<VertexID> &g_labels) {
+  void FindComponents(StaticGraphCommunicator &g, std::vector<VertexID> &g_labels) {
     if (config_.use_contraction) {
-      FindLocalComponents(g, g_labels);
+      // FindLocalComponents(g, g_labels);
 
-      CAGBuilder<DynamicGraphAccess> 
-        first_contraction(g, g_labels, rank_, size_);
-      DynamicGraphAccess cag = first_contraction.BuildDynamicComponentAdjacencyGraph();
-      OutputStats<DynamicGraphAccess>(cag);
+      // CAGBuilder<StaticGraphCommunicator> 
+      //   first_contraction(g, g_labels, rank_, size_);
+      // StaticGraphCommunicator cag = first_contraction.BuildDynamicComponentAdjacencyGraph();
+      // OutputStats<StaticGraphCommunicator>(cag);
 
-      // TODO: Delete original graph?
-      // Keep contraction labeling for later
-      std::vector<VertexID> cag_labels(cag.GetNumberOfVertices(), 0);
-      FindLocalComponents(cag, cag_labels);
+      // // TODO: Delete original graph?
+      // // Keep contraction labeling for later
+      // std::vector<VertexID> cag_labels(cag.GetNumberOfVertices(), 0);
+      // FindLocalComponents(cag, cag_labels);
 
-      CAGBuilder<DynamicGraphAccess> 
-        second_contraction(cag, cag_labels, rank_, size_);
-      DynamicGraphAccess ccag = second_contraction.BuildDynamicComponentAdjacencyGraph();
-      OutputStats<DynamicGraphAccess>(ccag);
+      // CAGBuilder<StaticGraphCommunicator> 
+      //   second_contraction(cag, cag_labels, rank_, size_);
+      // StaticGraphCommunicator ccag = second_contraction.BuildDynamicComponentAdjacencyGraph();
+      // OutputStats<StaticGraphCommunicator>(ccag);
 
-      PerformPropagation(ccag);
+      // PerformPropagation(ccag);
 
-      ApplyToLocalComponents(ccag, cag, cag_labels);
-      ApplyToLocalComponents(cag, cag_labels, g, g_labels);
+      // ApplyToLocalComponents(ccag, cag, cag_labels);
+      // ApplyToLocalComponents(cag, cag_labels, g, g_labels);
     } else {
       PerformPropagation(g);
       g.ForallLocalVertices([&](const VertexID v) {
@@ -76,7 +77,7 @@ class Propagation {
     }
   }
 
-  void Output(DynamicGraphAccess &g) {
+  void Output(StaticGraphCommunicator &g) {
     g.OutputLabels();
   }
 
@@ -93,20 +94,20 @@ class Propagation {
   // Local labels
   std::vector<VertexID> prev_labels_;
 
-  void PerformPropagation(DynamicGraphAccess &g) {
+  void PerformPropagation(StaticGraphCommunicator &g) {
     prev_labels_.resize(g.GetNumberOfLocalVertices());
     // Iterate until converged
     do {
       PropagateLabels(g);
       FindMinLabels(g);
 
-      OutputStats<DynamicGraphAccess>(g);
+      OutputStats<StaticGraphCommunicator>(g);
 
       iteration_++;
     } while (!CheckConvergence(g));
   }
 
-  void FindLocalComponents(DynamicGraphAccess &g, std::vector<VertexID> &label) {
+  void FindLocalComponents(StaticGraphCommunicator &g, std::vector<VertexID> &label) {
     std::vector<bool> marked(g.GetNumberOfVertices(), false);
     std::vector<VertexID> parent(g.GetNumberOfVertices(), 0);
 
@@ -116,7 +117,7 @@ class Propagation {
 
     // Compute components
     g.ForallLocalVertices([&](const VertexID v) {
-      if (!marked[v]) Utility<DynamicGraphAccess>::BFS(g, v, marked, parent);
+      if (!marked[v]) Utility<StaticGraphCommunicator>::BFS(g, v, marked, parent);
     });
 
     // Set vertex label for contraction
@@ -125,32 +126,53 @@ class Propagation {
     });
   }
 
-  void PropagateLabels(DynamicGraphAccess &g) {
+  void PropagateLabels(StaticGraphCommunicator &g) {
     g.ForallLocalVertices([&](const VertexID v) { 
       prev_labels_[v] = g.GetVertexLabel(v); 
     });
     g.SendAndReceiveGhostVertices();
   }
 
-  void FindMinLabels(DynamicGraphAccess &g) {
-    g.ForallLocalVertices([&](VertexID v) {
-      // Gather min label of all neighbors
-      VertexID min_label = g.GetVertexLabel(v);
-      g.ForallNeighbors(v, [&](VertexID u) {
-        min_label = std::min(g.GetVertexLabel(u), min_label);
-      });
-      // g.SetVertexLabel(v, min_label);
-      g.SetVertexPayload(v,
-                         {g.GetVertexDeviate(v), 
-                          min_label,
+  void FindMinLabels(StaticGraphCommunicator &g) {
+    // std::vector<bool> changed(g.GetNumberOfLocalVertices(), false);
+    // bool label_changed = true;
+    // while(label_changed) {
+    //   label_changed = false;
+      g.ForallLocalVertices([&](VertexID v) {
+        // Gather min label of all neighbors
+        VertexID v_label = g.GetVertexLabel(v);
+        g.ForallNeighbors(v, [&](VertexID u) {
+          if (g.GetVertexLabel(u) < v_label) {
+            // label_changed = true;
+            // changed[v] = true;
+            v_label = g.GetVertexLabel(u);
+          }
+        });
+        // g.SetVertexLabel(v, v_label);
+        g.SetVertexPayload(v,
+                           {g.GetVertexDeviate(v), 
+                            v_label,
 #ifdef TIEBREAK_DEGREE
-                          0,
+                            0,
 #endif
-                          g.GetVertexRoot(v)});
-    });
+                            g.GetVertexRoot(v)});
+        });
+    // }
+
+//     g.ForallLocalVertices([&](VertexID v) {
+//         if (changed[v] && g.IsInterface(v)) {
+//           g.ForceVertexPayload(v,
+//                                {g.GetVertexDeviate(v), 
+//                                 g.GetVertexLabel(v),
+// #ifdef TIEBREAK_DEGREE
+//                                 0,
+// #endif
+//                                 g.GetVertexRoot(v)});
+//         } 
+//       });
   }
 
-  bool CheckConvergence(DynamicGraphAccess &g) {
+  bool CheckConvergence(StaticGraphCommunicator &g) {
     int converged_globally = 0;
 
     // Check local convergence
@@ -169,17 +191,17 @@ class Propagation {
     return converged_globally;
   }
 
-  void ApplyToLocalComponents(DynamicGraphAccess &cag, 
-                              DynamicGraphAccess &g, std::vector<VertexID> &g_label) {
+  void ApplyToLocalComponents(StaticGraphCommunicator &cag, 
+                              StaticGraphCommunicator &g, std::vector<VertexID> &g_label) {
     g.ForallLocalVertices([&](const VertexID v) {
       VertexID cv = cag.GetLocalID(g.GetContractionVertex(v));
       g_label[v] = cag.GetVertexLabel(cv);
     });
   }
 
-  void ApplyToLocalComponents(DynamicGraphAccess &cag, 
+  void ApplyToLocalComponents(StaticGraphCommunicator &cag, 
                               std::vector<VertexID> &cag_label, 
-                              DynamicGraphAccess &g, 
+                              StaticGraphCommunicator &g, 
                               std::vector<VertexID> &g_label) {
     g.ForallLocalVertices([&](const VertexID v) {
       VertexID cv = cag.GetLocalID(g.GetContractionVertex(v));

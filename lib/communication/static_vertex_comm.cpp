@@ -1,8 +1,8 @@
 #include <iostream>
 
-#include "vertex_communicator.h"
+#include "static_vertex_comm.h"
 
-void VertexCommunicator::AddMessage(const VertexID v,
+void StaticVertexCommunicator::AddMessage(const VertexID v,
                                     const VertexPayload &msg) {
   g_->ForallNeighbors(v, [&](const VertexID u) {
     if (!g_->IsLocal(u)) {
@@ -26,7 +26,7 @@ void VertexCommunicator::AddMessage(const VertexID v,
   });
 }
 
-void VertexCommunicator::ReceiveMessages() {
+void StaticVertexCommunicator::ReceiveMessages() {
   PEID messages_recv = 0;
   recv_tag_++;
   while (messages_recv < GetNumberOfAdjacentPEs()) {

@@ -27,13 +27,13 @@
 
 #include "config.h"
 #include "definitions.h"
-#include "dynamic_graph_access.h"
-#include "static_graph_access.h"
+#include "dynamic_graph_comm.h"
+#include "static_graph.h"
 #include "edge_hash.h"
 
 class DynamicContraction {
  public:
-  DynamicContraction(DynamicGraphAccess &g, const PEID rank, const PEID size)
+  DynamicContraction(DynamicGraphCommunicator &g, const PEID rank, const PEID size)
       : g_(g), 
         rank_(rank), 
         size_(size),
@@ -353,7 +353,6 @@ class DynamicContraction {
     for (unsigned int i = 0; i < requests.size(); ++i) {
       MPI_Status st{};
       MPI_Wait(requests[i], &st);
-      MPI_Request_free(requests[i]);
     }
     requests.clear();
   }
@@ -670,7 +669,7 @@ class DynamicContraction {
 
  private:
   // Original graph instance
-  DynamicGraphAccess &g_;
+  DynamicGraphCommunicator &g_;
 
   // Network information
   PEID rank_, size_;

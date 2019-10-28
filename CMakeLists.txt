@@ -20,8 +20,8 @@ endif()
 set(CMAKE_CXX_FLAGS "${CMAKE_CXX_FLAGS} ${KACOMP_DEFINITIONS}")
 
 include_directories(SYSTEM ${MPI_CXX_INCLUDE_PATH})
-# set(CMAKE_CXX_FLAGS "${CMAKE_CXX_FLAGS} ${MPI_COMPILE_FLAGS} -fsanitize=address -std=c++14 -fno-omit-frame-pointer -march=native -DNDEBUG -Wall -fPIC -O3 -g")
-set(CMAKE_CXX_FLAGS "${CMAKE_CXX_FLAGS} ${MPI_COMPILE_FLAGS} -std=c++14 -fno-omit-frame-pointer -march=native -DNDEBUG -Wall -fPIC -O3 -g")
+set(CMAKE_CXX_FLAGS "${CMAKE_CXX_FLAGS} ${MPI_COMPILE_FLAGS} -fsanitize=address -std=c++14 -fno-omit-frame-pointer -march=native -DNDEBUG -Wall -fPIC -O3 -g")
+# set(CMAKE_CXX_FLAGS "${CMAKE_CXX_FLAGS} ${MPI_COMPILE_FLAGS} -std=c++14 -fno-omit-frame-pointer -march=native -DNDEBUG -Wall -fPIC -O3 -g")
 set(CMAKE_CXX_LINK_FLAGS "${CMAKE_CXX_LINK_FLAGS} ${MPI_LINK_FLAGS}")
 
 add_subdirectory(extern/kagen)
@@ -56,18 +56,19 @@ set(SOURCES
         app
         lib
         lib/communication
-        lib/communication/vertex_communicator.cpp
+        lib/communication/dynamic_vertex_comm.cpp
+        lib/communication/static_vertex_comm.cpp
         lib/components
         lib/contraction
         lib/data_structures
-        lib/data_structures/dynamic_graph_access.cpp
+        lib/data_structures/dynamic_graph_comm.cpp
+        lib/data_structures/static_graph_comm.cpp
         lib/io
         lib/tools
         )
 
 add_executable(exponential ${SOURCES} "app/exp_contraction.cpp")
 add_executable(allreduce ${SOURCES} "app/all_reduce.cpp")
-add_executable(reduction ${SOURCES} "app/reduction.cpp")
 add_executable(local ${SOURCES} "app/local_contraction.cpp")
 add_executable(shortcuts ${SOURCES} "app/shortcuts.cpp")
 add_executable(labels ${SOURCES} "app/labels.cpp")
@@ -76,12 +77,11 @@ set(LIBS
         spooky
         sampling
         ${MPI_LIBRARIES}
-        # asan
+        asan
         )
 
 target_link_libraries(exponential LINK_PUBLIC ${LIBS})
 target_link_libraries(allreduce LINK_PUBLIC ${LIBS})
-target_link_libraries(reduction LINK_PUBLIC ${LIBS})
 target_link_libraries(local LINK_PUBLIC ${LIBS})
 target_link_libraries(shortcuts LINK_PUBLIC ${LIBS})
 target_link_libraries(labels LINK_PUBLIC ${LIBS})

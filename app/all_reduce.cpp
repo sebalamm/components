@@ -50,10 +50,10 @@ int main(int argn, char **argv) {
   if (rank == ROOT) std::cout << "WARMUP RUN" << std::endl;
 
   {
-    StaticGraphAccess G(rank, size);
+    StaticGraph G(rank, size);
     if (conf.input_file != "null") {
       // File I/O
-      GraphIO::ReadStaticDistributedFile(G, conf, rank, size, MPI_COMM_WORLD);
+      GraphIO::ReadStaticDistributedFile<StaticGraph>(G, conf, rank, size, MPI_COMM_WORLD);
     } else if (conf.gen != "null") {
       // Generator I/O
       kagen::KaGen gen(rank, size);
@@ -80,7 +80,7 @@ int main(int argn, char **argv) {
         MPI_Finalize();
         exit(1);
       }
-      GraphIO::ReadStaticDistributedEdgeList(G, conf, rank, size, MPI_COMM_WORLD, edge_list);
+      GraphIO::ReadStaticDistributedEdgeList<StaticGraph>(G, conf, rank, size, MPI_COMM_WORLD, edge_list);
       edge_list.clear();
     } else {
       if (rank == ROOT) 
@@ -114,7 +114,7 @@ int main(int argn, char **argv) {
     G.ForallLocalVertices([&](const VertexID v) {
       labels[v] = G.GetGlobalID(v);
     });
-    AllReduce<StaticGraphAccess> ar(conf, rank, size);
+    AllReduce<StaticGraph> ar(conf, rank, size);
     ar.FindComponents(G, labels);
   }
   MPI_Barrier(MPI_COMM_WORLD);
@@ -127,10 +127,10 @@ int main(int argn, char **argv) {
   
   for (int i = 0; i < conf.iterations; ++i) {
     int round_seed = initial_seed + i + 1000;
-    StaticGraphAccess G(rank, size);
+    StaticGraph G(rank, size);
     if (conf.input_file != "null") {
       // File I/O
-      GraphIO::ReadStaticDistributedFile(G, conf, rank, size, MPI_COMM_WORLD);
+      GraphIO::ReadStaticDistributedFile<StaticGraph>(G, conf, rank, size, MPI_COMM_WORLD);
     } else if (conf.gen != "null") {
       // Generator I/O
       kagen::KaGen gen(rank, size);
@@ -170,7 +170,7 @@ int main(int argn, char **argv) {
       freePhysMem *= 1e-9;
 
       if (rank == ROOT) std::cout << "done generating... mem " << freePhysMem << std::endl;
-      GraphIO::ReadStaticDistributedEdgeList(G, conf, rank, size, MPI_COMM_WORLD, edge_list);
+      GraphIO::ReadStaticDistributedEdgeList<StaticGraph>(G, conf, rank, size, MPI_COMM_WORLD, edge_list);
       edge_list.clear();
     } else {
       if (rank == ROOT) 
@@ -211,7 +211,7 @@ int main(int argn, char **argv) {
     t.Restart();
 
     // Determine labels
-    AllReduce<StaticGraphAccess> ar(conf, rank, size);
+    AllReduce<StaticGraph> ar(conf, rank, size);
     ar.FindComponents(G, labels);
 
     // Gather total time

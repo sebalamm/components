@@ -24,9 +24,9 @@
 
 #include <queue>
 
-#include "minimal_graph_access.h"
-#include "dynamic_graph_access.h"
-#include "static_graph_access.h"
+#include "dynamic_graph.h"
+#include "dynamic_graph_comm.h"
+#include "static_graph.h"
 
 template <typename GraphInputType>
 class Utility {

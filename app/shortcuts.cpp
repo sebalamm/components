@@ -48,10 +48,10 @@ int main(int argn, char **argv) {
   if (rank == ROOT) std::cout << "WARMUP RUN" << std::endl;
 
   {
-    DynamicGraphAccess G(rank, size);
+    StaticGraphCommunicator G(rank, size);
     if (conf.input_file != "null") {
       // File I/O
-      GraphIO::ReadDynamicDistributedFile(G, conf, rank, size, MPI_COMM_WORLD);
+      GraphIO::ReadStaticDistributedFile<StaticGraphCommunicator>(G, conf, rank, size, MPI_COMM_WORLD);
     } else if (conf.gen != "null") {
       // Generator I/O
       kagen::KaGen gen(rank, size);
@@ -78,7 +78,7 @@ int main(int argn, char **argv) {
         MPI_Finalize();
         exit(1);
       }
-      GraphIO::ReadDynamicDistributedEdgeList(G, conf, rank, size, MPI_COMM_WORLD, edge_list);
+      GraphIO::ReadStaticDistributedEdgeList<StaticGraphCommunicator>(G, conf, rank, size, MPI_COMM_WORLD, edge_list);
       edge_list.clear();
     } else {
       if (rank == ROOT) 
@@ -122,10 +122,10 @@ int main(int argn, char **argv) {
   
   for (int i = 0; i < conf.iterations; ++i) {
     int round_seed = initial_seed + i + 1000;
-    DynamicGraphAccess G(rank, size);
+    StaticGraphCommunicator G(rank, size);
     if (conf.input_file != "null") {
       // File I/O
-      GraphIO::ReadDynamicDistributedFile(G, conf, rank, size, MPI_COMM_WORLD);
+      GraphIO::ReadStaticDistributedFile<StaticGraphCommunicator>(G, conf, rank, size, MPI_COMM_WORLD);
     } else if (conf.gen != "null") {
       // Generator I/O
       kagen::KaGen gen(rank, size);
@@ -165,7 +165,7 @@ int main(int argn, char **argv) {
       freePhysMem *= 1e-9;
 
       if (rank == ROOT) std::cout << "done generating... mem " << freePhysMem << std::endl;
-      GraphIO::ReadDynamicDistributedEdgeList(G, conf, rank, size, MPI_COMM_WORLD, edge_list);
+      GraphIO::ReadStaticDistributedEdgeList<StaticGraphCommunicator>(G, conf, rank, size, MPI_COMM_WORLD, edge_list);
       edge_list.clear();
     } else {
       if (rank == ROOT) 

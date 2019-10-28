@@ -33,15 +33,18 @@
 #include <sys/sysinfo.h>
 
 #include "config.h"
-#include "dynamic_graph_access.h"
-#include "static_graph_access.h"
+#include "dynamic_graph.h"
+#include "dynamic_graph_comm.h"
+#include "static_graph.h"
+#include "static_graph_comm.h"
 
 class GraphIO {
  public:
   GraphIO() = default;
   virtual ~GraphIO() = default;
 
-  static void ReadStaticDistributedEdgeList(StaticGraphAccess &g,
+  template<typename GraphOutputType>
+  static void ReadStaticDistributedEdgeList(GraphOutputType &g,
                                             Config &config, PEID rank,
                                             PEID size, const MPI_Comm &comm,
                                             auto &edge_list) {
@@ -92,6 +95,14 @@ class GraphIO {
 
     g.SetOffsetArray(std::move(vertex_dist));
 
+    // Initialize local vertices
+    if constexpr (std::is_same<GraphOutputType, StaticGraphCommunicator>::value) {
+      for (VertexID v = 0; v < number_of_local_vertices; v++) {
+          g.SetVertexLabel(v, from + v);
+          g.SetVertexRoot(v, rank);
+      }
+    }
+
     // Initialize ghost vertices
     for (auto &v : ghost_vertices) {
       g.AddGhostVertex(v);
@@ -116,7 +127,8 @@ class GraphIO {
     g.FinishConstruct();
   }
 
-  static void ReadDynamicDistributedEdgeList(DynamicGraphAccess &g,
+  template<typename GraphOutputType>
+  static void ReadDynamicDistributedEdgeList(GraphOutputType &g,
                                              Config &config, PEID rank,
                                              PEID size, const MPI_Comm &comm,
                                              auto &edge_list) {
@@ -162,9 +174,11 @@ class GraphIO {
     g.SetOffsetArray(std::move(vertex_dist));
 
     // Initialize local vertices
-    for (VertexID v = 0; v < number_of_local_vertices; v++) {
-        g.SetVertexLabel(v, from + v);
-        g.SetVertexRoot(v, rank);
+    if constexpr (std::is_same<GraphOutputType, DynamicGraphCommunicator>::value) {
+      for (VertexID v = 0; v < number_of_local_vertices; v++) {
+          g.SetVertexLabel(v, from + v);
+          g.SetVertexRoot(v, rank);
+      }
     }
 
     // Initialize ghost vertices
@@ -180,7 +194,8 @@ class GraphIO {
     g.FinishConstruct();
   }
 
-  static void ReadStaticDistributedFile(StaticGraphAccess &g, 
+  template<typename GraphOutputType>
+  static void ReadStaticDistributedFile(GraphOutputType &g, 
                                         Config &config, PEID rank,
                                         PEID size, const MPI_Comm &comm) {
     std::string line;
@@ -293,6 +308,14 @@ class GraphIO {
       g.AddGhostVertex(v);
     }
 
+    // Initialize local vertices
+    if constexpr (std::is_same<GraphOutputType, StaticGraphCommunicator>::value) {
+      for (VertexID v = 0; v < number_of_local_vertices; v++) {
+          g.SetVertexLabel(v, from + v);
+          g.SetVertexRoot(v, rank);
+      }
+    }
+
     std::sort(edge_list.begin(), edge_list.end(), [&](auto &left, auto &right) {
         VertexID lhs_source = g.GetLocalID(left.first);
         VertexID lhs_target = g.GetLocalID(left.second);
@@ -308,7 +331,8 @@ class GraphIO {
     g.FinishConstruct();
   }
 
-  static void ReadDynamicDistributedFile(DynamicGraphAccess &g,
+  template<typename GraphOutputType>
+  static void ReadDynamicDistributedFile(GraphOutputType &g,
                                          Config &config, PEID rank,
                                          PEID size, const MPI_Comm &comm) {
     std::string line;
@@ -415,9 +439,11 @@ class GraphIO {
     g.SetOffsetArray(std::move(vertex_dist));
 
     // Initialize local vertices
-    for (VertexID v = 0; v < number_of_local_vertices; v++) {
-        g.SetVertexLabel(v, from + v);
-        g.SetVertexRoot(v, rank);
+    if constexpr (std::is_same<GraphOutputType, DynamicGraphCommunicator>::value) {
+      for (VertexID v = 0; v < number_of_local_vertices; v++) {
+          g.SetVertexLabel(v, from + v);
+          g.SetVertexRoot(v, rank);
+      }
     }
 
     // Initialize ghost vertices

@@ -31,8 +31,8 @@
 #include "config.h"
 #include "definitions.h"
 #include "graph_io.h"
-#include "dynamic_graph_access.h"
-#include "static_graph_access.h"
+#include "dynamic_graph_comm.h"
+#include "static_graph.h"
 #include "cag_builder.h"
 #include "dynamic_contraction.h"
 #include "utils.h"
@@ -133,7 +133,7 @@ class AllReduce {
       }
 
       // Construct temporary graph
-      StaticGraphAccess sg(ROOT, 1);
+      StaticGraph sg(ROOT, 1);
 
       sg.StartConstruct(global_vertices_.size(), 0, global_edges_.size(), ROOT);
       for (int v = 0; v < global_vertices_.size(); ++v) {
@@ -147,7 +147,7 @@ class AllReduce {
     }
   }
 
-  void FindLocalComponents(StaticGraphAccess &g, std::vector<VertexID> &label) {
+  void FindLocalComponents(StaticGraph &g, std::vector<VertexID> &label) {
     std::vector<bool> marked(g.GetNumberOfVertices(), false);
     std::vector<VertexID> parent(g.GetNumberOfVertices(), 0);
 
@@ -157,7 +157,7 @@ class AllReduce {
 
     // Compute components
     g.ForallLocalVertices([&](const VertexID v) {
-      if (!marked[v]) Utility<StaticGraphAccess>::BFS(g, v, marked, parent);
+      if (!marked[v]) Utility<StaticGraph>::BFS(g, v, marked, parent);
     });
 
     // Set vertex label for contraction

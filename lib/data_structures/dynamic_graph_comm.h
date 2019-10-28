@@ -19,8 +19,8 @@
  * this program.  If not, see <http://www.gnu.org/licenses/>.
  *****************************************************************************/
 
-#ifndef _STATIC_GRAPH_ACCESS_H_
-#define _STATIC_GRAPH_ACCESS_H_
+#ifndef _DYNAMIC_GRAPH_COMM_H_
+#define _DYNAMIC_GRAPH_COMM_H_
 
 #include <mpi.h>
 
@@ -43,9 +43,10 @@
 
 #include "config.h"
 #include "timer.h"
+#include "payload.h"
 
-
-class StaticGraphAccess {
+class DynamicVertexCommunicator;
+class DynamicGraphCommunicator {
   struct Vertex {
     EdgeID first_edge_;
 
@@ -80,68 +81,18 @@ class StaticGraphAccess {
   };
 
  public:
-  StaticGraphAccess(const PEID rank, const PEID size)
-    : rank_(rank),
-      size_(size),
-      number_of_vertices_(0),
-      number_of_local_vertices_(0),
-      number_of_global_vertices_(0),
-      number_of_edges_(0),
-      number_of_cut_edges_(0),
-      number_of_global_edges_(0),
-      max_degree_(0),
-      max_degree_computed_(false),
-      local_offset_(0),
-      ghost_offset_(0),
-      vertex_counter_(0),
-      edge_counter_(0),
-      ghost_counter_(0),
-      last_source_(0) {
-    global_to_local_map_.set_empty_key(-1);
-  }
+  DynamicGraphCommunicator(const PEID rank, const PEID size);
 
-  virtual ~StaticGraphAccess() {};
+  virtual ~DynamicGraphCommunicator();
 
   //////////////////////////////////////////////
   // Graph construction
   //////////////////////////////////////////////
-  void StartConstruct(const VertexID local_n, 
-                      const VertexID ghost_n, 
-                      const VertexID total_m,
-                      const VertexID local_offset) {
-    number_of_local_vertices_ = local_n;
-    number_of_vertices_ = local_n + ghost_n;
-    number_of_edges_ = total_m;
+  void ResetCommunicator();
+  
+  void StartConstruct(VertexID local_n, VertexID ghost_n, VertexID local_offset);
 
-    vertices_.resize(number_of_vertices_ + 1);
-    // Fix first node being isolated
-    if (local_n > 0) vertices_[0].first_edge_ = 0;
-    edges_.resize(number_of_edges_);
-
-    local_vertices_data_.resize(number_of_vertices_);
-    ghost_vertices_data_.resize(ghost_n);
-
-    local_offset_ = local_offset;
-    ghost_offset_ = local_n;
-
-    // Temp counter for properly counting new ghost vertices
-    vertex_counter_ = local_n; 
-    edge_counter_ = 0;
-    ghost_counter_ = local_n;
-
-    adjacent_pes_.resize(static_cast<unsigned long>(size_), false);
-  }
-
-  void FinishConstruct() { 
-    vertices_.resize(vertex_counter_ + 1);
-    edges_.resize(edge_counter_ + 1);
-
-    for (VertexID v = 1; v <= vertex_counter_; v++) {
-      if (vertices_[v].first_edge_ == std::numeric_limits<EdgeID>::max()) {
-        vertices_[v].first_edge_ = vertices_[v - 1].first_edge_;
-      }
-    }
-  }
+  void FinishConstruct() { number_of_edges_ = edge_counter_; }
 
   //////////////////////////////////////////////
   // Graph iterators
@@ -149,34 +100,32 @@ class StaticGraphAccess {
   template<typename F>
   void ForallLocalVertices(F &&callback) {
     for (VertexID v = 0; v < GetNumberOfLocalVertices(); ++v) {
-      callback(v);
+      if (IsActive(v)) callback(v);
     }
   }
 
   template<typename F>
   void ForallGhostVertices(F &&callback) {
     for (VertexID v = GetNumberOfLocalVertices(); v < GetNumberOfVertices(); ++v) {
-      callback(v);
+      if (IsActive(v)) callback(v);
     }
   }
 
   template<typename F>
   void ForallVertices(F &&callback) {
     for (VertexID v = 0; v < GetNumberOfVertices(); ++v) {
-      callback(v);
+      if (IsActive(v)) callback(v);
     }
   }
 
   template<typename F>
   void ForallNeighbors(const VertexID v, F &&callback) {
-    ForallAdjacentEdges(v, [&](EdgeID e) { 
-        callback(edges_[e].target_); 
-    });
+    ForallAdjacentEdges(v, [&](EdgeID e) { callback(adjacent_edges_[v][e].target_); });
   }
 
   template<typename F>
   void ForallAdjacentEdges(const VertexID v, F &&callback) {
-    for (EdgeID e = GetFirstEdge(v); e < GetFirstInvalidEdge(v); ++e) {
+    for (EdgeID e = 0; e < GetVertexDegree(v); ++e) {
       callback(e);
     }
   }
@@ -187,6 +136,14 @@ class StaticGraphAccess {
       if (w == target) adj = true;
     });
     return adj;
+  }
+
+  inline bool IsActive(const VertexID v) const {
+    return is_active_[v];
+  }
+
+  void SetActive(VertexID v, bool is_active) {
+    is_active_[v] = is_active;
   }
 
   //////////////////////////////////////////////
@@ -204,6 +161,48 @@ class StaticGraphAccess {
     return contraction_vertices_[v];
   }
 
+  void BuildLabelShortcuts() {
+    // Gather labels
+    google::dense_hash_set<VertexID> labels; 
+    labels.set_empty_key(-1);
+    ForallLocalVertices([&](const VertexID v) {
+        labels.insert(GetVertexLabel(v));
+    });
+
+    // Init shortcuts
+    // std::unordered_map<VertexID, std::pair<VertexID, VertexID>> smallest_deviate;
+    google::dense_hash_map<VertexID, std::pair<VertexID, VertexID>> smallest_deviate; 
+    smallest_deviate.set_empty_key(-1);
+    FindSmallestDeviates(labels, smallest_deviate);
+
+    // Set actual shortcuts
+    for (auto &kv : smallest_deviate) 
+      label_shortcut_[kv.first] = kv.second.second;
+  }
+
+  void FindSmallestDeviates(google::dense_hash_set<VertexID> labels,
+                            google::dense_hash_map<VertexID, std::pair<VertexID, VertexID>> &smallest_deviate) {
+    for (auto &v : labels) 
+      smallest_deviate[v] = std::make_pair(std::numeric_limits<VertexID>::max(), 0);
+    ForallLocalVertices([&](const VertexID v) {
+      auto payload = GetVertexMessage(v);
+      VertexID label = payload.label_;
+      VertexID deviate = payload.deviate_;
+#ifdef TIEBREAK_DEGREE
+      VertexID degree = payload.degree_;
+#endif
+      VertexID root = payload.root_;
+      if (smallest_deviate[label].first > deviate) {
+        smallest_deviate[label].first = deviate;
+        smallest_deviate[label].second = GetParent(v);
+      }
+    });
+  }
+
+  inline VertexID GetShortcutForLabel(VertexID label) {
+    return label_shortcut_[label];
+  }
+
   //////////////////////////////////////////////
   // Vertex mappings
   //////////////////////////////////////////////
@@ -213,9 +212,7 @@ class StaticGraphAccess {
 
   PEID GetPEFromOffset(const VertexID v) const {
     for (PEID i = 0; i < offset_array_.size(); ++i) {
-      if (v >= offset_array_[i].first && v < offset_array_[i].second) {
-        return i;
-      }
+      if (v >= offset_array_[i].first && v < offset_array_[i].second) return i;
     }
     return rank_;
   }
@@ -287,14 +284,6 @@ class StaticGraphAccess {
 
   inline void ResetNumberOfCutEdges() { number_of_cut_edges_ = 0; }
 
-  inline EdgeID GetFirstEdge(const VertexID v) const {
-    return vertices_[v].first_edge_;
-  }
-
-  inline EdgeID GetFirstInvalidEdge(const VertexID v) const {
-    return vertices_[v + 1].first_edge_;
-  }
-
   VertexID GatherNumberOfGlobalVertices() {
     VertexID local_vertices = 0;
     ForallLocalVertices([&](const VertexID v) { local_vertices++; });
@@ -324,54 +313,84 @@ class StaticGraphAccess {
     return number_of_global_edges_;
   }
 
+  void SetVertexPayload(VertexID v, VertexPayload &&msg, bool propagate = true);
+
+  void ForceVertexPayload(VertexID v, VertexPayload &&msg);
+
+  inline VertexPayload &GetVertexMessage(const VertexID v) {
+    return vertex_payload_[v];
+  }
+
+  void SetVertexMessage(const VertexID v, VertexPayload &&msg) {
+    vertex_payload_[v] = msg;
+  }
+
+  void SetParent(const VertexID v, const VertexID parent_v) {
+    parent_[v] = parent_v;
+  }
+
+  inline std::string GetVertexString(const VertexID v) {
+    std::stringstream out;
+    out << "(" << GetVertexDeviate(v) << ","
+        << GetVertexLabel(v) << ","
+        << GetVertexRoot(v) << ")";
+    return out.str();
+  }
+
+  inline VertexID GetVertexDeviate(const VertexID v) const {
+    return vertex_payload_[v].deviate_;
+  }
+
+  inline void SetVertexDeviate(const VertexID v, const VertexID deviate) {
+    vertex_payload_[v].deviate_ = deviate;
+  }
+
+  inline VertexID GetVertexLabel(const VertexID v) const {
+    return vertex_payload_[v].label_;
+  }
+
+  inline void SetVertexLabel(const VertexID v, const VertexID label) {
+    vertex_payload_[v].label_ = label;
+  }
+
+  inline PEID GetVertexRoot(const VertexID v) const {
+    return vertex_payload_[v].root_;
+  }
+
+  inline void SetVertexRoot(const VertexID v, const PEID root) {
+    vertex_payload_[v].root_ = root;
+  }
+
+  inline VertexID GetParent(const VertexID v) {
+    return parent_[v];
+  }
+
   inline VertexID AddVertex() {
     return vertex_counter_++;
   }
 
-  inline VertexID AddGhostVertex(VertexID v) {
-    AddVertex();
-    global_to_local_map_[v] = ghost_counter_;
+  VertexID  AddGhostVertex(VertexID v);
 
-    // Update data
-    local_vertices_data_[ghost_counter_].is_interface_vertex_ = false;
-    ghost_vertices_data_[ghost_counter_ - ghost_offset_].rank_ = GetPEFromOffset(v);
-    ghost_vertices_data_[ghost_counter_ - ghost_offset_].global_id_ = v;
+  EdgeID AddEdge(VertexID from, VertexID to, PEID rank);
 
-    return ghost_counter_++;
-  }
+  void AddLocalEdge(VertexID from, VertexID to);
 
-  // TODO: Remove
-  // void ReserveEdgesForVertex(VertexID v, VertexID num_edges) {
-    // edges_[v].reserve(num_edges);
-  // }
+  void AddGhostEdge(VertexID from, VertexID to);
 
-  EdgeID AddEdge(VertexID from, VertexID to, PEID rank) {
-    if (IsLocalFromGlobal(to)) {
-      AddLocalEdge(from, to);
-    } else {
-      PEID neighbor = (rank == size_) ? GetPEFromOffset(to) : rank;
-      local_vertices_data_[from].is_interface_vertex_ = true;
-      if (IsGhostFromGlobal(to)) { // true if ghost already in map, otherwise false
-        number_of_cut_edges_++;
-        AddLocalEdge(from, to);
-        SetAdjacentPE(neighbor, true);
-      } else {
-        std::cout << "This shouldn't happen" << std::endl;
-        exit(1);
-      }
-    }
-    if (from > last_source_) last_source_ = from;
-    return edge_counter_;
-  }
+  void ReserveEdgesForVertex(VertexID v, VertexID num_edges);
 
-  void AddLocalEdge(VertexID from, VertexID to) {
-    edges_[edge_counter_].target_ = GetLocalID(to);
-    edge_counter_++;
-    vertices_[from + 1].first_edge_ = edge_counter_;
+  void RemoveAllEdges(VertexID from);
+
+  // Local IDs
+  bool IsConnected(VertexID from, VertexID to) {
+    ForallNeighbors(from, [&](VertexID v) {
+        if (v == to) return true; 
+    });
+    return false;
   }
 
   inline VertexID GetVertexDegree(const VertexID v) const {
-    return vertices_[v + 1].first_edge_ - vertices_[v].first_edge_; 
+    return adjacent_edges_[v].size();
   }
 
   VertexID GetMaxDegree() {
@@ -384,6 +403,28 @@ class StaticGraphAccess {
       max_degree_computed_ = true;
     }
     return max_degree_;
+  }
+
+  //////////////////////////////////////////////
+  // Manage ghost vertices
+  //////////////////////////////////////////////
+  void SendAndReceiveGhostVertices();
+
+  void ReceiveAndSendGhostVertices();
+
+  inline void HandleGhostUpdate(const VertexID v,
+                                const VertexID label,
+                                const VertexID deviate,
+#ifdef TIEBREAK_DEGREE
+                                const VertexID degree,
+#endif
+                                const PEID root) {
+    SetVertexPayload(v, {deviate, 
+                         label, 
+#ifdef TIEBREAK_DEGREE
+                         degree,
+#endif
+                         root});
   }
 
   //////////////////////////////////////////////
@@ -408,123 +449,23 @@ class StaticGraphAccess {
     return adjacent_pes_[pe];
   }
 
-  inline void SetAdjacentPE(const PEID pe, const bool is_adj) {
-    if (pe == rank_) return;
-    adjacent_pes_[pe] = is_adj;
-  }
+  void SetAdjacentPE(const PEID pe, const bool is_adj);
+
+  void ResetAdjacentPEs();
+
 
   //////////////////////////////////////////////
   // I/O
   //////////////////////////////////////////////
-  void OutputLocal() {
-    ForallLocalVertices([&](const VertexID v) {
-      std::stringstream out;
-      out << "[R" << rank_ << "] [V] "
-          << GetGlobalID(v) << " (local_id=" << v
-           << ", pe=" << rank_ << ")";
-      std::cout << out.str() << std::endl;
-    });
+  bool CheckDuplicates();
 
-    ForallLocalVertices([&](const VertexID v) {
-      std::stringstream out;
-      out << "[R" << rank_ << "] [N] "
-          << GetGlobalID(v) << " -> ";
-      ForallNeighbors(v, [&](VertexID u) {
-        // out << GetGlobalID(u) << " ";
-        out << GetGlobalID(u) << " (local_id=" << u
-            << ", pe=" << GetPE(u) << ") ";
-      });
-      std::cout << out.str() << std::endl;
-    });
-  }
+  void OutputLocal();
 
-  void OutputGhosts() {
-    std::cout << "[R" << rank_ << "] [G] [ ";
-    for (auto &e : global_to_local_map_) {
-      std::cout << e.first << " ";
-    }
-    std::cout << "]" << std::endl;
-  }
+  void OutputLabels();
 
-  void OutputComponents(std::vector<VertexID> &labels) {
-    VertexID global_num_vertices = GatherNumberOfGlobalVertices();
-    // Gather component sizes
-    google::dense_hash_map<VertexID, VertexID> local_component_sizes; 
-    local_component_sizes.set_empty_key(-1);
-    ForallLocalVertices([&](const VertexID v) {
-      VertexID c = labels[v];
-      if (local_component_sizes.find(c) == end(local_component_sizes))
-        local_component_sizes[c] = 0;
-      local_component_sizes[c]++;
-    });
+  void OutputGhosts();
 
-    // Gather component message
-    std::vector<std::pair<VertexID, VertexID>> local_components;
-    // local_components.reserve(local_component_sizes.size());
-    for(auto &kv : local_component_sizes)
-      local_components.emplace_back(kv.first, kv.second);
-    // TODO [MEMORY]: Might be too small
-    int num_local_components = local_components.size();
-
-    // Exchange number of local components
-    std::vector<int> num_components(size_);
-    MPI_Gather(&num_local_components, 1, MPI_INT, &num_components[0], 1, MPI_INT, ROOT, MPI_COMM_WORLD);
-
-    // Compute diplacements
-    std::vector<int> displ_components(size_, 0);
-    // TODO [MEMORY]: Might be too small
-    int num_global_components = 0;
-    for (PEID i = 0; i < size_; ++i) {
-      displ_components[i] = num_global_components;
-      num_global_components += num_components[i];
-    }
-
-    // Add datatype
-    MPI_Datatype MPI_COMP;
-    MPI_Type_vector(1, 2, 0, MPI_VERTEX, &MPI_COMP);
-    MPI_Type_commit(&MPI_COMP);
-
-    // Exchange components
-    std::vector<std::pair<VertexID, VertexID>> global_components(num_global_components);
-    MPI_Gatherv(&local_components[0], num_local_components, MPI_COMP,
-                &global_components[0], &num_components[0], &displ_components[0], MPI_COMP,
-                ROOT, MPI_COMM_WORLD);
-
-    if (rank_ == ROOT) {
-      google::dense_hash_map<VertexID, VertexID> global_component_sizes; global_component_sizes.set_empty_key(-1);
-      for (auto &comp : global_components) {
-        VertexID c = comp.first;
-        VertexID size = comp.second;
-        if (global_component_sizes.find(c) == end(global_component_sizes))
-          global_component_sizes[c] = 0;
-        global_component_sizes[c] += size;
-      }
-
-      google::dense_hash_map<VertexID, VertexID> condensed_component_sizes; 
-      condensed_component_sizes.set_empty_key(-1);
-      for (auto &cs : global_component_sizes) {
-        VertexID c = cs.first;
-        VertexID size = cs.second;
-        if (condensed_component_sizes.find(size) == end(condensed_component_sizes)) {
-          condensed_component_sizes[size] = 0;
-        }
-        condensed_component_sizes[size]++;
-      }
-
-      // Build final vector
-      std::vector<std::pair<VertexID, VertexID>> components;
-      components.reserve(condensed_component_sizes.size());
-      for(auto &kv : condensed_component_sizes)
-        components.emplace_back(kv.first, kv.second);
-      std::sort(begin(components), end(components));
-
-      std::cout << "COMPONENTS [ ";
-      for (auto &comp : components)
-        std::cout << "size=" << comp.first << " (num=" << comp.second << ") ";
-      std::cout << "]" << std::endl;
-    }
-
-  }
+  void OutputComponents(std::vector<VertexID> &labels);
 
   void Logging(bool active);
 
@@ -533,11 +474,15 @@ class StaticGraphAccess {
   PEID rank_, size_;
 
   // Vertices and edges
-  std::vector<Vertex> vertices_;
-  std::vector<Edge> edges_;
+  std::vector<std::vector<Edge>> adjacent_edges_;
 
   std::vector<LocalVertexData> local_vertices_data_;
   std::vector<GhostVertexData> ghost_vertices_data_;
+  std::vector<VertexPayload> vertex_payload_;
+
+  // Shortcutting
+  std::vector<VertexID> parent_;
+  google::dense_hash_map<VertexID, VertexID> label_shortcut_;
 
   VertexID number_of_vertices_;
   VertexID number_of_local_vertices_;
@@ -559,15 +504,18 @@ class StaticGraphAccess {
 
   // Contraction
   std::vector<VertexID> contraction_vertices_;
+  std::vector<bool> is_active_;
 
   // Adjacent PEs
   std::vector<bool> adjacent_pes_;
 
+  // Communication interface
+  DynamicVertexCommunicator *ghost_comm_;
+
   // Temporary counters
   VertexID vertex_counter_;
-  EdgeID edge_counter_;
   VertexID ghost_counter_;
-  VertexID last_source_;
+  EdgeID edge_counter_;
 };
 
 #endif

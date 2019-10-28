@@ -28,8 +28,8 @@
 
 #include "config.h"
 #include "definitions.h"
-#include "dynamic_graph_access.h"
-#include "static_graph_access.h"
+#include "dynamic_graph_comm.h"
+#include "static_graph.h"
 #include "edge_hash.h"
 
 template <typename GraphInputType>
@@ -46,12 +46,12 @@ class CAGBuilder {
   }
   virtual ~CAGBuilder() = default;
 
-  DynamicGraphAccess BuildDynamicComponentAdjacencyGraph() {
+  DynamicGraphCommunicator BuildDynamicComponentAdjacencyGraph() {
     PerformContraction();
     return BuildDynamicContractionGraph();
   }
 
-  StaticGraphAccess BuildStaticComponentAdjacencyGraph() {
+  StaticGraph BuildStaticComponentAdjacencyGraph() {
     PerformContraction();
     return BuildStaticContractionGraph();
   }
@@ -396,7 +396,7 @@ class CAGBuilder {
     });
   }
 
-  DynamicGraphAccess BuildDynamicContractionGraph() {
+  DynamicGraphCommunicator BuildDynamicContractionGraph() {
     VertexID from = num_smaller_components_;
     VertexID to = num_smaller_components_ + num_local_components_ - 1;
 
@@ -429,7 +429,7 @@ class CAGBuilder {
     MPI_Allgather(&range, 1, MPI_COMP,
                   &vertex_dist[0], 1, MPI_COMP, MPI_COMM_WORLD);
 
-    DynamicGraphAccess cg(rank_, size_);
+    DynamicGraphCommunicator cg(rank_, size_);
     cg.StartConstruct(num_local_components_,
                       number_of_ghost_vertices,
                       from);
@@ -456,7 +456,7 @@ class CAGBuilder {
     return cg;
   }
 
-  StaticGraphAccess BuildStaticContractionGraph() {
+  StaticGraph BuildStaticContractionGraph() {
     VertexID from = num_smaller_components_;
     VertexID to = num_smaller_components_ + num_local_components_ - 1;
 
@@ -489,7 +489,7 @@ class CAGBuilder {
     MPI_Allgather(&range, 1, MPI_COMP,
                   &vertex_dist[0], 1, MPI_COMP, MPI_COMM_WORLD);
 
-    StaticGraphAccess cg(rank_, size_);
+    StaticGraph cg(rank_, size_);
     cg.StartConstruct(num_local_components_,
                       number_of_ghost_vertices,
                       edges_.size(),
