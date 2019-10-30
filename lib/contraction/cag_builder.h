@@ -183,7 +183,7 @@ class CAGBuilder {
     ReceiveBuffers(largest_component, vertex_message);
 
     ApplyUpdatesToGhostVertices(largest_component, vertex_message);
-    WaitForRequests(requests);
+    CheckRequests(requests);
   }
 
   void IdentifyLargestInterfaceComponents() {
@@ -370,11 +370,11 @@ class CAGBuilder {
     });
   }
 
-  void WaitForRequests(std::vector<MPI_Request*>& requests) {
+  void CheckRequests(std::vector<MPI_Request*>& requests) {
     for (unsigned int i = 0; i < requests.size(); ++i) {
-      MPI_Status st{};
-      MPI_Wait(requests[i], &st);
-      // MPI_Request_free(requests[i]);
+      if (*requests[i] != MPI_REQUEST_NULL) {
+        MPI_Request_free(requests[i]);
+      }
     }
   }
 

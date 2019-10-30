@@ -357,7 +357,7 @@ class ShortcutPropagation {
     // Process remote requests
     // int flag;
     // shortcut_timer_.Restart();
-    // WaitForRequests(answer_requests);
+    // CheckRequests(answer_requests);
     // MPI_Barrier(MPI_COMM_WORLD);
     // VertexID probe_barrier = 0;
     // do {
@@ -466,9 +466,9 @@ class ShortcutPropagation {
 
       // Check if all ISend successful
       isend_done = true;
-      for (unsigned int i = 0; i < answer_requests.size(); ++i) {
+      for (unsigned int i = 0; i < update_requests.size(); ++i) {
         int SingleISendDone = 0;
-        MPI_Test(answer_requests[i], &SingleISendDone, &st);
+        MPI_Test(update_requests[i], &SingleISendDone, &st);
         isend_done &= SingleISendDone;
       }
     }
@@ -505,7 +505,7 @@ class ShortcutPropagation {
     }
 
 
-    // WaitForRequests(update_requests);
+    // CheckRequests(update_requests);
     // MPI_Barrier(MPI_COMM_WORLD);
     // std::vector<VertexID> receive_buffer;
     // VertexID probe_barrier = 0;
@@ -528,7 +528,7 @@ class ShortcutPropagation {
     //     if (st.MPI_TAG == 72 * size_ + rank_) {
     //       if (st.MPI_SOURCE == rank_) {
     //         std::cout << "[ERROR] R" << rank_ << " self message!" << std::endl;
-    //         exit(1);
+    //         exit(1)s;
     //       }
     //       for (const auto &request : message) {
     //         receive_buffer.emplace_back(request);
@@ -556,12 +556,21 @@ class ShortcutPropagation {
     if (rank_ == ROOT) std::cout << "[STATUS] |-- Resolving remote answers took " 
                                  << "[TIME] " << shortcut_timer_.Elapsed() << std::endl;
 
+    CheckRequests(answer_requests);
+    CheckRequests(update_requests);
   }
 
-  void WaitForRequests(std::vector<MPI_Request*>& requests) {
+  void CheckRequests(std::vector<MPI_Request*>& requests) {
+    unsigned int unresolved_requests = 0;
     for (unsigned int i = 0; i < requests.size(); ++i) {
-      MPI_Status st{};
-      MPI_Wait(requests[i], &st);
+      if (*requests[i] != MPI_REQUEST_NULL) {
+        MPI_Request_free(requests[i]);
+        unresolved_requests++;
+      }
+    }
+    if (unresolved_requests > 0) {
+      std::cerr << "R" << rank_ << " Error unresolved requests in shortcut propagation" << std::endl;
+      exit(0);
     }
   }
 
