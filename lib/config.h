@@ -32,6 +32,8 @@ struct Config {
 
   // Seed for the PRNG
   int seed{};
+  // Input type
+  std::string input_type;
   // Input filename
   std::string input_file;
   // Output filename

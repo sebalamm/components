@@ -459,6 +459,241 @@ class GraphIO {
     g.FinishConstruct();
   }
 
+  template<typename GraphOutputType>
+  static void ReadStaticFile(GraphOutputType &g, 
+                             Config &config, PEID rank,
+                             PEID size, const MPI_Comm &comm) {
+    std::string line;
+    std::string filename(config.input_file);
+
+    // open file for reading
+    std::ifstream in(filename.c_str());
+    if (!in) {
+      std::cerr << "Error opening " << filename << std::endl;
+      exit(0);
+    }
+
+    VertexID number_of_global_vertices = 0;
+    EdgeID number_of_global_edges = 0;
+
+    std::getline(in, line);
+    while (line[0] == '%') std::getline(in, line);
+
+    std::stringstream ss(line);
+    ss >> number_of_global_vertices;
+    ss >> number_of_global_edges;
+
+    config.n = number_of_global_vertices;
+    config.m = number_of_global_edges;
+
+    // Read the lines i*ceil(n/size) to (i+1)*floor(n/size) lines of that file
+    VertexID leftover_vertices = number_of_global_vertices % size;
+    VertexID number_of_local_vertices = (number_of_global_vertices / size)
+      + static_cast<VertexID>(rank < leftover_vertices);
+    VertexID from = (rank * number_of_local_vertices)
+      + static_cast<VertexID>(rank >= leftover_vertices ? leftover_vertices : 0);
+    VertexID to = from + number_of_local_vertices - 1;
+
+    // Add datatype
+    MPI_Datatype MPI_COMP;
+    MPI_Type_vector(1, 2, 0, MPI_VERTEX, &MPI_COMP);
+    MPI_Type_commit(&MPI_COMP);
+    
+    // Gather vertex distribution
+    std::pair<VertexID, VertexID> range(from, to + 1);
+    std::vector<std::pair<VertexID, VertexID>> vertex_dist(size);
+    MPI_Allgather(&range, 1, MPI_COMP,
+                  &vertex_dist[0], 1, MPI_COMP, comm);
+
+    std::vector<std::pair<VertexID, VertexID>> edge_list;
+    // google::dense_hash_set<VertexID> ghost_vertices; 
+    // ghost_vertices.set_empty_key(-1);
+    google::sparse_hash_set<VertexID> ghost_vertices; 
+
+    VertexID counter = 0;
+    VertexID vertex_counter = 0;
+
+    char *old_str, *new_str;
+    while (std::getline(in, line)) {
+      if (counter > to) break;
+      if (line[0] == '%') continue;
+
+      if (counter >= from) {
+        old_str = &line[0];
+        new_str = nullptr;
+
+        VertexID source = from + vertex_counter;
+        for (;;) {
+          VertexID target; 
+          target = (VertexID) strtol(old_str, &new_str, 10);
+          if (target == 0) break;
+          old_str = new_str;
+          // Decrement target to get proper range
+          target--;
+          // Add edges
+          edge_list.emplace_back(source, target);
+          // std::cout << "R" << rank << " e (" << source << "," << target << ")" << std::endl;
+          if (from > target || target > to) {
+            if (ghost_vertices.find(target) == end(ghost_vertices)) {
+                ghost_vertices.insert(target);
+            } 
+            // We need the backwards edge here
+            edge_list.emplace_back(target, source);
+          } 
+        }
+        vertex_counter++;
+      }
+      counter++;
+      if (in.eof()) break;
+    }
+
+    g.StartConstruct(number_of_local_vertices, 
+                     ghost_vertices.size(), 
+                     edge_list.size(),
+                     from); 
+    g.SetOffsetArray(std::move(vertex_dist));
+
+    // Initialize ghost vertices
+    for (auto &v : ghost_vertices) {
+      g.AddGhostVertex(v);
+    }
+
+    // Initialize local vertices
+    if constexpr (std::is_same<GraphOutputType, StaticGraphCommunicator>::value) {
+      for (VertexID v = 0; v < number_of_local_vertices; v++) {
+          g.SetVertexLabel(v, from + v);
+          g.SetVertexRoot(v, rank);
+      }
+    }
+
+    std::sort(edge_list.begin(), edge_list.end(), [&](auto &left, auto &right) {
+        VertexID lhs_source = g.GetLocalID(left.first);
+        VertexID lhs_target = g.GetLocalID(left.second);
+        VertexID rhs_source = g.GetLocalID(right.first);
+        VertexID rhs_target = g.GetLocalID(right.second);
+        return (lhs_source < rhs_source
+                  || (lhs_source == rhs_source && lhs_target < rhs_target));
+    });
+    for (auto &edge : edge_list) {
+      g.AddEdge(g.GetLocalID(edge.first), edge.second, size);
+    }
+
+    g.FinishConstruct();
+  }
+
+  template<typename GraphOutputType>
+  static void ReadDynamicFile(GraphOutputType &g,
+                              Config &config, PEID rank,
+                              PEID size, const MPI_Comm &comm) {
+    std::string line;
+    std::string filename(config.input_file);
+
+    // open file for reading
+    std::ifstream in(filename.c_str());
+    if (!in) {
+      std::cerr << "Error opening " << filename << std::endl;
+      exit(0);
+    }
+
+    VertexID number_of_global_vertices = 0;
+    EdgeID number_of_global_edges = 0;
+
+    std::getline(in, line);
+    while (line[0] == '%') std::getline(in, line);
+
+    std::stringstream ss(line);
+    ss >> number_of_global_vertices;
+    ss >> number_of_global_edges;
+
+    config.n = number_of_global_vertices;
+    config.m = number_of_global_edges;
+
+    // Read the lines i*ceil(n/size) to (i+1)*floor(n/size) lines of that file
+    VertexID leftover_vertices = number_of_global_vertices % size;
+    VertexID number_of_local_vertices = (number_of_global_vertices / size)
+      + static_cast<VertexID>(rank < leftover_vertices);
+    VertexID from = (rank * number_of_local_vertices)
+      + static_cast<VertexID>(rank >= leftover_vertices ? leftover_vertices : 0);
+    VertexID to = from + number_of_local_vertices - 1;
+
+    // Add datatype
+    MPI_Datatype MPI_COMP;
+    MPI_Type_vector(1, 2, 0, MPI_VERTEX, &MPI_COMP);
+    MPI_Type_commit(&MPI_COMP);
+
+    // Gather vertex distribution
+    std::pair<VertexID, VertexID> range(from, to + 1);
+    std::vector<std::pair<VertexID, VertexID>> vertex_dist(size);
+    MPI_Allgather(&range, 1, MPI_COMP,
+                  &vertex_dist[0], 1, MPI_COMP, comm);
+
+    std::vector<std::pair<VertexID, VertexID>> edge_list;
+    // google::dense_hash_set<VertexID> ghost_vertices; 
+    // ghost_vertices.set_empty_key(-1);
+    google::sparse_hash_set<VertexID> ghost_vertices; 
+
+    VertexID counter = 0;
+    VertexID vertex_counter = 0;
+
+    char *old_str, *new_str;
+    while (std::getline(in, line)) {
+      if (counter > to) break;
+      if (line[0] == '%') continue;
+
+      if (counter >= from) {
+        old_str = &line[0];
+        new_str = nullptr;
+
+        VertexID source = from + vertex_counter;
+        for (;;) {
+          VertexID target;
+          target = (VertexID) strtol(old_str, &new_str, 10);
+          if (target == 0) break;
+          old_str = new_str;
+          // Decrement target to get proper range
+          target--;
+          // Add edges
+          edge_list.emplace_back(source, target);
+          if (from > target || target > to) {
+            if (ghost_vertices.find(target) == end(ghost_vertices)) {
+                ghost_vertices.insert(target);
+            } 
+            // We need the backwards edge here
+            edge_list.emplace_back(target, source);
+          } 
+        }
+        vertex_counter++;
+      }
+      counter++;
+      if (in.eof()) break;
+    }
+
+    g.StartConstruct(number_of_local_vertices, 
+                     ghost_vertices.size(), 
+                     from);
+    g.SetOffsetArray(std::move(vertex_dist));
+
+    // Initialize local vertices
+    if constexpr (std::is_same<GraphOutputType, DynamicGraphCommunicator>::value) {
+      for (VertexID v = 0; v < number_of_local_vertices; v++) {
+          g.SetVertexLabel(v, from + v);
+          g.SetVertexRoot(v, rank);
+      }
+    }
+
+    // Initialize ghost vertices
+    // This will also set the payload
+    for (auto &v : ghost_vertices) {
+      g.AddGhostVertex(v);
+    }
+
+    for (auto &edge : edge_list) {
+      g.AddEdge(g.GetLocalID(edge.first), edge.second, size);
+    }
+
+    g.FinishConstruct();
+  }
+
   static long long GetFreePhysMem() {
     struct sysinfo memInfo;
     sysinfo (&memInfo);

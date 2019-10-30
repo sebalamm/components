@@ -34,7 +34,9 @@ void ParseParameters(int argn, char **argv,
   // RNG
   conf.seed = args.Get<int>("seed", 1);
 
+
   // I/O
+  conf.input_type = args.Get<std::string>("input", "file");
   conf.input_file = args.Get<std::string>("in", "null");
   conf.output_file = args.Get<std::string>("out", "out");
   conf.debug_output_file = args.Get<std::string>("debug_out", "tmp");

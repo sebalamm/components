@@ -49,8 +49,9 @@ int main(int argn, char **argv) {
 
   {
     StaticGraphCommunicator G(rank, size);
-    if (conf.input_file != "null") {
-      // File I/O
+    if (conf.input_type == "file") {
+      GraphIO::ReadStaticFile<StaticGraphCommunicator>(G, conf, rank, size, MPI_COMM_WORLD);
+    } else if (conf.input_type == "partition") {
       GraphIO::ReadStaticDistributedFile<StaticGraphCommunicator>(G, conf, rank, size, MPI_COMM_WORLD);
     } else if (conf.gen != "null") {
       // Generator I/O
@@ -123,8 +124,9 @@ int main(int argn, char **argv) {
   for (int i = 0; i < conf.iterations; ++i) {
     int round_seed = initial_seed + i + 1000;
     StaticGraphCommunicator G(rank, size);
-    if (conf.input_file != "null") {
-      // File I/O
+    if (conf.input_type == "file") {
+      GraphIO::ReadStaticFile<StaticGraphCommunicator>(G, conf, rank, size, MPI_COMM_WORLD);
+    } else if (conf.input_type == "partition") {
       GraphIO::ReadStaticDistributedFile<StaticGraphCommunicator>(G, conf, rank, size, MPI_COMM_WORLD);
     } else if (conf.gen != "null") {
       // Generator I/O
