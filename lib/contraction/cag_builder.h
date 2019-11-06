@@ -172,7 +172,8 @@ class CAGBuilder {
     AddComponentMessages();
 
     // Send ghost vertex updates O(cut size) (communication)
-    std::vector<MPI_Request*> requests = SendBuffers();
+    std::vector<MPI_Request> requests;
+    SendBuffers(requests);
 
     google::dense_hash_map<PEID, VertexID> largest_component; 
     google::dense_hash_map<VertexID, VertexID> vertex_message; 
@@ -261,8 +262,7 @@ class CAGBuilder {
     });
   }
 
-  std::vector<MPI_Request*> SendBuffers() {
-    std::vector<MPI_Request*> requests;
+  void SendBuffers(std::vector<MPI_Request> &requests) {
     requests.clear();
 
     for (PEID i = 0; i < size_; ++i) {
@@ -271,19 +271,13 @@ class CAGBuilder {
           vertex_buffers_[i].emplace_back(std::numeric_limits<VertexID>::max());
           vertex_buffers_[i].emplace_back(0);
         }
-        auto *req = new MPI_Request();
+        requests.emplace_back(MPI_Request());
         MPI_Isend(&vertex_buffers_[i][0],
                   static_cast<int>(vertex_buffers_[i].size()),
-                  MPI_VERTEX,
-                  i,
-                  i + 42 * size_,
-                  MPI_COMM_WORLD,
-                  req);
-        requests.emplace_back(req);
+                  MPI_VERTEX, i, i + 42 * size_,
+                  MPI_COMM_WORLD, &requests.back());
       };
     }
-
-    return requests;
   }
 
   void ReceiveBuffers(google::dense_hash_map<PEID, VertexID> & largest_component, 
@@ -370,10 +364,10 @@ class CAGBuilder {
     });
   }
 
-  void CheckRequests(std::vector<MPI_Request*>& requests) {
+  void CheckRequests(std::vector<MPI_Request> &requests) {
     for (unsigned int i = 0; i < requests.size(); ++i) {
-      if (*requests[i] != MPI_REQUEST_NULL) {
-        MPI_Request_free(requests[i]);
+      if (requests[i] != MPI_REQUEST_NULL) {
+        MPI_Request_free(&requests[i]);
       }
     }
   }

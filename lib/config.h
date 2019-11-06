@@ -55,6 +55,7 @@ struct Config {
   double beta{};
   // Contraction
   bool use_contraction;
+  bool direct_contraction;
   // Number of heavy hitters for shortcutting
   VertexID number_of_hitters;
   // Generator

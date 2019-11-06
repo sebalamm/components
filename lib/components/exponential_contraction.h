@@ -371,7 +371,11 @@ class ExponentialContraction {
     if (rank_ == ROOT) std::cout << "done shortcutting... mem " << GetFreePhysMem() << std::endl;
 
     contraction_timer_.Restart();
-    exp_contraction_->ExponentialContraction();
+    if (config_.direct_contraction) {
+      exp_contraction_->DirectContraction();
+    } else {
+      exp_contraction_->ExponentialContraction();
+    }
     if (rank_ == ROOT) {
       std::cout << "[STATUS] |-- Exponential contraction took " 
                 << "[TIME] " << contraction_timer_.Elapsed() << std::endl;

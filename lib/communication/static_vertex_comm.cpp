@@ -90,8 +90,8 @@ void StaticVertexCommunicator::ReceiveMessages() {
     // if (rank_ == 11) std::cout << "done" << std::endl;
   }
   for (unsigned int i = 0; i < isend_requests_.size(); ++i) {
-    if (*isend_requests_[i] != MPI_REQUEST_NULL) {
-      MPI_Request_free(isend_requests_[i]);
+    if (isend_requests_[i] != MPI_REQUEST_NULL) {
+      MPI_Request_free(&isend_requests_[i]);
     }
   }
   isend_requests_.clear();

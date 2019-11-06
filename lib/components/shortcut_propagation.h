@@ -240,27 +240,20 @@ class ShortcutPropagation {
                                  << "[TIME] " << shortcut_timer_.Elapsed() << std::endl;
 
     // Send updates and requests
-    std::vector<MPI_Request*> answer_requests;
-    std::vector<MPI_Request*> update_requests;
-    answer_requests.clear();
-    update_requests.clear();
-
-    shortcut_timer_.Restart();
+    int num_requests = 0;
     for (PEID i = 0; i < size_; ++i) {
       if (i == rank_) continue;
-      // if (update_buffers[i].size() > 0) {
-      //   auto *req = new MPI_Request();
-      //   MPI_Isend(&update_buffers[i][0], update_buffers[i].size(), MPI_LABEL_UPDATE, i, 
-      //             72 * size_ + i, MPI_COMM_WORLD, req);
-      //   update_requests.emplace_back(req);
-      // }
+      if (request_buffers[i].size() > 0) num_requests++;
+    }
+    std::vector<MPI_Request> answer_requests(num_requests);
 
+    shortcut_timer_.Restart();
+    int req = 0;
+    for (PEID i = 0; i < size_; ++i) {
+      if (i == rank_) continue;
       if (request_buffers[i].size() > 0) {
-        auto *req = new MPI_Request();
-        MPI_Isend(&request_buffers[i][0], request_buffers[i].size(), MPI_VERTEX, i, 
-                  7 * size_ + i, MPI_COMM_WORLD, req);
-        // std::cout << "R" << rank_ << " send message to " << i << " length " << request_buffers[i].size() << std::endl;
-        answer_requests.emplace_back(req);
+        MPI_Issend(request_buffers[i].data(), request_buffers[i].size(), MPI_VERTEX, i, 
+                   7 * size_ + i, MPI_COMM_WORLD, &answer_requests[req++]);
       }
     }
 
@@ -281,8 +274,9 @@ class ShortcutPropagation {
                                  << "[TIME] " << shortcut_timer_.Elapsed() << std::endl;
 
     shortcut_timer_.Restart();
-    bool isend_done = false;
-    while(!isend_done) {
+    std::vector<MPI_Status> statuses(num_requests);
+    int isend_done = 0;
+    while(isend_done == 0) {
       // Check for messages
       int iprobe_success = 0;
       MPI_Status st{};
@@ -300,29 +294,24 @@ class ShortcutPropagation {
             std::cout << "[ERROR] R" << rank_ << " self message!" << std::endl;
             exit(1);
           }
-          for (const VertexID &request : message) {
-            // answers[st.MPI_SOURCE].emplace_back(request, g.GetVertexLabel(g.GetLocalID(request)), g.GetVertexRoot(g.GetLocalID(request)));
-            update_buffers[st.MPI_SOURCE].emplace_back(request);
-            update_buffers[st.MPI_SOURCE].emplace_back(g.GetVertexLabel(g.GetLocalID(request)));
-            update_buffers[st.MPI_SOURCE].emplace_back(g.GetVertexRoot(g.GetLocalID(request)));
+          for (const VertexID &m : message) {
+            update_buffers[st.MPI_SOURCE].emplace_back(m);
+            update_buffers[st.MPI_SOURCE].emplace_back(g.GetVertexLabel(g.GetLocalID(m)));
+            update_buffers[st.MPI_SOURCE].emplace_back(g.GetVertexRoot(g.GetLocalID(m)));
           }
         } else std::cout << "Unexpected tag." << std::endl;
       }
 
       // Check if all ISend successful
-      isend_done = true;
-      for (unsigned int i = 0; i < answer_requests.size(); ++i) {
-        int SingleISendDone = 0;
-        MPI_Test(answer_requests[i], &SingleISendDone, &st);
-        isend_done &= SingleISendDone;
-      }
+      isend_done = 0;
+      MPI_Testall(num_requests, answer_requests.data(), &isend_done, statuses.data());
     }
 
     MPI_Request barrier_request;
     MPI_Ibarrier(MPI_COMM_WORLD, &barrier_request);
 
     int ibarrier_done = 0;
-    while(!ibarrier_done) {
+    while(ibarrier_done == 0) {
       // Check for messages
       int iprobe_success = 0;
       MPI_Status st{};
@@ -340,78 +329,39 @@ class ShortcutPropagation {
             std::cout << "[ERROR] R" << rank_ << " self message!" << std::endl;
             exit(1);
           }
-          for (const VertexID &request : message) {
-            // answers[st.MPI_SOURCE].emplace_back(request, g.GetVertexLabel(g.GetLocalID(request)), g.GetVertexRoot(g.GetLocalID(request)));
-            update_buffers[st.MPI_SOURCE].emplace_back(request);
-            update_buffers[st.MPI_SOURCE].emplace_back(g.GetVertexLabel(g.GetLocalID(request)));
-            update_buffers[st.MPI_SOURCE].emplace_back(g.GetVertexRoot(g.GetLocalID(request)));
+          for (const VertexID &m : message) {
+            update_buffers[st.MPI_SOURCE].emplace_back(m);
+            update_buffers[st.MPI_SOURCE].emplace_back(g.GetVertexLabel(g.GetLocalID(m)));
+            update_buffers[st.MPI_SOURCE].emplace_back(g.GetVertexRoot(g.GetLocalID(m)));
           }
         } else std::cout << "Unexpected tag." << std::endl;
       }
 
       // Check if all reached Ibarrier
-      MPI_Test(&barrier_request, &ibarrier_done, &st);
+      MPI_Status tst{};
+      MPI_Test(&barrier_request, &ibarrier_done, &tst);
     }
-
-
-    // Process remote requests
-    // int flag;
-    // shortcut_timer_.Restart();
-    // CheckRequests(answer_requests);
-    // MPI_Barrier(MPI_COMM_WORLD);
-    // VertexID probe_barrier = 0;
-    // do {
-    //   flag = 0;
-    //   MPI_Status st{};
-    //   // Probe for requests
-    //   MPI_Iprobe(MPI_ANY_SOURCE, 7 * size_ + rank_, MPI_COMM_WORLD, &flag, &st);
-    //   if (flag) {
-    //     int message_length;
-    //     MPI_Get_count(&st, MPI_VERTEX, &message_length);
-    //     std::vector<VertexID> message(message_length);
-    //     MPI_Status rst{};
-    //     MPI_Recv(&message[0], message_length, MPI_VERTEX, st.MPI_SOURCE,
-    //              st.MPI_TAG, MPI_COMM_WORLD, &rst);
-    //     // Request
-    //     if (st.MPI_TAG == 7 * size_ + rank_) {
-    //       if (st.MPI_SOURCE == rank_) {
-    //         std::cout << "[ERROR] R" << rank_ << " self message!" << std::endl;
-    //         exit(1);
-    //       }
-    //       for (const VertexID &request : message) {
-    //         // answers[st.MPI_SOURCE].emplace_back(request, g.GetVertexLabel(g.GetLocalID(request)), g.GetVertexRoot(g.GetLocalID(request)));
-    //         update_buffers[st.MPI_SOURCE].emplace_back(request);
-    //         update_buffers[st.MPI_SOURCE].emplace_back(g.GetVertexLabel(g.GetLocalID(request)));
-    //         update_buffers[st.MPI_SOURCE].emplace_back(g.GetVertexRoot(g.GetLocalID(request)));
-    //       }
-    //     } else std::cout << "Unexpected tag." << std::endl;
-    //   } else {
-    //     probe_barrier++;
-    //   }
-    // } while (probe_barrier < 100);
 
     if (rank_ == ROOT) std::cout << "[STATUS] |-- Resolving remote requests took " 
                                  << "[TIME] " << shortcut_timer_.Elapsed() << std::endl;
 
+    num_requests = 0;
+    for (PEID i = 0; i < size_; ++i) {
+      if (i == rank_) continue;
+      if (update_buffers[i].size() > 0) num_requests++;
+    }
+    std::vector<MPI_Request> update_requests(num_requests);
+
     shortcut_timer_.Restart();
+    statuses.resize(num_requests);
+    req = 0;
     for (PEID i = 0; i < size_; ++i) {
       if (i == rank_) continue;
       if (update_buffers[i].size() > 0) {
-        auto *req = new MPI_Request();
-        MPI_Isend(&update_buffers[i][0], update_buffers[i].size(), MPI_VERTEX, i, 
-                  72 * size_ + i, MPI_COMM_WORLD, req);
-        update_requests.emplace_back(req);
+        MPI_Issend(update_buffers[i].data(), update_buffers[i].size(), MPI_VERTEX, i, 
+                   72 * size_ + i, MPI_COMM_WORLD, &update_requests[req++]);
       }
     }
-
-    // for (PEID i = 0; i < size_; ++i) {
-    //   if (i == rank_) continue;
-    //   if (answers[i].size() > 0) {
-    //     auto *req = new MPI_Request();
-    //     MPI_Isend(&answers[i][0], answers[i].size(), MPI_LABEL_UPDATE, i, 72 * size_ + i, MPI_COMM_WORLD, req);
-    //     update_requests.emplace_back(req);
-    //   }
-    // }
 
     if (rank_ == ROOT) std::cout << "[STATUS] |-- Sending updates/answers took " 
                                  << "[TIME] " << shortcut_timer_.Elapsed() << std::endl;
@@ -439,7 +389,7 @@ class ShortcutPropagation {
     // Process remote answers
     shortcut_timer_.Restart();
     std::vector<VertexID> receive_buffer;
-    isend_done = false;
+    isend_done = 0;
     while(!isend_done) {
       // Check for messages
       int iprobe_success = 0;
@@ -458,19 +408,15 @@ class ShortcutPropagation {
             std::cout << "[ERROR] R" << rank_ << " self message!" << std::endl;
             exit(1);
           }
-          for (const auto &request : message) {
-            receive_buffer.emplace_back(request);
+          for (const auto &m : message) {
+            receive_buffer.emplace_back(m);
           }
         } else std::cout << "Unexpected tag." << std::endl;
       }
 
       // Check if all ISend successful
-      isend_done = true;
-      for (unsigned int i = 0; i < update_requests.size(); ++i) {
-        int SingleISendDone = 0;
-        MPI_Test(update_requests[i], &SingleISendDone, &st);
-        isend_done &= SingleISendDone;
-      }
+      isend_done = 0;
+      MPI_Testall(num_requests, update_requests.data(), &isend_done, statuses.data());
     }
 
     MPI_Ibarrier(MPI_COMM_WORLD, &barrier_request);
@@ -501,45 +447,9 @@ class ShortcutPropagation {
       }
 
       // Check if all reached Ibarrier
-      MPI_Test(&barrier_request, &ibarrier_done, &st);
+      MPI_Status tst{};
+      MPI_Test(&barrier_request, &ibarrier_done, &tst);
     }
-
-
-    // CheckRequests(update_requests);
-    // MPI_Barrier(MPI_COMM_WORLD);
-    // std::vector<VertexID> receive_buffer;
-    // VertexID probe_barrier = 0;
-    // int flag = 0;
-    // do {
-    //   flag = 0;
-    //   MPI_Status st{};
-    //   // Probe for updates
-    //   MPI_Iprobe(MPI_ANY_SOURCE, 72 * size_ + rank_, MPI_COMM_WORLD, &flag, &st);
-    //   if (flag) {
-    //     int message_length;
-    //     MPI_Get_count(&st, MPI_VERTEX, &message_length);
-    //     if (iteration_ == 18) std::cout << "R" << rank_ << " try recv from " << st.MPI_SOURCE << " length " << message_length << std::endl;
-    //     std::vector<VertexID> message(message_length);
-    //     MPI_Status rst{};
-    //     MPI_Recv(&message[0], message_length, MPI_VERTEX, st.MPI_SOURCE,
-    //              st.MPI_TAG, MPI_COMM_WORLD, &rst);
-    //     if (iteration_ == 18) std::cout << "R" << rank_ << " finished recv from " << st.MPI_SOURCE << " length " << message_length << std::endl;
-    //     // Updates
-    //     if (st.MPI_TAG == 72 * size_ + rank_) {
-    //       if (st.MPI_SOURCE == rank_) {
-    //         std::cout << "[ERROR] R" << rank_ << " self message!" << std::endl;
-    //         exit(1)s;
-    //       }
-    //       for (const auto &request : message) {
-    //         receive_buffer.emplace_back(request);
-    //       }
-    //     } else std::cout << "Unexpected tag." << std::endl;
-    //     if (iteration_ == 18) std::cout << "R" << rank_ << " processed recv from " << st.MPI_SOURCE << " length " << message_length << std::endl;
-    //   } else {
-    //     probe_barrier++;
-    //   }
-    // } while (probe_barrier < 100);
-    // MPI_Barrier(MPI_COMM_WORLD);
 
     for (VertexID i = 0; i < receive_buffer.size(); i += 3) {
       const VertexID target = receive_buffer[i];
@@ -560,11 +470,11 @@ class ShortcutPropagation {
     CheckRequests(update_requests);
   }
 
-  void CheckRequests(std::vector<MPI_Request*>& requests) {
+  void CheckRequests(std::vector<MPI_Request> &requests) {
     unsigned int unresolved_requests = 0;
     for (unsigned int i = 0; i < requests.size(); ++i) {
-      if (*requests[i] != MPI_REQUEST_NULL) {
-        MPI_Request_free(requests[i]);
+      if (requests[i] != MPI_REQUEST_NULL) {
+        MPI_Request_free(&requests[i]);
         unresolved_requests++;
       }
     }

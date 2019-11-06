@@ -97,7 +97,7 @@ class DynamicVertexCommunicator {
   std::vector<Buffer> *current_send_buffers_;
   std::vector<Buffer> send_buffers_a_;
   std::vector<Buffer> send_buffers_b_;
-  std::vector<MPI_Request *> isend_requests_;
+  std::vector<MPI_Request> isend_requests_;
 
   unsigned int send_tag_;
   unsigned int recv_tag_;
@@ -112,28 +112,11 @@ class DynamicVertexCommunicator {
           (*current_send_buffers_)[pe].emplace_back(0);
           (*current_send_buffers_)[pe].emplace_back(0);
         }
-        auto *request = new MPI_Request();
-        MPI_Isend(&(*current_send_buffers_)[pe][0],
+        isend_requests_.emplace_back(MPI_Request());
+        MPI_Isend((*current_send_buffers_)[pe].data(),
                   static_cast<int>((*current_send_buffers_)[pe].size()),
                   MPI_VERTEX, pe,
-                  send_tag_, communicator_, request);
-
-        // if ((*current_send_buffers_)[pe].size() > 1) {
-        //   std::cout << "[INFO] [R" << rank_ 
-        //             << "] send " << (*current_send_buffers_)[pe].size()/4 
-        //             << " messages to " << pe 
-        //             << " with tag " << send_tag_ << std::endl;
-        //   for (int i = 0; i < (*current_send_buffers_)[pe].size() - 1; i += 4) {
-        //     std::cout << "[R" << rank_ << "] send [" << (*current_send_buffers_)[pe][i]
-        //               << "]("
-        //               << (*current_send_buffers_)[pe][i + 1] << ","
-        //               << (*current_send_buffers_)[pe][i + 2] << ","
-        //               << (*current_send_buffers_)[pe][i + 3] << ") to pe "
-        //               << pe << " with tag " << send_tag_ << " length "
-        //               << (*current_send_buffers_)[pe].size() << std::endl;
-        //   }
-        // }
-        isend_requests_.push_back(request);
+                  send_tag_, communicator_, &isend_requests_.back());
       }
     }
   }
