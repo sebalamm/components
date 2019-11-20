@@ -291,3 +291,8 @@ void StaticGraphCommunicator::OutputComponents(std::vector<VertexID> &labels) {
   }
 }
 
+float StaticGraphCommunicator::GetCommTime() {
+  return comm_time_ + ghost_comm_->GetCommTime();
+}
+
+

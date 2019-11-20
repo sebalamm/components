@@ -316,3 +316,7 @@ void DynamicGraphCommunicator::OutputComponents(std::vector<VertexID> &labels) {
   }
 }
 
+float DynamicGraphCommunicator::GetCommTime() {
+  return comm_time_ + ghost_comm_->GetCommTime();
+}
+
