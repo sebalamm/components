@@ -95,7 +95,7 @@ class DynamicGraph {
       vertex_counter_(0),
       edge_counter_(0),
       ghost_counter_(0),
-      comm_time_(.0) {
+      comm_time_(0.0) {
     label_shortcut_.set_empty_key(-1);
     global_to_local_map_.set_empty_key(-1);
   }

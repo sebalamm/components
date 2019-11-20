@@ -45,7 +45,7 @@ class ExponentialContraction {
         size_(size),
         config_(conf),
         iteration_(0),
-        comm_time_(.0) { }
+        comm_time_(0.0) { }
 
   virtual ~ExponentialContraction() {
     delete exp_contraction_;

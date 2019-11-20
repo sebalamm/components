@@ -40,7 +40,7 @@ class StaticVertexCommunicator {
         g_(nullptr),
         rank_(rank),
         size_(size),
-        comm_time_(.0) {
+        comm_time_(0.0) {
     packed_pes_.resize(static_cast<unsigned long>(size_), false);
     adjacent_pes_.resize(static_cast<unsigned long>(size_), false);
     send_buffers_a_.resize(static_cast<unsigned long>(size_));

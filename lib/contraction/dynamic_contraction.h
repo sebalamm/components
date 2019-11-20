@@ -38,7 +38,7 @@ class DynamicContraction {
         rank_(rank), 
         size_(size),
         contraction_level_(0),
-        comm_time_(.0) { 
+        comm_time_(0.0) { 
     inactive_level_.resize(g_.GetNumberOfVertices(), -1);
   }
   virtual ~DynamicContraction() = default;
