@@ -474,7 +474,7 @@ class DynamicGraphCommunicator {
   void Logging(bool active);
 
   float GetCommTime() {
-    return comm_time_;
+    return comm_time_ + ghost_comm_->GetCommTime();
   }
 
  private:
