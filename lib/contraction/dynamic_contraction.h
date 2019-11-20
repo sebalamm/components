@@ -37,7 +37,8 @@ class DynamicContraction {
       : g_(g), 
         rank_(rank), 
         size_(size),
-        contraction_level_(0) { 
+        contraction_level_(0),
+        comm_time_(.0) { 
     inactive_level_.resize(g_.GetNumberOfVertices(), -1);
   }
   virtual ~DynamicContraction() = default;
@@ -104,9 +105,11 @@ class DynamicContraction {
     while (converged_globally == 0) {
 
       contraction_timer_.Restart();
+      comm_timer_.Restart();
       SendMessages(is_adj, current_send_buffers, requests);
       ReceiveMessages(num_adj, requests, current_send_buffers, receive_buffers);
       SwapBuffers(current_send_buffers, send_buffers_a, send_buffers_b);
+      comm_time_ += comm_timer_.Elapsed();
 
       std::cout << "[STATUS] |---- R" << rank_ << " Message exchange took " 
                 << "[TIME] " << contraction_timer_.Elapsed() << std::endl;
@@ -123,12 +126,14 @@ class DynamicContraction {
       // Check if all PEs are done
       // if (++local_iterations % 6 == 0) {
       contraction_timer_.Restart();
+      comm_timer_.Restart();
       MPI_Allreduce(&converged_locally,
                     &converged_globally,
                     1,
                     MPI_INT,
                     MPI_MIN,
                     MPI_COMM_WORLD);
+      comm_time_ += comm_timer_.Elapsed();
       // } 
       local_iterations++;
         std::cout << "[STATUS] |---- R" << rank_ << " Convergence test took " 
@@ -205,6 +210,7 @@ class DynamicContraction {
     // Propagate edge buffers until all vertices are converged
     int num_requests = 0;
 
+    comm_timer_.Restart();
     for (PEID pe = 0; pe < size_; ++pe) {
       if (send_buffers[pe].size() > 0) num_requests++; 
     }
@@ -282,6 +288,7 @@ class DynamicContraction {
         exit(1);
       }
     }
+    comm_time_ += comm_timer_.Elapsed();
 
     for (PEID pe = 0; pe < size_; ++pe) {
       if (receive_buffers[pe].size() < 3) continue;
@@ -390,21 +397,25 @@ class DynamicContraction {
     int converged_globally = 0;
     int local_iterations = 0;
     while (converged_globally == 0) {
+      comm_timer_.Restart();
       SendMessages(is_adj, current_send_buffers, requests);
       ReceiveMessages(num_adj, requests, current_send_buffers, receive_buffers);
       SwapBuffers(current_send_buffers, send_buffers_a, send_buffers_b);
+      comm_time_ += comm_timer_.Elapsed();
 
       int converged_locally = ProcessLocalMessages(num_global_vertices, inserted_edges, edges_to_add, 
                                                    send_ids, receive_buffers, current_send_buffers);
 
 
       // Check if all PEs are done
+      comm_timer_.Restart();
       MPI_Allreduce(&converged_locally,
                     &converged_globally,
                     1,
                     MPI_INT,
                     MPI_MIN,
                     MPI_COMM_WORLD);
+      comm_time_ += comm_timer_.Elapsed();
       local_iterations++;
     }
     if (rank_ == ROOT) 
@@ -861,12 +872,14 @@ class DynamicContraction {
 
         contraction_timer_.Restart();
         // Check if all PEs are done
+        comm_timer_.Restart();
         MPI_Allreduce(&converged_locally,
                       &converged_globally,
                       1,
                       MPI_INT,
                       MPI_MIN,
                       MPI_COMM_WORLD);
+        comm_time_ += comm_timer_.Elapsed();
         if (rank_ == ROOT) {
           std::cout << "[status] |--- Convergence test took " 
                     << "[time] " << contraction_timer_.Elapsed() << std::endl;
@@ -894,6 +907,10 @@ class DynamicContraction {
     }
   }
 
+  float GetCommTime() {
+    return comm_time_;
+  }
+
  private:
   // Original graph instance
   DynamicGraphCommunicator &g_;
@@ -907,7 +924,9 @@ class DynamicContraction {
   std::vector<short> inactive_level_;
 
   // Statistics
+  float comm_time_;
   Timer contraction_timer_;
+  Timer comm_timer_;
   VertexID edge_counter_;
 };
 

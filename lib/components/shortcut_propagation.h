@@ -32,7 +32,6 @@
 #include "graph_io.h"
 #include "cag_builder.h"
 #include "utils.h"
-#include "union_find.h"
 #include "dynamic_graph_comm.h"
 #include "static_graph_comm.h"
 

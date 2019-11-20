@@ -39,7 +39,8 @@ class DynamicVertexCommunicator {
       : communicator_(communicator),
         g_(nullptr),
         rank_(rank),
-        size_(size) {
+        size_(size),
+        comm_time_(.0) {
     packed_pes_.resize(static_cast<unsigned long>(size_), false);
     adjacent_pes_.resize(static_cast<unsigned long>(size_), false);
     send_buffers_a_.resize(static_cast<unsigned long>(size_));
@@ -75,16 +76,25 @@ class DynamicVertexCommunicator {
   void AddMessage(VertexID v, const VertexPayload &msg);
 
   void ReceiveAndSendGhostVertices() {
+    comm_timer_.Restart();
     if (send_tag_ > 100 * size_) ReceiveMessages();
     SendMessages();
     ClearAndSwitchBuffers();
+    comm_time_ += comm_timer_.Elapsed();
   }
 
   void SendAndReceiveGhostVertices() {
+    comm_timer_.Restart();
     SendMessages();
     ReceiveMessages();
     ClearAndSwitchBuffers();
+    comm_time_ += comm_timer_.Elapsed();
   }
+
+  float GetCommTime() {
+    return comm_time_;
+  }
+
 
  private:
   MPI_Comm communicator_;
@@ -101,6 +111,9 @@ class DynamicVertexCommunicator {
 
   unsigned int send_tag_;
   unsigned int recv_tag_;
+
+  float comm_time_;
+  Timer comm_timer_;
 
   void SendMessages() {
     send_tag_++;

@@ -262,12 +262,14 @@ class StaticGraphCommunicator {
     VertexID local_vertices = 0;
     ForallLocalVertices([&](const VertexID v) { local_vertices++; });
     // Check if all PEs are done
+    comm_timer_.Restart();
     MPI_Allreduce(&local_vertices,
                   &number_of_global_vertices_,
                   1,
                   MPI_VERTEX,
                   MPI_SUM,
                   MPI_COMM_WORLD);
+    comm_time_ += comm_timer_.Elapsed();
     return number_of_global_vertices_;
   }
 
@@ -277,12 +279,14 @@ class StaticGraphCommunicator {
         ForallNeighbors(v, [&](const VertexID w) { local_edges++; });
     });
     // Check if all PEs are done
+    comm_timer_.Restart();
     MPI_Allreduce(&local_edges,
                   &number_of_global_edges_,
                   1,
                   MPI_VERTEX,
                   MPI_SUM,
                   MPI_COMM_WORLD);
+    comm_time_ += comm_timer_.Elapsed();
     number_of_global_edges_ /= 2;
     return number_of_global_edges_;
   }
@@ -419,6 +423,10 @@ class StaticGraphCommunicator {
 
   void Logging(bool active);
 
+  float GetCommTime() {
+    return comm_time_;
+  }
+
  private:
   // Network information
   PEID rank_, size_;
@@ -463,6 +471,10 @@ class StaticGraphCommunicator {
   EdgeID edge_counter_;
   VertexID ghost_counter_;
   VertexID last_source_;
+
+  // Statistics
+  float comm_time_;
+  Timer comm_timer_;
 };
 
 #endif

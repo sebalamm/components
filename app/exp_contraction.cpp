@@ -121,6 +121,7 @@ int main(int argn, char **argv) {
   // ACTUAL RUN
   if (rank == ROOT) std::cout << "BENCH RUN" << std::endl;
   Statistics stats;
+  Statistics comm_stats;
   
   for (int i = 0; i < conf.iterations; ++i) {
     int round_seed = initial_seed + i + 1000;
@@ -200,8 +201,8 @@ int main(int argn, char **argv) {
     }
 
     Timer t;
-    double local_time = 0.0;
-    double total_time = 0.0;
+    float local_time = 0.0;
+    float total_time = 0.0;
 
     std::vector<VertexID> labels(G.GetNumberOfVertices(), 0);
     G.ForallLocalVertices([&](const VertexID v) {
@@ -215,9 +216,16 @@ int main(int argn, char **argv) {
 
     // Gather total time
     local_time = t.Elapsed();
-    MPI_Reduce(&local_time, &total_time, 1, MPI_DOUBLE, MPI_MAX, ROOT,
+    MPI_Reduce(&local_time, &total_time, 1, MPI_FLOAT, MPI_MAX, ROOT,
                MPI_COMM_WORLD);
     if (rank == ROOT) stats.Push(total_time);
+
+    // Gather comm time
+    float comm_time = comp.GetCommTime();
+    float total_comm_time = 0.0;
+    MPI_Reduce(&comm_time, &total_comm_time, 1, MPI_FLOAT, MPI_MAX, ROOT,
+               MPI_COMM_WORLD);
+    if (rank == ROOT) comm_stats.Push(total_comm_time);
     
     // Print labels
     G.OutputComponents(labels);
@@ -226,6 +234,7 @@ int main(int argn, char **argv) {
   if (rank == ROOT) {
     std::cout << "RESULT runner=exp"
               << " time=" << stats.Avg() << " stddev=" << stats.Stddev()
+              << " comm_time=" << comm_stats.Avg() << " stddev=" << comm_stats.Stddev()
               << " iterations=" << conf.iterations << std::endl;
   }
 

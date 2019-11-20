@@ -34,8 +34,6 @@
 #include "cag_builder.h"
 #include "dynamic_contraction.h"
 #include "utils.h"
-#include "union_find.h"
-#include "propagation.h"
 #include "all_reduce.h"
 
 class LocalContraction {

@@ -40,7 +40,8 @@ class CAGBuilder {
         num_smaller_components_(0),
         num_local_components_(0),
         num_global_components_(0),
-        vertex_buffers_(size) {
+        vertex_buffers_(size),
+        comm_time_(0.0) {
     local_components_.set_empty_key(-1);
     offset_ = g_.GatherNumberOfGlobalVertices();
   }
@@ -54,6 +55,10 @@ class CAGBuilder {
   StaticGraph BuildStaticComponentAdjacencyGraph() {
     PerformContraction();
     return BuildStaticContractionGraph();
+  }
+
+  float GetCommTime() {
+    return comm_time_;
   }
 
  private:
@@ -83,11 +88,15 @@ class CAGBuilder {
   std::vector<bool> received_message_;
 
   // Statistics
+  float comm_time_;
   Timer contraction_timer_;
+  Timer comm_timer_;
 
   void PerformContraction() {
     contraction_timer_.Restart();
+    comm_timer_.Restart();
     ComputeComponentPrefixSum();
+    comm_time_ += comm_timer_.Elapsed();
     if (rank_ == ROOT) {
       std::cout << "[STATUS] |-- Computing component prefix sum took " 
                 << "[TIME] " << contraction_timer_.Elapsed() << std::endl;
@@ -172,6 +181,7 @@ class CAGBuilder {
     AddComponentMessages();
 
     // Send ghost vertex updates O(cut size) (communication)
+    comm_timer_.Restart();
     std::vector<MPI_Request> requests;
     SendBuffers(requests);
 
@@ -182,9 +192,12 @@ class CAGBuilder {
 
     received_message_.resize(g_.GetNumberOfVertices(), false);
     ReceiveBuffers(largest_component, vertex_message);
+    comm_time_ += comm_timer_.Elapsed();
 
     ApplyUpdatesToGhostVertices(largest_component, vertex_message);
+    comm_timer_.Restart();
     CheckRequests(requests);
+    comm_time_ += comm_timer_.Elapsed();
   }
 
   void IdentifyLargestInterfaceComponents() {
@@ -413,6 +426,7 @@ class CAGBuilder {
     VertexID number_of_edges = edges_.size();
 
     // Add datatype
+    comm_timer_.Restart();
     MPI_Datatype MPI_COMP;
     MPI_Type_vector(1, 2, 0, MPI_VERTEX, &MPI_COMP);
     MPI_Type_commit(&MPI_COMP);
@@ -422,6 +436,7 @@ class CAGBuilder {
     std::vector<std::pair<VertexID, VertexID>> vertex_dist(size_);
     MPI_Allgather(&range, 1, MPI_COMP,
                   &vertex_dist[0], 1, MPI_COMP, MPI_COMM_WORLD);
+    comm_time_ += comm_timer_.Elapsed();
 
     DynamicGraphCommunicator cg(rank_, size_);
     cg.StartConstruct(num_local_components_,
@@ -473,6 +488,7 @@ class CAGBuilder {
     VertexID number_of_edges = edges_.size();
 
     // Add datatype
+    comm_timer_.Restart();
     MPI_Datatype MPI_COMP;
     MPI_Type_vector(1, 2, 0, MPI_VERTEX, &MPI_COMP);
     MPI_Type_commit(&MPI_COMP);
@@ -482,6 +498,7 @@ class CAGBuilder {
     std::vector<std::pair<VertexID, VertexID>> vertex_dist(size_);
     MPI_Allgather(&range, 1, MPI_COMP,
                   &vertex_dist[0], 1, MPI_COMP, MPI_COMM_WORLD);
+    comm_time_ += comm_timer_.Elapsed();
 
     StaticGraph cg(rank_, size_);
     cg.StartConstruct(num_local_components_,

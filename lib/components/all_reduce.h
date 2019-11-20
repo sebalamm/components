@@ -31,13 +31,8 @@
 #include "config.h"
 #include "definitions.h"
 #include "graph_io.h"
-#include "dynamic_graph_comm.h"
-#include "static_graph.h"
 #include "cag_builder.h"
-#include "dynamic_contraction.h"
 #include "utils.h"
-#include "union_find.h"
-#include "propagation.h"
 
 template <typename GraphType>
 class AllReduce {

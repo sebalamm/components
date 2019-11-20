@@ -21,7 +21,8 @@ StaticGraphCommunicator::StaticGraphCommunicator(const PEID rank, const PEID siz
       vertex_counter_(0),
       edge_counter_(0),
       ghost_counter_(0),
-      last_source_(0) {
+      last_source_(0),
+      comm_time_(.0) {
   ghost_comm_ = new StaticVertexCommunicator(rank_, size_, MPI_COMM_WORLD);
   ghost_comm_->SetGraph(this);
   global_to_local_map_.set_empty_key(-1);

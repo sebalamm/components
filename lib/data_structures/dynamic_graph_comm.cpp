@@ -20,7 +20,8 @@ DynamicGraphCommunicator::DynamicGraphCommunicator(const PEID rank, const PEID s
       ghost_comm_(nullptr),
       vertex_counter_(0),
       edge_counter_(0),
-      ghost_counter_(0) {
+      ghost_counter_(0),
+      comm_time_(.0) {
   ghost_comm_ = new DynamicVertexCommunicator(rank_, size_, MPI_COMM_WORLD);
   ghost_comm_->SetGraph(this);
   label_shortcut_.set_empty_key(-1);

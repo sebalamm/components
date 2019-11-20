@@ -1,6 +1,6 @@
 /******************************************************************************
  * components.h *
- * Distributed computation of connected components
+ * Distributed computation of connected components;
  ******************************************************************************
  * Copyright (C) 2017 Sebastian Lamm <lamm@kit.edu>
  *
@@ -36,8 +36,6 @@
 #include "cag_builder.h"
 #include "dynamic_contraction.h"
 #include "utils.h"
-#include "union_find.h"
-#include "propagation.h"
 #include "all_reduce.h"
 
 class ExponentialContraction {
@@ -46,7 +44,8 @@ class ExponentialContraction {
       : rank_(rank),
         size_(size),
         config_(conf),
-        iteration_(0) { }
+        iteration_(0),
+        comm_time_(.0) { }
 
   virtual ~ExponentialContraction() {
     delete exp_contraction_;
@@ -111,6 +110,9 @@ class ExponentialContraction {
 
       ApplyToLocalComponents(ccag, cag, cag_labels);
       ApplyToLocalComponents(cag, cag_labels, g, g_labels);
+      comm_time_ += first_contraction.GetCommTime() + second_contraction.GetCommTime() 
+                    + exp_contraction_->GetCommTime()
+                    + ccag.GetCommTime() + cag.GetCommTime() + g.GetCommTime();
     } else {
       // TODO: Contraction does not work on static graph
       // exp_contraction_ = new DynamicContraction(g, rank_, size_);
@@ -127,6 +129,10 @@ class ExponentialContraction {
     g.OutputLabels();
   }
 
+  float GetCommTime() {
+    return comm_time_; 
+  }
+
  private:
   // Network information
   PEID rank_, size_;
@@ -139,8 +145,10 @@ class ExponentialContraction {
   VertexID rng_offset_;
 
   // Statistics
+  float comm_time_;
   Timer iteration_timer_;
   Timer contraction_timer_;
+  Timer comm_timer_;
   
   // Contraction
   DynamicContraction *exp_contraction_;
