@@ -96,6 +96,34 @@ class ExponentialContraction {
                   << "[TIME] " << contraction_timer_.Elapsed() << std::endl;
       }
 
+      // TODO: Distribute high-degree vertices
+      VertexID max_deg = 0;
+      ccag.ForallLocalVertices([&](const VertexID v) {
+          VertexID v_deg = ccag.GetVertexDegree(v);
+          if (v_deg > max_deg) {
+            max_deg = v_deg; 
+          }
+      });
+      std::vector<VertexID> max_deg_dist(size_);
+      MPI_Allgather(&max_deg, 1, MPI_VERTEX,
+                    max_deg_dist.data(), 1, MPI_VERTEX, MPI_COMM_WORLD);
+      float avg_max_deg = std::accumulate(max_deg_dist.begin(), max_deg_dist.end(), 0) / max_deg_dist.size();
+      if (rank_ == ROOT) {
+        for (PEID i = 0; i < size_; ++i) {
+          std::cout << "R" << i << " max deg " << max_deg_dist[i] << std::endl;
+        }
+        std::cout << "avg deg " << avg_max_deg << std::endl;
+      }
+      if (max_deg > 2 * avg_max_deg) {
+        // TODO: Determine high degree vertices
+        ccag.ForallLocalVertices([&](const VertexID v) {
+          VertexID v_deg = ccag.GetVertexDegree(v);
+          if (v_deg > 2 * avg_max_deg) {
+            std::cout << "R" << rank_ << " v" << ccag.GetGlobalID(v) << " d " << v_deg << std::endl;
+          }
+        });
+      }
+
       // TODO: Delete intermediate graph?
       // Keep contraction labeling for later
       exp_contraction_ = new DynamicContraction(ccag, rank_, size_);
