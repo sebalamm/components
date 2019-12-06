@@ -441,12 +441,14 @@ class CAGBuilder {
     DynamicGraphCommunicator cg(rank_, size_);
     cg.StartConstruct(num_local_components_,
                       number_of_ghost_vertices,
-                      from);
+                      num_global_components_);
 
     cg.SetOffsetArray(std::move(vertex_dist));
 
     // Initialize local vertices
     for (VertexID v = 0; v < num_local_components_; v++) {
+        // std::cout << "R" << rank_ << " add v " << from + v << std::endl;
+        cg.AddVertex(from + v);
         cg.SetVertexLabel(v, from + v);
         cg.SetVertexRoot(v, rank_);
     }
@@ -459,9 +461,11 @@ class CAGBuilder {
 
     for (auto &edge : edges_) {
       cg.AddEdge(cg.GetLocalID(edge.first), edge.second, size_);
+      // std::cout << "R" << rank_ << " add e (" << edge.first << "," << edge.second << ")" << std::endl;
     }
 
     cg.FinishConstruct();
+    // cg.OutputLocal();
     return cg;
   }
 

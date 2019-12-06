@@ -56,21 +56,21 @@ class DynamicGraphCommunicator {
 
   struct LocalVertexData {
     bool is_interface_vertex_;
+    VertexID global_id_;
 
     LocalVertexData()
-        : is_interface_vertex_(false) {}
-    LocalVertexData(const VertexID id, bool interface)
-        : is_interface_vertex_(interface) {}
+        : global_id_(0), is_interface_vertex_(false) {}
+    LocalVertexData(VertexID global_id, bool interface)
+        : global_id_(global_id), is_interface_vertex_(interface) {}
   };
 
   struct GhostVertexData {
     PEID rank_;
-    VertexID global_id_;
 
     GhostVertexData()
-        : rank_(0), global_id_(0) {}
-    GhostVertexData(PEID rank, VertexID global_id)
-        : rank_(rank), global_id_(global_id) {}
+        : rank_(0) {}
+    GhostVertexData(PEID rank)
+        : rank_(rank) {}
   };
 
   struct Edge {
@@ -106,16 +106,15 @@ class DynamicGraphCommunicator {
 
   template<typename F>
   void ForallGhostVertices(F &&callback) {
-    for (VertexID v = GetNumberOfLocalVertices(); v < GetNumberOfVertices(); ++v) {
-      if (IsActive(v)) callback(v);
+    for (VertexID v = 0; v < GetNumberOfGhostVertices(); ++v) {
+      if (IsActive(v + ghost_offset_)) callback(v + ghost_offset_);
     }
   }
 
   template<typename F>
   void ForallVertices(F &&callback) {
-    for (VertexID v = 0; v < GetNumberOfVertices(); ++v) {
-      if (IsActive(v)) callback(v);
-    }
+    ForallLocalVertices(callback);
+    ForallGhostVertices(callback);
   }
 
   template<typename F>
@@ -138,7 +137,7 @@ class DynamicGraphCommunicator {
     return adj;
   }
 
-  inline bool IsActive(const VertexID v) const {
+  inline bool IsActive(const VertexID v) {
     return is_active_[v];
   }
 
@@ -157,7 +156,7 @@ class DynamicGraphCommunicator {
     contraction_vertices_[v] = cv;
   }
 
-  inline VertexID GetContractionVertex(VertexID v) const {
+  inline VertexID GetContractionVertex(VertexID v) {
     return contraction_vertices_[v];
   }
 
@@ -218,45 +217,45 @@ class DynamicGraphCommunicator {
   }
 
   inline bool IsLocal(VertexID v) const {
-    return v < number_of_local_vertices_;
+    return v < ghost_offset_;
   }
 
-  inline bool IsLocalFromGlobal(VertexID v) const {
-    return local_offset_ <= v && v < local_offset_ + number_of_local_vertices_;
+  inline bool IsLocalFromGlobal(VertexID v) {
+    // TODO: This conflicts with ghost vertices
+    return global_to_local_map_.find(v) != global_to_local_map_.end() && IsLocal(global_to_local_map_[v]);
   }
 
   inline bool IsGhost(VertexID v) const {
-    return global_to_local_map_.find(GetGlobalID(v))
-        != global_to_local_map_.end();
+    return v >= ghost_offset_;
   }
 
-
-  inline bool IsGhostFromGlobal(VertexID v) const {
-    return global_to_local_map_.find(v) != global_to_local_map_.end();
+  inline bool IsGhostFromGlobal(VertexID v) {
+    return global_to_local_map_.find(v) != global_to_local_map_.end() && IsGhost(global_to_local_map_[v]);
   }
 
-  inline bool IsInterface(VertexID v) const {
+  inline bool IsInterface(VertexID v) {
     return local_vertices_data_[v].is_interface_vertex_;
   }
 
-  inline bool IsInterfaceFromGlobal(VertexID v) const {
+  inline bool IsInterfaceFromGlobal(VertexID v) {
     return local_vertices_data_[GetLocalID(v)].is_interface_vertex_;
   }
 
-  inline VertexID GetLocalID(VertexID v) const {
-    return IsLocalFromGlobal(v) ? v - local_offset_
-                                : global_to_local_map_.find(v)->second;
+  inline VertexID GetLocalID(VertexID v) {
+    return global_to_local_map_[v];
   }
 
-  inline VertexID GetGlobalID(VertexID v) const {
-    return IsLocal(v) ? v + local_offset_
-                      : ghost_vertices_data_[v - ghost_offset_].global_id_;
+  inline VertexID GetGlobalID(VertexID v) {
+    return local_vertices_data_[v].global_id_;
   }
 
-  inline PEID GetPE(VertexID v) const {
+  inline PEID GetPE(VertexID v) {
     return IsLocal(v) ? rank_
-                      : ghost_vertices_data_[v - ghost_offset_].rank_;
+                      : ghost_vertices_data_[v].rank_;
+  }
 
+  inline void SetPE(VertexID v, PEID pe) {
+    ghost_vertices_data_[v].rank_ = pe;
   }
 
   //////////////////////////////////////////////
@@ -267,10 +266,6 @@ class DynamicGraphCommunicator {
   inline VertexID GetNumberOfGlobalVertices() const { return number_of_global_vertices_; }
 
   inline VertexID GetNumberOfGlobalEdges() const { return number_of_global_edges_; }
-
-  inline VertexID GetLocalOffset() const {
-    return local_offset_;
-  }
 
   inline VertexID GetNumberOfLocalVertices() const {
     return number_of_local_vertices_;
@@ -341,7 +336,7 @@ class DynamicGraphCommunicator {
     return out.str();
   }
 
-  inline VertexID GetVertexDeviate(const VertexID v) const {
+  inline VertexID GetVertexDeviate(const VertexID v) {
     return vertex_payload_[v].deviate_;
   }
 
@@ -349,7 +344,7 @@ class DynamicGraphCommunicator {
     vertex_payload_[v].deviate_ = deviate;
   }
 
-  inline VertexID GetVertexLabel(const VertexID v) const {
+  inline VertexID GetVertexLabel(const VertexID v) {
     return vertex_payload_[v].label_;
   }
 
@@ -357,7 +352,7 @@ class DynamicGraphCommunicator {
     vertex_payload_[v].label_ = label;
   }
 
-  inline PEID GetVertexRoot(const VertexID v) const {
+  inline PEID GetVertexRoot(const VertexID v) {
     return vertex_payload_[v].root_;
   }
 
@@ -369,21 +364,39 @@ class DynamicGraphCommunicator {
     return parent_[v];
   }
 
-  inline VertexID AddVertex() {
-    return vertex_counter_++;
+  inline VertexID AddVertex(VertexID v) {
+    VertexID local_id = vertex_counter_++;
+    global_to_local_map_[v] = local_id;
+
+    // Update data
+    local_vertices_data_[local_id].is_interface_vertex_ = false;
+    local_vertices_data_[local_id].global_id_ = v;
+
+    // Set active
+    is_active_[local_id] = true;
+
+    number_of_vertices_++;
+    number_of_local_vertices_++;
+    return local_id;
   }
 
-  VertexID  AddGhostVertex(VertexID v);
+  VertexID AddGhostVertex(VertexID v);
+
+  VertexID AddGhostVertex(VertexID v, PEID pe);
 
   EdgeID AddEdge(VertexID from, VertexID to, PEID rank);
+
+  EdgeID RelinkEdge(VertexID from, VertexID old_to, VertexID new_to, PEID rank);
+
+  EdgeID RemoveEdge(VertexID from, VertexID to);
+
+  void RemoveAllEdges(VertexID from);
 
   void AddLocalEdge(VertexID from, VertexID to);
 
   void AddGhostEdge(VertexID from, VertexID to);
 
   void ReserveEdgesForVertex(VertexID v, VertexID num_edges);
-
-  void RemoveAllEdges(VertexID from);
 
   // Local IDs
   bool IsConnected(VertexID from, VertexID to) {
@@ -393,20 +406,8 @@ class DynamicGraphCommunicator {
     return false;
   }
 
-  inline VertexID GetVertexDegree(const VertexID v) const {
+  inline VertexID GetVertexDegree(const VertexID v) {
     return adjacent_edges_[v].size();
-  }
-
-  VertexID GetMaxDegree() {
-    if (!max_degree_computed_) {
-      max_degree_ = 0;
-      ForallVertices([&](const VertexID v) {
-          if (GetVertexDegree(v) > max_degree_) 
-            max_degree_ = GetVertexDegree(v);
-      });
-      max_degree_computed_ = true;
-    }
-    return max_degree_;
   }
 
   //////////////////////////////////////////////
@@ -480,14 +481,14 @@ class DynamicGraphCommunicator {
   PEID rank_, size_;
 
   // Vertices and edges
-  std::vector<std::vector<Edge>> adjacent_edges_;
+  google::sparse_hash_map<VertexID, std::vector<Edge>> adjacent_edges_;
 
-  std::vector<LocalVertexData> local_vertices_data_;
-  std::vector<GhostVertexData> ghost_vertices_data_;
-  std::vector<VertexPayload> vertex_payload_;
+  google::sparse_hash_map<VertexID, LocalVertexData> local_vertices_data_;
+  google::sparse_hash_map<VertexID, GhostVertexData> ghost_vertices_data_;
+  google::sparse_hash_map<VertexID, VertexPayload> vertex_payload_;
 
   // Shortcutting
-  std::vector<VertexID> parent_;
+  google::dense_hash_map<VertexID, VertexID> parent_;
   google::dense_hash_map<VertexID, VertexID> label_shortcut_;
 
   VertexID number_of_vertices_;
@@ -498,19 +499,13 @@ class DynamicGraphCommunicator {
   EdgeID number_of_cut_edges_;
   EdgeID number_of_global_edges_;
 
-  VertexID max_degree_;
-  bool max_degree_computed_;
-
   // Vertex mapping
-  VertexID local_offset_;
   std::vector<std::pair<VertexID, VertexID>> offset_array_;
-
-  VertexID ghost_offset_;
   google::dense_hash_map<VertexID, VertexID> global_to_local_map_;
 
   // Contraction
-  std::vector<VertexID> contraction_vertices_;
-  std::vector<bool> is_active_;
+  google::sparse_hash_map<VertexID, VertexID> contraction_vertices_;
+  google::sparse_hash_map<VertexID, bool> is_active_;
 
   // Adjacent PEs
   std::vector<bool> adjacent_pes_;
@@ -520,8 +515,9 @@ class DynamicGraphCommunicator {
 
   // Temporary counters
   VertexID vertex_counter_;
-  VertexID ghost_counter_;
+  VertexID ghost_vertex_counter_;
   EdgeID edge_counter_;
+  VertexID ghost_offset_;
 
   // Statistics
   float comm_time_;

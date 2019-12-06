@@ -96,33 +96,7 @@ class ExponentialContraction {
                   << "[TIME] " << contraction_timer_.Elapsed() << std::endl;
       }
 
-      // TODO: Distribute high-degree vertices
-      VertexID max_deg = 0;
-      ccag.ForallLocalVertices([&](const VertexID v) {
-          VertexID v_deg = ccag.GetVertexDegree(v);
-          if (v_deg > max_deg) {
-            max_deg = v_deg; 
-          }
-      });
-      std::vector<VertexID> max_deg_dist(size_);
-      MPI_Allgather(&max_deg, 1, MPI_VERTEX,
-                    max_deg_dist.data(), 1, MPI_VERTEX, MPI_COMM_WORLD);
-      float avg_max_deg = std::accumulate(max_deg_dist.begin(), max_deg_dist.end(), 0) / max_deg_dist.size();
-      if (rank_ == ROOT) {
-        for (PEID i = 0; i < size_; ++i) {
-          std::cout << "R" << i << " max deg " << max_deg_dist[i] << std::endl;
-        }
-        std::cout << "avg deg " << avg_max_deg << std::endl;
-      }
-      if (max_deg > 2 * avg_max_deg) {
-        // TODO: Determine high degree vertices
-        ccag.ForallLocalVertices([&](const VertexID v) {
-          VertexID v_deg = ccag.GetVertexDegree(v);
-          if (v_deg > 2 * avg_max_deg) {
-            std::cout << "R" << rank_ << " v" << ccag.GetGlobalID(v) << " d " << v_deg << std::endl;
-          }
-        });
-      }
+      DistributeHighDegreeVertices(ccag);
 
       // TODO: Delete intermediate graph?
       // Keep contraction labeling for later
@@ -135,6 +109,9 @@ class ExponentialContraction {
         std::cout << "[STATUS] |- Resolving connectivity took " 
                   << "[TIME] " << contraction_timer_.Elapsed() << std::endl;
       }
+
+      // TODO: Remove replicated vertices
+      RemoveReplicatedVertices(ccag);
 
       ApplyToLocalComponents(ccag, cag, cag_labels);
       ApplyToLocalComponents(cag, cag_labels, g, g_labels);
@@ -180,6 +157,10 @@ class ExponentialContraction {
   
   // Contraction
   DynamicContraction *exp_contraction_;
+
+  // Node replication
+  google::sparse_hash_map<VertexID, VertexID> distribution_map_;
+  std::vector<VertexID> replicated_vertices_;
 
   void PerformDecomposition(DynamicGraphCommunicator &g) {
     contraction_timer_.Restart(); 
@@ -269,7 +250,6 @@ class ExponentialContraction {
   void RunContraction(DynamicGraphCommunicator &g) {
     contraction_timer_.Restart();
     // VertexID global_vertices = g.GatherNumberOfGlobalVertices();
-    // TODO: Number of vertices seems correct so something is probably wrong with backwards edges
     if (rank_ == ROOT) {
       if (iteration_ == 1)
         std::cout << "[STATUS] |-- Iteration " << iteration_ 
@@ -477,6 +457,261 @@ class ExponentialContraction {
     g.ForallLocalVertices([&](const VertexID v) {
       g.SetVertexLabel(v, labels[vertex_map[v]]);
     });
+  }
+
+  void DistributeHighDegreeVertices(DynamicGraphCommunicator &g) {
+    // Offset for new vertex IDs
+    VertexID vertex_offset = g.GatherNumberOfGlobalVertices() * rank_;
+    VertexID local_max_deg = 0;
+    g.ForallLocalVertices([&](const VertexID v) {
+        VertexID v_deg = g.GetVertexDegree(v);
+        if (v_deg > local_max_deg) {
+          local_max_deg = v_deg; 
+        }
+    });
+    VertexID global_max_deg = 0;
+    MPI_Allreduce(&local_max_deg, &global_max_deg, 
+                  1, MPI_VERTEX, 
+                  MPI_SUM, MPI_COMM_WORLD);
+    VertexID avg_max_deg = global_max_deg / size_; 
+    if (rank_ == ROOT) std::cout << "avg max deg " << avg_max_deg << std::endl;
+
+    VertexID total_parts = 0;
+    VertexID num_new_vertices = 0;
+    std::vector<std::vector<VertexID>> send_buffers(size_);
+    std::vector<std::vector<VertexID>> receive_buffers(size_);
+    if (local_max_deg >= 4 * avg_max_deg) {
+      g.ForallLocalVertices([&](const VertexID v) {
+        VertexID v_deg = g.GetVertexDegree(v);
+        if (v_deg >= 4 * avg_max_deg) {
+          std::cout << "R" << rank_ << " v " << g.GetGlobalID(v) << " d " << v_deg << std::endl;
+
+          // Split adjacency list for building the star
+          avg_max_deg = std::max<VertexID>(avg_max_deg, 2);
+          VertexID num_parts = static_cast<VertexID>(ceil(v_deg / avg_max_deg));
+          std::vector<std::vector<VertexID>> adj_list_parts(num_parts);
+          std::vector<std::vector<VertexID>> num_adj(num_parts);
+          std::vector<VertexID> edges_to_insert;
+          for (VertexID i = 0; i < num_parts; ++i) num_adj[i].resize(size_, 0);
+
+          VertexID adj_counter = 0;
+          VertexID current_part = 0;
+          g.ForallNeighbors(v, [&](const VertexID w) {
+              // Reset counter for new part
+              if (adj_counter >= avg_max_deg) {
+                current_part++;
+                adj_counter = 0;
+              }
+              // Add v to the beginning of each part
+              if (adj_counter == 0) {
+                adj_list_parts[current_part].emplace_back(g.GetGlobalID(v));
+                adj_list_parts[current_part].emplace_back(vertex_offset + num_new_vertices);
+                num_new_vertices++;
+              }
+              // Add neighbors to end of part
+              PEID w_pe = g.GetPE(w);
+              adj_list_parts[current_part].emplace_back(g.GetGlobalID(w));
+              adj_list_parts[current_part].emplace_back(w_pe);
+              adj_counter++;
+              num_adj[current_part][w_pe]++;
+          });
+          total_parts += current_part;
+
+          for (VertexID i = 0; i < num_parts; ++i) {
+            PEID max_pe = 0;
+            PEID max_adj = 0;
+            for (PEID j = 0; j < size_; ++j) {
+              if (num_adj[i][j] > max_adj) {
+                max_adj = num_adj[i][j];
+                max_pe = j;
+              }
+            }
+            send_buffers[max_pe].swap(adj_list_parts[i]);
+            edges_to_insert.emplace_back(send_buffers[max_pe][1]);
+            edges_to_insert.emplace_back(max_pe);
+          }
+          g.RemoveAllEdges(v);
+          for (VertexID i = 0; i < edges_to_insert.size(); i += 2) {
+            VertexID target =  edges_to_insert[i];
+            VertexID target_pe =  edges_to_insert[i+1];
+            g.AddGhostVertex(target, target_pe);
+            std::cout << "R" << rank_ << " add ghost vertex " << target << " pe(ghost)=" << target_pe << std::endl;
+            g.AddEdge(v, target, target_pe);
+            distribution_map_[target] = v;
+            std::cout << "R" << rank_ << " add edge (" << g.GetGlobalID(v) << "," << target << ") pe(target)=" << target_pe << std::endl;
+          }
+        }
+      });
+    }
+
+    ExchangeMessages(send_buffers, receive_buffers);
+    ProcessAdjLists(g, receive_buffers, send_buffers);
+    ExchangeMessages(send_buffers, receive_buffers);
+    ProcessRouting(g, receive_buffers);
+
+    // TODO: Relink local edges to original vertex to replicated ones (further reduces messages)
+    // TODO: Optimize detection of neighboring PEs and interface vertices
+    // TODO: Reintroduce Semidynamic graph class
+    // TODO: Optimize fully dynamic graph class to use vectors instead of hash maps
+  }
+
+  void ExchangeMessages(std::vector<std::vector<VertexID>> &send_buffers,
+                        std::vector<std::vector<VertexID>> &receive_buffers) {
+    PEID num_requests = 0;
+    for (PEID pe = 0; pe < size_; ++pe) {
+      if (send_buffers[pe].size() > 0) num_requests++; 
+    }
+    std::vector<MPI_Request> requests(num_requests);
+
+    int req = 0;
+    for (PEID pe = 0; pe < size_; ++pe) {
+      if (send_buffers[pe].size() > 0) {
+        MPI_Issend(send_buffers[pe].data(), 
+                   static_cast<int>(send_buffers[pe].size()), 
+                   MPI_VERTEX, pe, 993 * size_ + pe, MPI_COMM_WORLD, &requests[req++]);
+        if (pe == rank_) {
+          std::cout << "R" << rank_ << " ERROR selfmessage" << std::endl;
+          exit(1);
+        }
+      } 
+    }
+
+    std::vector<MPI_Status> statuses(num_requests);
+    int isend_done = 0;
+    while (isend_done == 0) {
+      // Check for messages
+      int iprobe_success = 1;
+      while (iprobe_success > 0) {
+        iprobe_success = 0;
+        MPI_Status st{};
+        MPI_Iprobe(MPI_ANY_SOURCE, 993 * size_ + rank_, MPI_COMM_WORLD, &iprobe_success, &st);
+        if (iprobe_success > 0) {
+          int message_length;
+          MPI_Get_count(&st, MPI_VERTEX, &message_length);
+          std::vector<VertexID> message(message_length);
+          MPI_Status rst{};
+          MPI_Recv(message.data(), message_length, MPI_VERTEX, st.MPI_SOURCE,
+                   st.MPI_TAG, MPI_COMM_WORLD, &rst);
+
+          for (const VertexID &m : message) {
+            receive_buffers[st.MPI_SOURCE].emplace_back(m);
+          }
+        }
+      }
+      // Check if all ISend successful
+      isend_done = 0;
+      MPI_Testall(num_requests, requests.data(), &isend_done, statuses.data());
+    }
+
+    MPI_Request barrier_request;
+    MPI_Ibarrier(MPI_COMM_WORLD, &barrier_request);
+
+    int ibarrier_done = 0;
+    while (ibarrier_done == 0) {
+      int iprobe_success = 1;
+      while (iprobe_success > 0) {
+        iprobe_success = 0;
+        MPI_Status st{};
+        MPI_Iprobe(MPI_ANY_SOURCE, 993 * size_ + rank_, MPI_COMM_WORLD, &iprobe_success, &st);
+        if (iprobe_success > 0) {
+          int message_length;
+          MPI_Get_count(&st, MPI_VERTEX, &message_length);
+          std::vector<VertexID> message(message_length);
+          MPI_Status rst{};
+          MPI_Recv(message.data(), message_length, MPI_VERTEX, st.MPI_SOURCE,
+                   st.MPI_TAG, MPI_COMM_WORLD, &rst);
+
+          for (const VertexID &m : message) {
+            receive_buffers[st.MPI_SOURCE].emplace_back(m);
+          }
+        }
+      }
+        
+      // Check if all reached Ibarrier
+      MPI_Status tst{};
+      MPI_Test(&barrier_request, &ibarrier_done, &tst);
+      if (tst.MPI_ERROR != MPI_SUCCESS) {
+        std::cout << "R" << rank_ << " mpi_test (barrier) failed" << std::endl;
+        exit(1);
+      }
+    }
+  }
+
+  void ProcessAdjLists(DynamicGraphCommunicator &g, 
+                       std::vector<std::vector<VertexID>> & receive_buffer,
+                       std::vector<std::vector<VertexID>> & send_buffer) {
+    // Clear send buffers
+    for (PEID pe = 0; pe < size_; ++pe) {
+      send_buffer[pe].clear();
+    }
+    // Process incoming vertices/edges
+    for (PEID pe = 0; pe < size_; ++pe) {
+      if (receive_buffer[pe].size() > 0) {
+        std::cout << "R" << rank_ << " recv " << (receive_buffer[pe].size()-1)/2<< " edges from " << pe << std::endl;
+        VertexID source = receive_buffer[pe][0];
+        VertexID copy_vertex = receive_buffer[pe][1];
+        std::cout << "R" << rank_ << " recv vertex " << source << " new_id " << copy_vertex << " from " << pe << std::endl;
+        VertexID local_copy_id = g.AddVertex(copy_vertex);
+        replicated_vertices_.emplace_back(local_copy_id);
+        std::cout << "R" << rank_ << " add local vertex " << copy_vertex << std::endl;
+        g.AddEdge(local_copy_id, source, pe);
+        std::cout << "R" << rank_ << " add edge (" << copy_vertex << "," << source << ") pe(target)=" << pe << std::endl;
+        for (VertexID i = 2; i < receive_buffer[pe].size(); i+=2) {
+          VertexID target = receive_buffer[pe][i];
+          VertexID target_pe = receive_buffer[pe][i+1];
+          std::cout << "R" << rank_ << " recv edge (" << copy_vertex << "," << target << ") local(target)=" << (target_pe == rank_) << " pe(target)=" << target_pe << " from " << pe << std::endl;
+          // Neighbor is local vertex
+          if (target_pe == rank_) {
+            // g.AddEdge(g.GetLocalID(target), copy_vertex, rank_);
+            // std::cout << "R" << rank_ << " add edge (" << target << "," << copy_vertex << ") pe(target)=" << rank_ << std::endl;
+            g.RelinkEdge(g.GetLocalID(target), source, copy_vertex, rank_);
+            std::cout << "R" << rank_ << " reroute edge (" << target << "," << source << ") pe(target)=" << g.GetPE(source) << " -> (" << target << "," << copy_vertex << ") pe(target)=" << rank_ << std::endl;
+          // Neighbor is remote vertex
+          } else {
+            g.AddGhostVertex(target);
+            // Target PE needs to reroute (target, source) from (original) PE to (target, copy) on sender PE
+            send_buffer[target_pe].emplace_back(target);
+            send_buffer[target_pe].emplace_back(source);
+            send_buffer[target_pe].emplace_back(copy_vertex);
+            std::cout << "R" << rank_ << " send reroute (" << target << "," << source << ") pe(target)=" << pe << " -> (" << target << "," << copy_vertex << ") pe(target)=" << rank_ << " to " << target_pe << std::endl;
+          }
+          g.AddEdge(g.GetLocalID(copy_vertex), target, target_pe);
+          std::cout << "R" << rank_ << " add edge (" << copy_vertex << "," << target << ") pe(target)=" << target_pe << std::endl;
+        }
+        // Clear receive buffers
+        receive_buffer[pe].clear();
+      }
+    }
+  }
+
+  void ProcessRouting(DynamicGraphCommunicator &g, 
+                      std::vector<std::vector<VertexID>> & receive_buffer) {
+    // Process incoming vertices/edges
+    for (PEID pe = 0; pe < size_; ++pe) {
+      if (receive_buffer[pe].size() > 0) {
+        std::cout << "R" << rank_ << " recv " << receive_buffer[pe].size()/3 << " reroutes from " << pe << std::endl;
+        for (VertexID i = 0; i < receive_buffer[pe].size(); i+=3) {
+          VertexID source = receive_buffer[pe][i];
+          VertexID old_target = receive_buffer[pe][i+1];
+          VertexID new_target = receive_buffer[pe][i+2];
+          std::cout << "R" << rank_ << " recv reroute (" << source << "," << old_target << ") pe(target)=" << g.GetPE(old_target) << " -> (" << source << "," << new_target << ") pe(target)=" << pe << " from " << pe << std::endl;
+
+          if (!g.IsGhostFromGlobal(new_target)) {
+            std::cout << "R" << rank_ << " add ghost vertex " << new_target << " pe(vertex)=" << pe << std::endl;
+            g.AddGhostVertex(new_target, pe);
+          }
+          g.RelinkEdge(g.GetLocalID(source), old_target, new_target, pe);
+          std::cout << "R" << rank_ << " reroute edge (" << source << "," << old_target << ") pe(target)=" << g.GetPE(old_target) << " -> (" << source << "," << new_target << ") pe(target)=" << pe << std::endl;
+        }
+      }
+    }
+    if (rank_ == 6) g.OutputLocal();
+  }
+
+  void RemoveReplicatedVertices(DynamicGraphCommunicator &g) {
+    for (const VertexID &v : replicated_vertices_) {
+      g.SetActive(v, false);
+    }
   }
 
   template <typename GraphType>

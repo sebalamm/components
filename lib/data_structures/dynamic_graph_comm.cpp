@@ -13,19 +13,17 @@ DynamicGraphCommunicator::DynamicGraphCommunicator(const PEID rank, const PEID s
       number_of_edges_(0),
       number_of_cut_edges_(0),
       number_of_global_edges_(0),
-      max_degree_(0),
-      max_degree_computed_(false),
-      local_offset_(0),
-      ghost_offset_(0),
       ghost_comm_(nullptr),
       vertex_counter_(0),
+      ghost_vertex_counter_(0),
       edge_counter_(0),
-      ghost_counter_(0),
+      ghost_offset_(0),
       comm_time_(0.0) {
   ghost_comm_ = new DynamicVertexCommunicator(rank_, size_, MPI_COMM_WORLD);
   ghost_comm_->SetGraph(this);
   label_shortcut_.set_empty_key(-1);
   global_to_local_map_.set_empty_key(-1);
+  parent_.set_empty_key(-1);
 }
 
 DynamicGraphCommunicator::~DynamicGraphCommunicator() {
@@ -40,25 +38,9 @@ void DynamicGraphCommunicator::ResetCommunicator() {
 }
 
 void DynamicGraphCommunicator::StartConstruct(const VertexID local_n,
-                                 const VertexID ghost_n,
-                                 const VertexID local_offset) {
-  number_of_local_vertices_ = local_n;
-  number_of_vertices_ = local_n + ghost_n;
-
-  adjacent_edges_.resize(number_of_vertices_);
-  local_vertices_data_.resize(number_of_vertices_);
-  ghost_vertices_data_.resize(ghost_n);
-  vertex_payload_.resize(number_of_vertices_);
-
-  local_offset_ = local_offset;
-  ghost_offset_ = local_n;
-
-  // Temp counter for properly counting new ghost vertices
-  ghost_counter_ = local_n;
-
-  parent_.resize(local_n);
-  is_active_.resize(number_of_vertices_, true);
-
+                                              const VertexID ghost_n,
+                                              const VertexID ghost_offset) {
+  ghost_offset_ = ghost_offset;
   adjacent_pes_.resize(static_cast<unsigned long>(size_), false);
 }
 
@@ -92,21 +74,14 @@ void DynamicGraphCommunicator::ReserveEdgesForVertex(VertexID v, VertexID num_ed
 }
 
 VertexID DynamicGraphCommunicator::AddGhostVertex(VertexID v) {
-  VertexID local_id = ghost_counter_++;
+  VertexID local_id = ghost_vertex_counter_ + ghost_offset_;
   global_to_local_map_[v] = local_id;
-
-  // Fix overflows
-  if (ghost_counter_ > local_vertices_data_.size()) {
-    local_vertices_data_.resize(ghost_counter_ + 1);
-    ghost_vertices_data_.resize(ghost_counter_ + 1);
-    is_active_.resize(ghost_counter_ + 1);
-    vertex_payload_.resize(ghost_counter_ + 1);
-  }
+  ghost_vertex_counter_++;
 
   // Update data
   local_vertices_data_[local_id].is_interface_vertex_ = false;
-  ghost_vertices_data_[local_id - ghost_offset_].rank_ = GetPEFromOffset(v);
-  ghost_vertices_data_[local_id - ghost_offset_].global_id_ = v;
+  local_vertices_data_[local_id].global_id_ = v;
+  ghost_vertices_data_[local_id].rank_ = GetPEFromOffset(v);
 
   // Set adjacent PE
   PEID neighbor = GetPEFromOffset(v);
@@ -122,6 +97,35 @@ VertexID DynamicGraphCommunicator::AddGhostVertex(VertexID v) {
 #endif
                                neighbor};
 
+  number_of_vertices_++;
+  return local_id;
+}
+
+VertexID DynamicGraphCommunicator::AddGhostVertex(VertexID v, PEID pe) {
+  VertexID local_id = ghost_vertex_counter_ + ghost_offset_;
+  global_to_local_map_[v] = local_id;
+  ghost_vertex_counter_++;
+
+  // Update data
+  local_vertices_data_[local_id].is_interface_vertex_ = false;
+  local_vertices_data_[local_id].global_id_ = v;
+  ghost_vertices_data_[local_id].rank_ = pe;
+
+  // Set adjacent PE
+  PEID neighbor = pe;
+
+  // Set active
+  is_active_[local_id] = true;
+
+  // Set payload
+  vertex_payload_[local_id] = {std::numeric_limits<VertexID>::max() - 1, 
+                               v, 
+#ifdef TIEBREAK_DEGREE
+                               0,
+#endif
+                               neighbor};
+
+  number_of_vertices_++;
   return local_id;
 }
 
@@ -141,20 +145,85 @@ EdgeID DynamicGraphCommunicator::AddEdge(VertexID from, VertexID to, PEID rank) 
       exit(1);
     }
   }
-  edge_counter_ += 2;
+  edge_counter_++;
   return edge_counter_;
 }
 
-void DynamicGraphCommunicator::AddLocalEdge(VertexID from, VertexID to) {
-  adjacent_edges_[from].emplace_back(to - local_offset_);
+EdgeID DynamicGraphCommunicator::RelinkEdge(VertexID from, VertexID old_to, VertexID new_to, PEID rank) {
+  VertexID old_to_local = GetLocalID(old_to);
+  VertexID new_to_local = GetLocalID(new_to);
+
+  // TODO: Unsure if the ghost offset works with distributing high degree vertices
+  if (IsLocal(new_to_local)) {
+    if (IsGhost(old_to_local)) number_of_cut_edges_--;
+  }
+  else {
+    if (!IsGhost(old_to_local)) number_of_cut_edges_++;
+    PEID neighbor = (rank == size_) ? GetPEFromOffset(new_to) : rank;
+    SetAdjacentPE(neighbor, true);
+  }
+
+  // Actual relink
+  for (VertexID i = 0; i < adjacent_edges_[from].size(); i++) {
+    if (adjacent_edges_[from][i].target_ == old_to_local) {
+      adjacent_edges_[from][i].target_ = new_to_local;
+    }
+  }
+
+  // TODO: Remove later
+  // => We might want to do a sweep after ALL relinking operations are done and update accordingly
+  // => For now do it here and fix if everything works (very costly)
+  std::vector<bool> is_neighbor(size_, false);
+  ForallLocalVertices([&](const VertexID v) {
+    ForallNeighbors(v, [&](const VertexID w) {
+      if (IsGhost(w)) {
+        is_neighbor[GetPE(v)] = true;
+      }
+    });
+  });
+
+  // Update PEs
+  for (PEID i = 0; i < size_; i++) {
+    SetAdjacentPE(i, is_neighbor[i]);
+  }
+
+  // Check if from is still an interface vertex
+  ForallNeighbors(from, [&](const VertexID w) {
+    if (IsGhost(w)) {
+      local_vertices_data_[from].is_interface_vertex_ = true;
+    }
+  });
+
+  return edge_counter_;
 }
 
-void DynamicGraphCommunicator::AddGhostEdge(VertexID from, VertexID to) {
-  adjacent_edges_[from].emplace_back(global_to_local_map_[to]);
+// TODO: Also support operation that removes whole set of edges but not all?
+EdgeID DynamicGraphCommunicator::RemoveEdge(VertexID from, VertexID to) {
+  VertexID delete_pos = ghost_offset_;
+  for (VertexID i = 0; i < adjacent_edges_[from].size(); i++) {
+    if (adjacent_edges_[from][i].target_ == to) {
+      delete_pos = i;
+      break;
+    }
+  }
+  if (delete_pos != ghost_offset_) {
+    adjacent_edges_[from].erase(adjacent_edges_[from].begin() + delete_pos);
+  } else {
+    std::cout << "This shouldn't happen" << std::endl;
+    exit(1);
+  }
 }
 
 void DynamicGraphCommunicator::RemoveAllEdges(const VertexID from) {
   adjacent_edges_[from].clear();
+}
+
+void DynamicGraphCommunicator::AddLocalEdge(VertexID from, VertexID to) {
+  adjacent_edges_[from].emplace_back(global_to_local_map_[to]);
+}
+
+void DynamicGraphCommunicator::AddGhostEdge(VertexID from, VertexID to) {
+  adjacent_edges_[from].emplace_back(global_to_local_map_[to]);
 }
 
 void DynamicGraphCommunicator::SetAdjacentPE(const PEID pe, const bool is_adj) {

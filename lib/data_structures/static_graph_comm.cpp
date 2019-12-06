@@ -13,8 +13,6 @@ StaticGraphCommunicator::StaticGraphCommunicator(const PEID rank, const PEID siz
       number_of_edges_(0),
       number_of_cut_edges_(0),
       number_of_global_edges_(0),
-      max_degree_(0),
-      max_degree_computed_(false),
       local_offset_(0),
       ghost_offset_(0),
       ghost_comm_(nullptr),

@@ -88,8 +88,6 @@ class DynamicGraph {
       number_of_edges_(0),
       number_of_cut_edges_(0),
       number_of_global_edges_(0),
-      max_degree_(0),
-      max_degree_computed_(false),
       local_offset_(0),
       ghost_offset_(0),
       vertex_counter_(0),
@@ -393,18 +391,6 @@ class DynamicGraph {
     return adjacent_edges_[v].size();
   }
 
-  VertexID GetMaxDegree() {
-    if (!max_degree_computed_) {
-      max_degree_ = 0;
-      ForallVertices([&](const VertexID v) {
-          if (GetVertexDegree(v) > max_degree_) 
-            max_degree_ = GetVertexDegree(v);
-      });
-      max_degree_computed_ = true;
-    }
-    return max_degree_;
-  }
-
   //////////////////////////////////////////////
   // Manage adjacent PEs
   //////////////////////////////////////////////
@@ -596,9 +582,6 @@ class DynamicGraph {
   EdgeID number_of_edges_;
   EdgeID number_of_cut_edges_;
   EdgeID number_of_global_edges_;
-
-  VertexID max_degree_;
-  bool max_degree_computed_;
 
   // Vertex mapping
   VertexID local_offset_;

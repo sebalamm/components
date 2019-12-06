@@ -349,18 +349,6 @@ class StaticGraphCommunicator {
     return vertices_[v + 1].first_edge_ - vertices_[v].first_edge_; 
   }
 
-  VertexID GetMaxDegree() {
-    if (!max_degree_computed_) {
-      max_degree_ = 0;
-      ForallVertices([&](const VertexID v) {
-          if (GetVertexDegree(v) > max_degree_) 
-            max_degree_ = GetVertexDegree(v);
-      });
-      max_degree_computed_ = true;
-    }
-    return max_degree_;
-  }
-
   //////////////////////////////////////////////
   // Manage ghost vertices
   //////////////////////////////////////////////
@@ -444,9 +432,6 @@ class StaticGraphCommunicator {
   EdgeID number_of_edges_;
   EdgeID number_of_cut_edges_;
   EdgeID number_of_global_edges_;
-
-  VertexID max_degree_;
-  bool max_degree_computed_;
 
   // Vertex mapping
   VertexID local_offset_;

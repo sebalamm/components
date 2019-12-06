@@ -39,13 +39,9 @@ class DynamicContraction {
         size_(size),
         contraction_level_(0),
         comm_time_(0.0) { 
-    inactive_level_.resize(g_.GetNumberOfVertices(), -1);
+    // inactive_level_.resize(g_.GetNumberOfVertices(), -1);
   }
   virtual ~DynamicContraction() = default;
-
-  inline bool IsActive(VertexID v) const {
-    return inactive_level_[v] == -1;
-  }
 
   void ExponentialContraction() {
     // Statistics
@@ -58,7 +54,10 @@ class DynamicContraction {
     VertexID num_vertices = g_.GetNumberOfVertices();
 
     // Update with new vertices added during last contraction
-    inactive_level_.resize(num_vertices, -1);
+    // inactive_level_.resize(num_vertices, -1);
+    g_.ForallVertices([&](VertexID v) {
+      inactive_level_[v] = -1;
+    });
 
     // Determine edges to communicate
     // Gather labels to communicate
@@ -158,9 +157,7 @@ class DynamicContraction {
               << "[TIME] " << contraction_timer_.Elapsed() 
               << " " << edge_counter_ << " edges" << std::endl;
 
-    // max_degree_computed_ = false;
     UpdateGraphVertices();
-    g_.OutputLocal();
   }
 
   void DirectContraction() {
@@ -174,7 +171,7 @@ class DynamicContraction {
     VertexID num_vertices = g_.GetNumberOfVertices();
 
     // Update with new vertices added during last contraction
-    inactive_level_.resize(num_vertices, -1);
+    // inactive_level_.resize(num_vertices, -1);
 
     // Determine edges to communicate
     // Gather labels to communicate
@@ -360,7 +357,10 @@ class DynamicContraction {
     VertexID num_vertices = g_.GetNumberOfVertices();
 
     // Update with new vertices added during last contraction
-    inactive_level_.resize(num_vertices, -1);
+    // inactive_level_.resize(num_vertices, -1);
+    g_.ForallVertices([&](VertexID v) {
+      inactive_level_[v] = -1;
+    });
 
     // Determine edges to communicate
     // Gather labels to communicate
@@ -742,9 +742,12 @@ class DynamicContraction {
   }
 
   void UpdateActiveVertices() {
-    for (VertexID i = 0; i < inactive_level_.size(); ++i) {
-      if (inactive_level_[i] == -1) inactive_level_[i] = contraction_level_ - 1;
+    for (auto &kv : inactive_level_) {
+      if (kv.second == -1) inactive_level_[kv.first] = contraction_level_ - 1;
     }
+    // for (VertexID i = 0; i < inactive_level_.size(); ++i) {
+    //   if (inactive_level_[i] == -1) inactive_level_[i] = contraction_level_ - 1;
+    // }
   }
 
   void InsertEdges(std::vector<std::vector<std::pair<VertexID, VertexID>>> &new_edges) {
@@ -754,9 +757,9 @@ class DynamicContraction {
         VertexID wlabel = e.second;
         VertexID vlocal = g_.GetLocalID(vlabel);
         // TODO: Check if this is needed
-        if (!g_.IsGhostFromGlobal(wlabel)) {
+        if (!g_.IsLocalFromGlobal(wlabel) && !g_.IsGhostFromGlobal(wlabel)) {
           g_.AddGhostVertex(wlabel);
-          inactive_level_.resize(inactive_level_.size() + 1);
+          // inactive_level_.resize(inactive_level_.size() + 1);
         }
         // Add edge
         g_.AddEdge(vlocal, wlabel, pe);
@@ -786,8 +789,11 @@ class DynamicContraction {
   }
 
   void UpdateGraphVertices() {
-    for (VertexID i = 0; i < inactive_level_.size(); ++i) {
-      g_.SetActive(i, inactive_level_[i] == -1);
+    // for (VertexID i = 0; i < inactive_level_.size(); ++i) {
+    //   g_.SetActive(i, inactive_level_[i] == -1);
+    // }
+    for (auto &kv : inactive_level_) {
+      g_.SetActive(kv.first, kv.second == -1);
     }
   }
 
@@ -893,8 +899,11 @@ class DynamicContraction {
   }
 
   void EnableActiveVertices() {
-    for (VertexID i = 0; i < inactive_level_.size(); ++i) {
-      if (inactive_level_[i] == contraction_level_) inactive_level_[i] = - 1;
+    // for (VertexID i = 0; i < inactive_level_.size(); ++i) {
+    //   if (inactive_level_[i] == contraction_level_) inactive_level_[i] = - 1;
+    // }
+    for (auto &kv : inactive_level_) {
+      if (kv.second == contraction_level_) inactive_level_[kv.first] = -1;
     }
   }
 
@@ -921,7 +930,8 @@ class DynamicContraction {
   // Variables
   VertexID contraction_level_;
   std::stack<std::pair<VertexID, VertexID>> removed_edges_;
-  std::vector<short> inactive_level_;
+  // std::vector<short> inactive_level_;
+  google::sparse_hash_map<VertexID, short> inactive_level_;
 
   // Statistics
   float comm_time_;
