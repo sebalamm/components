@@ -251,6 +251,10 @@ class DynamicGraphCommunicator {
                       : false;
   }
 
+  inline void SetInterface(VertexID v, bool is_interface) {
+    if (IsLocal(v)) local_vertices_data_[v].is_interface_vertex_ = is_interface;
+  }
+
   inline bool IsInterfaceFromGlobal(VertexID v) {
     return IsLocalFromGlobal(v) ? local_vertices_data_[GetLocalID(v)].is_interface_vertex_ 
                                 : false;

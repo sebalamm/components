@@ -51,7 +51,7 @@ void DynamicGraphCommunicator::ReceiveAndSendGhostVertices() {
   ghost_comm_->ReceiveAndSendGhostVertices();
 }
 
-// TODO: v should always be local?
+// NOTE: v should always be local
 void DynamicGraphCommunicator::SetVertexPayload(const VertexID v,
                                           VertexPayload &&msg,
                                           bool propagate) {
@@ -62,7 +62,7 @@ void DynamicGraphCommunicator::SetVertexPayload(const VertexID v,
   SetVertexMessage(v, std::move(msg));
 }
 
-// TODO: v should always be local?
+// NOTE: v should always be local?
 void DynamicGraphCommunicator::ForceVertexPayload(const VertexID v,
                                      VertexPayload &&msg) {
   if (local_vertices_data_[v].is_interface_vertex_)
@@ -117,7 +117,7 @@ EdgeID DynamicGraphCommunicator::AddEdge(VertexID from, VertexID to, PEID rank) 
     AddLocalEdge(from, to);
   } else {
     PEID neighbor = (rank == size_) ? GetPEFromOffset(to) : rank;
-    // TODO: Is from always local?
+    // NOTE: from always local
     local_vertices_data_[from].is_interface_vertex_ = true;
     if (IsGhostFromGlobal(to)) { // true if ghost already in map, otherwise false
       number_of_cut_edges_++;
@@ -136,7 +136,7 @@ EdgeID DynamicGraphCommunicator::RelinkEdge(VertexID from, VertexID old_to, Vert
   VertexID old_to_local = GetLocalID(old_to);
   VertexID new_to_local = GetLocalID(new_to);
 
-  // TODO: Unsure if the ghost offset works with distributing high degree vertices
+  // NOTE: Unsure if the ghost offset works with distributing high degree vertices
   if (IsLocal(new_to_local)) {
     if (IsGhost(old_to_local)) number_of_cut_edges_--;
   }
@@ -147,36 +147,12 @@ EdgeID DynamicGraphCommunicator::RelinkEdge(VertexID from, VertexID old_to, Vert
   }
 
   // Actual relink
-  // TODO: from should always be local
+  // NOTE: from should always be local
   for (VertexID i = 0; i < local_adjacent_edges_[from].size(); i++) {
     if (local_adjacent_edges_[from][i].target_ == old_to_local) {
       local_adjacent_edges_[from][i].target_ = new_to_local;
     }
   }
-
-  // TODO: Remove later
-  // => We might want to do a sweep after ALL relinking operations are done and update accordingly
-  // => For now do it here and fix if everything works (very costly)
-  std::vector<bool> is_neighbor(size_, false);
-  ForallLocalVertices([&](const VertexID v) {
-    ForallNeighbors(v, [&](const VertexID w) {
-      if (IsGhost(w)) {
-        is_neighbor[GetPE(v)] = true;
-      }
-    });
-  });
-
-  // Update PEs
-  for (PEID i = 0; i < size_; i++) {
-    SetAdjacentPE(i, is_neighbor[i]);
-  }
-
-  // Check if from is still an interface vertex
-  ForallNeighbors(from, [&](const VertexID w) {
-    if (IsGhost(w)) {
-      local_vertices_data_[from].is_interface_vertex_ = true;
-    }
-  });
 
   return edge_counter_;
 }
@@ -314,7 +290,7 @@ void DynamicGraphCommunicator::OutputComponents(std::vector<VertexID> &labels) {
   // local_components.reserve(local_component_sizes.size());
   for(auto &kv : local_component_sizes)
     local_components.emplace_back(kv.first, kv.second);
-  // TODO [MEMORY]: Might be too small
+  // MEMORY: Might be too small
   int num_local_components = local_components.size();
 
   // Exchange number of local components
@@ -323,7 +299,7 @@ void DynamicGraphCommunicator::OutputComponents(std::vector<VertexID> &labels) {
 
   // Compute diplacements
   std::vector<int> displ_components(size_, 0);
-  // TODO [MEMORY]: Might be too small
+  // MEMORY: Might be too small
   int num_global_components = 0;
   for (PEID i = 0; i < size_; ++i) {
     displ_components[i] = num_global_components;
