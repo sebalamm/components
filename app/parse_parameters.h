@@ -54,14 +54,17 @@ void ParseParameters(int argn, char **argv,
   conf.beta = args.Get<double>("beta", 0.1);
 
   // Contraction
-  conf.use_contraction = args.Get<bool>("contraction", true);
-  conf.direct_contraction = args.Get<bool>("direct", false);
+  conf.use_contraction = args.IsSet("contraction");
+  conf.direct_contraction = args.IsSet("direct");
 
   // Sequential computation
   conf.sequential_limit = args.Get<unsigned int>("seq", 1000);
 
   // High-degree vertices
   conf.degree_limit = args.Get<unsigned int>("deg", 100);
+
+  // Vertex replication
+  conf.replicate_high_degree = args.IsSet("replicate");
 
   // Generator
   conf.gen = args.Get<std::string>("gen", "null");

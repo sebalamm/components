@@ -96,7 +96,9 @@ class ExponentialContraction {
                   << "[TIME] " << contraction_timer_.Elapsed() << std::endl;
       }
 
-      DistributeHighDegreeVertices(ccag);
+      if (config_.replicate_high_degree) {
+        DistributeHighDegreeVertices(ccag);
+      }
 
       // TODO: Delete intermediate graph?
       // Keep contraction labeling for later

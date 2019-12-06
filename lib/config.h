@@ -45,6 +45,8 @@ struct Config {
   EdgeID m{};
   // High degree vertices
   VertexID degree_limit{};
+  // Vertex replication
+  bool replicate_high_degree;
   // Sequential computations
   VertexID sequential_limit{};
   // Benchmarks
