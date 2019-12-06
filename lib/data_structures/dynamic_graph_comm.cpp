@@ -23,7 +23,6 @@ DynamicGraphCommunicator::DynamicGraphCommunicator(const PEID rank, const PEID s
   ghost_comm_->SetGraph(this);
   label_shortcut_.set_empty_key(-1);
   global_to_local_map_.set_empty_key(-1);
-  parent_.set_empty_key(-1);
 }
 
 DynamicGraphCommunicator::~DynamicGraphCommunicator() {
@@ -52,6 +51,7 @@ void DynamicGraphCommunicator::ReceiveAndSendGhostVertices() {
   ghost_comm_->ReceiveAndSendGhostVertices();
 }
 
+// TODO: v should always be local?
 void DynamicGraphCommunicator::SetVertexPayload(const VertexID v,
                                           VertexPayload &&msg,
                                           bool propagate) {
@@ -62,6 +62,7 @@ void DynamicGraphCommunicator::SetVertexPayload(const VertexID v,
   SetVertexMessage(v, std::move(msg));
 }
 
+// TODO: v should always be local?
 void DynamicGraphCommunicator::ForceVertexPayload(const VertexID v,
                                      VertexPayload &&msg) {
   if (local_vertices_data_[v].is_interface_vertex_)
@@ -70,35 +71,12 @@ void DynamicGraphCommunicator::ForceVertexPayload(const VertexID v,
 }
 
 void DynamicGraphCommunicator::ReserveEdgesForVertex(VertexID v, VertexID num_edges) {
-  adjacent_edges_[v].reserve(num_edges);
+  if (IsLocal(v)) local_adjacent_edges_[v].reserve(num_edges);
+  else ghost_adjacent_edges_[v - ghost_offset_].reserve(num_edges);
 }
 
 VertexID DynamicGraphCommunicator::AddGhostVertex(VertexID v) {
-  VertexID local_id = ghost_vertex_counter_ + ghost_offset_;
-  global_to_local_map_[v] = local_id;
-  ghost_vertex_counter_++;
-
-  // Update data
-  local_vertices_data_[local_id].is_interface_vertex_ = false;
-  local_vertices_data_[local_id].global_id_ = v;
-  ghost_vertices_data_[local_id].rank_ = GetPEFromOffset(v);
-
-  // Set adjacent PE
-  PEID neighbor = GetPEFromOffset(v);
-
-  // Set active
-  is_active_[local_id] = true;
-
-  // Set payload
-  vertex_payload_[local_id] = {std::numeric_limits<VertexID>::max() - 1, 
-                               v, 
-#ifdef TIEBREAK_DEGREE
-                               0,
-#endif
-                               neighbor};
-
-  number_of_vertices_++;
-  return local_id;
+  AddGhostVertex(v, GetPEFromOffset(v));
 }
 
 VertexID DynamicGraphCommunicator::AddGhostVertex(VertexID v, PEID pe) {
@@ -107,23 +85,27 @@ VertexID DynamicGraphCommunicator::AddGhostVertex(VertexID v, PEID pe) {
   ghost_vertex_counter_++;
 
   // Update data
-  local_vertices_data_[local_id].is_interface_vertex_ = false;
-  local_vertices_data_[local_id].global_id_ = v;
-  ghost_vertices_data_[local_id].rank_ = pe;
+  ghost_vertices_data_.resize(ghost_vertices_data_.size() + 1);
+  ghost_payload_.resize(ghost_payload_.size() + 1);
+  ghost_adjacent_edges_.resize(ghost_adjacent_edges_.size() + 1);
+  ghost_parent_.resize(ghost_parent_.size() + 1);
+  ghost_active_.resize(ghost_active_.size() + 1);
+  ghost_vertices_data_[local_id - ghost_offset_].global_id_ = v;
+  ghost_vertices_data_[local_id - ghost_offset_].rank_ = pe;
 
   // Set adjacent PE
   PEID neighbor = pe;
 
   // Set active
-  is_active_[local_id] = true;
+  ghost_active_[local_id - ghost_offset_] = true;
 
   // Set payload
-  vertex_payload_[local_id] = {std::numeric_limits<VertexID>::max() - 1, 
-                               v, 
+  ghost_payload_[local_id - ghost_offset_] = {std::numeric_limits<VertexID>::max() - 1, 
+                                              v, 
 #ifdef TIEBREAK_DEGREE
-                               0,
+                                              0,
 #endif
-                               neighbor};
+                                              neighbor};
 
   number_of_vertices_++;
   return local_id;
@@ -135,6 +117,7 @@ EdgeID DynamicGraphCommunicator::AddEdge(VertexID from, VertexID to, PEID rank) 
     AddLocalEdge(from, to);
   } else {
     PEID neighbor = (rank == size_) ? GetPEFromOffset(to) : rank;
+    // TODO: Is from always local?
     local_vertices_data_[from].is_interface_vertex_ = true;
     if (IsGhostFromGlobal(to)) { // true if ghost already in map, otherwise false
       number_of_cut_edges_++;
@@ -164,9 +147,10 @@ EdgeID DynamicGraphCommunicator::RelinkEdge(VertexID from, VertexID old_to, Vert
   }
 
   // Actual relink
-  for (VertexID i = 0; i < adjacent_edges_[from].size(); i++) {
-    if (adjacent_edges_[from][i].target_ == old_to_local) {
-      adjacent_edges_[from][i].target_ = new_to_local;
+  // TODO: from should always be local
+  for (VertexID i = 0; i < local_adjacent_edges_[from].size(); i++) {
+    if (local_adjacent_edges_[from][i].target_ == old_to_local) {
+      local_adjacent_edges_[from][i].target_ = new_to_local;
     }
   }
 
@@ -197,17 +181,21 @@ EdgeID DynamicGraphCommunicator::RelinkEdge(VertexID from, VertexID old_to, Vert
   return edge_counter_;
 }
 
-// TODO: Also support operation that removes whole set of edges but not all?
 EdgeID DynamicGraphCommunicator::RemoveEdge(VertexID from, VertexID to) {
   VertexID delete_pos = ghost_offset_;
-  for (VertexID i = 0; i < adjacent_edges_[from].size(); i++) {
-    if (adjacent_edges_[from][i].target_ == to) {
-      delete_pos = i;
-      break;
+  if (IsLocal(from)) {
+    for (VertexID i = 0; i < local_adjacent_edges_[from].size(); i++) {
+      if (local_adjacent_edges_[from][i].target_ == to) {
+        delete_pos = i;
+        break;
+      }
     }
-  }
-  if (delete_pos != ghost_offset_) {
-    adjacent_edges_[from].erase(adjacent_edges_[from].begin() + delete_pos);
+    if (delete_pos != ghost_offset_) {
+      local_adjacent_edges_[from].erase(local_adjacent_edges_[from].begin() + delete_pos);
+    } else {
+      std::cout << "This shouldn't happen" << std::endl;
+      exit(1);
+    }
   } else {
     std::cout << "This shouldn't happen" << std::endl;
     exit(1);
@@ -215,15 +203,17 @@ EdgeID DynamicGraphCommunicator::RemoveEdge(VertexID from, VertexID to) {
 }
 
 void DynamicGraphCommunicator::RemoveAllEdges(const VertexID from) {
-  adjacent_edges_[from].clear();
+  if (IsLocal(from)) local_adjacent_edges_[from].clear();
+  else ghost_adjacent_edges_[from - ghost_offset_].clear();
 }
 
 void DynamicGraphCommunicator::AddLocalEdge(VertexID from, VertexID to) {
-  adjacent_edges_[from].emplace_back(global_to_local_map_[to]);
+  if (IsLocal(from)) local_adjacent_edges_[from].emplace_back(global_to_local_map_[to]);
+  else ghost_adjacent_edges_[from - ghost_offset_].emplace_back(global_to_local_map_[to]);
 }
 
 void DynamicGraphCommunicator::AddGhostEdge(VertexID from, VertexID to) {
-  adjacent_edges_[from].emplace_back(global_to_local_map_[to]);
+  AddLocalEdge(from, to);
 }
 
 void DynamicGraphCommunicator::SetAdjacentPE(const PEID pe, const bool is_adj) {
@@ -290,7 +280,7 @@ void DynamicGraphCommunicator::OutputLabels() {
     std::stringstream out;
     out << "[R" << rank << "] [V] "
         << GetGlobalID(v) << " label="
-        << vertex_payload_[v].label_;
+        << local_payload_[v].label_;
     std::cout << out.str() << std::endl;
   });
 }
