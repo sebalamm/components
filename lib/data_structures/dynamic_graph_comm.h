@@ -45,7 +45,9 @@
 #include "timer.h"
 #include "payload.h"
 
-class DynamicVertexCommunicator;
+template<typename GraphType> 
+class VertexCommunicator;
+
 class DynamicGraphCommunicator {
   struct Vertex {
     EdgeID first_edge_;
@@ -552,7 +554,7 @@ class DynamicGraphCommunicator {
   std::vector<bool> adjacent_pes_;
 
   // Communication interface
-  DynamicVertexCommunicator *ghost_comm_;
+  VertexCommunicator<DynamicGraphCommunicator> *ghost_comm_;
 
   // Temporary counters
   VertexID vertex_counter_;

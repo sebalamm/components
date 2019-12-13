@@ -19,21 +19,23 @@
  * this program.  If not, see <http://www.gnu.org/licenses/>.
  *****************************************************************************/
 
-#ifndef _STATIC_VERTEX_COMMUNICATOR_H_
-#define _STATIC_VERTEX_COMMUNICATOR_H_
+#ifndef _VERTEX_COMMUNICATOR_H_
+#define _VERTEX_COMMUNICATOR_H_
 
 #include <unordered_map>
 #include <vector>
 #include <memory>
 
 #include "config.h"
+#include "dynamic_graph_comm.h"
 #include "static_graph_comm.h"
 
 using Buffer = std::vector<VertexID>;
 
-class StaticVertexCommunicator {
+template<typename GraphType>
+class VertexCommunicator {
  public:
-  StaticVertexCommunicator(const PEID rank,
+  VertexCommunicator(const PEID rank,
                    const PEID size,
                    MPI_Comm communicator)
       : communicator_(communicator),
@@ -49,12 +51,12 @@ class StaticVertexCommunicator {
     send_tag_ = static_cast<unsigned int>(100 * size_);
     recv_tag_ = static_cast<unsigned int>(100 * size_);
   }
-  virtual ~StaticVertexCommunicator() {};
+  virtual ~VertexCommunicator() {};
 
-  StaticVertexCommunicator(const StaticVertexCommunicator &rhs) = default;
-  StaticVertexCommunicator(StaticVertexCommunicator &&rhs) = default;
+  VertexCommunicator(const VertexCommunicator &rhs) = default;
+  VertexCommunicator(VertexCommunicator &&rhs) = default;
  
-  inline void SetGraph(StaticGraphCommunicator *g) {
+  inline void SetGraph(GraphType *g) {
     g_ = g;
   }
 
@@ -95,9 +97,10 @@ class StaticVertexCommunicator {
     return comm_time_;
   }
 
+
  private:
   MPI_Comm communicator_;
-  StaticGraphCommunicator *g_;
+  GraphType *g_;
 
   PEID rank_, size_;
 
@@ -125,7 +128,7 @@ class StaticVertexCommunicator {
           (*current_send_buffers_)[pe].emplace_back(0);
         }
         isend_requests_.emplace_back(MPI_Request());
-        MPI_Isend(&(*current_send_buffers_)[pe][0],
+        MPI_Isend((*current_send_buffers_)[pe].data(),
                   static_cast<int>((*current_send_buffers_)[pe].size()),
                   MPI_VERTEX, pe,
                   send_tag_, communicator_, &isend_requests_.back());
@@ -145,5 +148,8 @@ class StaticVertexCommunicator {
     }
   }
 };
+
+template class VertexCommunicator<DynamicGraphCommunicator>;
+template class VertexCommunicator<StaticGraphCommunicator>;
 
 #endif

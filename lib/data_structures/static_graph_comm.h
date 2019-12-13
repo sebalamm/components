@@ -45,7 +45,9 @@
 #include "timer.h"
 #include "payload.h"
 
-class StaticVertexCommunicator;
+template<typename GraphType> 
+class VertexCommunicator;
+
 class StaticGraphCommunicator {
   struct Vertex {
     EdgeID first_edge_;
@@ -447,7 +449,7 @@ class StaticGraphCommunicator {
   std::vector<bool> adjacent_pes_;
 
   // Communication interface
-  StaticVertexCommunicator *ghost_comm_;
+  VertexCommunicator<StaticGraphCommunicator> *ghost_comm_;
 
   // Temporary counters
   VertexID vertex_counter_;

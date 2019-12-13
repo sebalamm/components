@@ -2,7 +2,7 @@
 #include <sstream>
 
 #include "static_graph_comm.h"
-#include "static_vertex_comm.h"
+#include "vertex_comm.h"
   
 StaticGraphCommunicator::StaticGraphCommunicator(const PEID rank, const PEID size) 
     : rank_(rank),
@@ -21,7 +21,7 @@ StaticGraphCommunicator::StaticGraphCommunicator(const PEID rank, const PEID siz
       ghost_counter_(0),
       last_source_(0),
       comm_time_(0.0) {
-  ghost_comm_ = new StaticVertexCommunicator(rank_, size_, MPI_COMM_WORLD);
+  ghost_comm_ = new VertexCommunicator<StaticGraphCommunicator>(rank_, size_, MPI_COMM_WORLD);
   ghost_comm_->SetGraph(this);
   global_to_local_map_.set_empty_key(-1);
 }
@@ -33,7 +33,7 @@ StaticGraphCommunicator::~StaticGraphCommunicator() {
 
 void StaticGraphCommunicator::ResetCommunicator() {
   delete ghost_comm_;
-  ghost_comm_ = new StaticVertexCommunicator(rank_, size_, MPI_COMM_WORLD);
+  ghost_comm_ = new VertexCommunicator<StaticGraphCommunicator>(rank_, size_, MPI_COMM_WORLD);
   ghost_comm_->SetGraph(this);
 }
 

@@ -3,8 +3,8 @@ project(components)
 
 find_package(MPI REQUIRED)
 
-set(OMPI_CC gcc-7)
-set(OMPI_CXX g++-7)
+# set(OMPI_CC mpicc.mpich)
+# set(OMPI_CXX mpicxx.mpich)
 set(CMAKE_EXPORT_COMPILE_COMMANDS ON)
 
 if (NOT CMAKE_BUILD_TYPE)
@@ -28,50 +28,50 @@ add_subdirectory(extern/kagen)
 # add_subdirectory(extern/KaHIP)
 
 include_directories(
-        app
-        lib
-        lib/communication
-        lib/components
-        lib/contraction
-        lib/data_structures
-        lib/io
-        lib/tools
-        extern/kagen/extlib/sampling/sampling
-        extern/kagen/include
-        extern/kagen/include/generators
-        extern/kagen/include/generators/barabassi
-        extern/kagen/include/generators/geometric
-        extern/kagen/include/generators/geometric/delaunay
-        extern/kagen/include/generators/geometric/rgg
-        extern/kagen/include/generators/gnm
-        extern/kagen/include/generators/gnp
-        extern/kagen/include/generators/hyperbolic
-        extern/kagen/include/io
-        extern/kagen/include/tools
-        extern/kagen/interface/
+          app
+          lib
+          lib/communication
+          lib/components
+          lib/contraction
+          lib/data_structures
+          lib/io
+          lib/tools
+          extern/kagen/extlib/sampling/sampling
+          extern/kagen/include
+          extern/kagen/include/generators
+          extern/kagen/include/generators/barabassi
+          extern/kagen/include/generators/geometric
+          extern/kagen/include/generators/geometric/delaunay
+          extern/kagen/include/generators/geometric/rgg
+          extern/kagen/include/generators/gnm
+          extern/kagen/include/generators/gnp
+          extern/kagen/include/generators/hyperbolic
+          extern/kagen/include/io
+          extern/kagen/include/tools
+          extern/kagen/interface/
 )
 
 
 set(SOURCES
-        app
-        lib
-        lib/communication
-        lib/communication/dynamic_vertex_comm.cpp
-        lib/communication/static_vertex_comm.cpp
-        lib/components
-        lib/contraction
-        lib/data_structures
-        lib/data_structures/dynamic_graph_comm.cpp
-        lib/data_structures/static_graph_comm.cpp
-        lib/io
-        lib/tools
-        )
+          app
+          lib
+          lib/communication
+          lib/communication/vertex_comm.cpp
+          lib/components
+          lib/contraction
+          lib/data_structures
+          lib/data_structures/dynamic_graph_comm.cpp
+          lib/data_structures/static_graph_comm.cpp
+          lib/io
+          lib/tools
+)
 
+# add_executable(isend ${SOURCES} "isend_example.cpp")
 add_executable(exponential ${SOURCES} "app/exp_contraction.cpp")
 add_executable(allreduce ${SOURCES} "app/all_reduce.cpp")
-add_executable(local ${SOURCES} "app/local_contraction.cpp")
-add_executable(shortcuts ${SOURCES} "app/shortcuts.cpp")
-add_executable(labels ${SOURCES} "app/labels.cpp")
+# add_executable(local ${SOURCES} "app/local_contraction.cpp")
+# add_executable(shortcuts ${SOURCES} "app/shortcuts.cpp")
+# add_executable(labels ${SOURCES} "app/labels.cpp")
 
 set(LIBS
         spooky
@@ -80,8 +80,9 @@ set(LIBS
         asan
         )
 
+      # target_link_libraries(isend LINK_PUBLIC ${LIBS})
 target_link_libraries(exponential LINK_PUBLIC ${LIBS})
 target_link_libraries(allreduce LINK_PUBLIC ${LIBS})
-target_link_libraries(local LINK_PUBLIC ${LIBS})
-target_link_libraries(shortcuts LINK_PUBLIC ${LIBS})
-target_link_libraries(labels LINK_PUBLIC ${LIBS})
+# target_link_libraries(local LINK_PUBLIC ${LIBS})
+# target_link_libraries(shortcuts LINK_PUBLIC ${LIBS})
+# target_link_libraries(labels LINK_PUBLIC ${LIBS})

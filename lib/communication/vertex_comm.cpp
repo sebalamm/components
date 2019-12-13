@@ -1,9 +1,10 @@
 #include <iostream>
 
-#include "static_vertex_comm.h"
+#include "vertex_comm.h"
 
-void StaticVertexCommunicator::AddMessage(const VertexID v,
-                                    const VertexPayload &msg) {
+template<typename GraphType>
+void VertexCommunicator<GraphType>::AddMessage(const VertexID v,
+                                               const VertexPayload &msg) {
   g_->ForallNeighbors(v, [&](const VertexID u) {
     if (!g_->IsLocal(u)) {
       PEID neighbor = g_->GetPE(u);
@@ -26,7 +27,8 @@ void StaticVertexCommunicator::AddMessage(const VertexID v,
   });
 }
 
-void StaticVertexCommunicator::ReceiveMessages() {
+template<typename GraphType>
+void VertexCommunicator<GraphType>::ReceiveMessages() {
   PEID messages_recv = 0;
   recv_tag_++;
   while (messages_recv < GetNumberOfAdjacentPEs()) {

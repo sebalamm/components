@@ -2,7 +2,7 @@
 #include <sstream>
 
 #include "dynamic_graph_comm.h"
-#include "dynamic_vertex_comm.h"
+#include "vertex_comm.h"
   
 DynamicGraphCommunicator::DynamicGraphCommunicator(const PEID rank, const PEID size) 
     : rank_(rank),
@@ -19,7 +19,7 @@ DynamicGraphCommunicator::DynamicGraphCommunicator(const PEID rank, const PEID s
       edge_counter_(0),
       ghost_offset_(0),
       comm_time_(0.0) {
-  ghost_comm_ = new DynamicVertexCommunicator(rank_, size_, MPI_COMM_WORLD);
+  ghost_comm_ = new VertexCommunicator<DynamicGraphCommunicator>(rank_, size_, MPI_COMM_WORLD);
   ghost_comm_->SetGraph(this);
   label_shortcut_.set_empty_key(-1);
   global_to_local_map_.set_empty_key(-1);
@@ -32,7 +32,7 @@ DynamicGraphCommunicator::~DynamicGraphCommunicator() {
 
 void DynamicGraphCommunicator::ResetCommunicator() {
   delete ghost_comm_;
-  ghost_comm_ = new DynamicVertexCommunicator(rank_, size_, MPI_COMM_WORLD);
+  ghost_comm_ = new VertexCommunicator<DynamicGraphCommunicator>(rank_, size_, MPI_COMM_WORLD);
   ghost_comm_->SetGraph(this);
 }
 
