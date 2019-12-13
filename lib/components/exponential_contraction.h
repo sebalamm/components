@@ -27,6 +27,7 @@
 #include <set>
 
 #include <sys/sysinfo.h>
+#include <experimental/random>
 
 #include "config.h"
 #include "definitions.h"
@@ -162,7 +163,6 @@ class ExponentialContraction {
   DynamicContraction *exp_contraction_;
 
   // Node replication
-  google::sparse_hash_map<VertexID, VertexID> distribution_map_;
   std::vector<VertexID> replicated_vertices_;
 
   void PerformDecomposition(DynamicGraphCommunicator &g) {
@@ -461,8 +461,10 @@ class ExponentialContraction {
   }
 
   void DistributeHighDegreeVertices(DynamicGraphCommunicator &g) {
+    if (rank_ == 6) g.OutputLocal();
     // Offset for new vertex IDs
-    VertexID vertex_offset = g.GatherNumberOfGlobalVertices() * rank_;
+    VertexID global_vertices = g.GatherNumberOfGlobalVertices();
+    VertexID vertex_offset = global_vertices * (rank_ + 1);
     VertexID local_max_deg = 0;
     g.ForallLocalVertices([&](const VertexID v) {
         VertexID v_deg = g.GetVertexDegree(v);
@@ -477,7 +479,6 @@ class ExponentialContraction {
     VertexID avg_max_deg = global_max_deg / size_; 
     if (rank_ == ROOT) std::cout << "avg max deg " << avg_max_deg << std::endl;
 
-    VertexID total_parts = 0;
     VertexID num_new_vertices = 0;
     std::vector<std::vector<VertexID>> send_buffers(size_);
     std::vector<std::vector<VertexID>> receive_buffers(size_);
@@ -485,76 +486,124 @@ class ExponentialContraction {
       g.ForallLocalVertices([&](const VertexID v) {
         VertexID v_deg = g.GetVertexDegree(v);
         if (v_deg >= 4 * avg_max_deg) {
-          // std::cout << "R" << rank_ << " v " << g.GetGlobalID(v) << " d " << v_deg << std::endl;
-
           // Split adjacency list for building the star
-          avg_max_deg = std::max<VertexID>(avg_max_deg, 2);
-          VertexID num_parts = static_cast<VertexID>(ceil(v_deg / avg_max_deg));
-          std::vector<std::vector<VertexID>> adj_list_parts(num_parts);
-          std::vector<std::vector<VertexID>> num_adj(num_parts);
-          std::vector<VertexID> edges_to_insert;
-          for (VertexID i = 0; i < num_parts; ++i) num_adj[i].resize(size_, 0);
-
-          VertexID adj_counter = 0;
-          VertexID current_part = 0;
-          g.ForallNeighbors(v, [&](const VertexID w) {
-              // Reset counter for new part
-              if (adj_counter >= avg_max_deg) {
-                current_part++;
-                adj_counter = 0;
-              }
-              // Add v to the beginning of each part
-              if (adj_counter == 0) {
-                adj_list_parts[current_part].emplace_back(g.GetGlobalID(v));
-                adj_list_parts[current_part].emplace_back(vertex_offset + num_new_vertices);
-                num_new_vertices++;
-              }
-              // Add neighbors to end of part
-              PEID w_pe = g.GetPE(w);
-              adj_list_parts[current_part].emplace_back(g.GetGlobalID(w));
-              adj_list_parts[current_part].emplace_back(w_pe);
-              adj_counter++;
-              num_adj[current_part][w_pe]++;
-          });
-          total_parts += current_part;
-
-          for (VertexID i = 0; i < num_parts; ++i) {
-            PEID max_pe = 0;
-            PEID max_adj = 0;
-            for (PEID j = 0; j < size_; ++j) {
-              if (num_adj[i][j] > max_adj) {
-                max_adj = num_adj[i][j];
-                max_pe = j;
-              }
-            }
-            send_buffers[max_pe].swap(adj_list_parts[i]);
-            edges_to_insert.emplace_back(send_buffers[max_pe][1]);
-            edges_to_insert.emplace_back(max_pe);
-          }
-          g.RemoveAllEdges(v);
-          for (VertexID i = 0; i < edges_to_insert.size(); i += 2) {
-            VertexID target =  edges_to_insert[i];
-            VertexID target_pe =  edges_to_insert[i+1];
-            g.AddGhostVertex(target, target_pe);
-            // std::cout << "R" << rank_ << " add ghost vertex " << target << " pe(ghost)=" << target_pe << std::endl;
-            g.AddEdge(v, target, target_pe);
-            distribution_map_[target] = v;
-            // std::cout << "R" << rank_ << " add edge (" << g.GetGlobalID(v) << "," << target << ") pe(target)=" << target_pe << std::endl;
-          }
+          ComputeEdgePartitioning(g, avg_max_deg, v, v_deg, vertex_offset, num_new_vertices, send_buffers);
         }
       });
     }
 
     ExchangeMessages(send_buffers, receive_buffers);
-    ProcessAdjLists(g, receive_buffers, send_buffers);
+    ProcessAdjLists(g, global_vertices, receive_buffers, send_buffers);
     ExchangeMessages(send_buffers, receive_buffers);
     ProcessRouting(g, receive_buffers);
-    // TODO: Optimize detection of neighboring PEs and interface vertices
     UpdateInterfaceVertices(g);
 
     // TODO: Relink local edges to original vertex to replicated ones (further reduces messages)
     //       Actually do this by partitioning the vertices properly on the sender side
     // TODO: Reintroduce Semidynamic graph class
+    if (rank_ == 6) g.OutputLocal();
+  }
+
+  void ComputeEdgePartitioning(DynamicGraphCommunicator &g,
+                               const VertexID &avg_max_deg,
+                               const VertexID &vertex_id,
+                               const VertexID &vertex_deg,
+                               const VertexID &new_vertices_offset,
+                               VertexID &new_vertices_counter,
+                               std::vector<std::vector<VertexID>> &send_buffers) {
+    // Ensure that its not just a single partition
+    VertexID clamped_avg_max_deg = std::max<VertexID>(avg_max_deg, 2);
+
+    // Number of partitions to generate
+    VertexID num_parts = static_cast<VertexID>(ceil(vertex_deg / clamped_avg_max_deg));
+    VertexID part_size = vertex_deg / num_parts;
+
+    // Temporary vector for storing new local edges 
+    std::vector<VertexID> local_edges;
+
+    // TODO: Improve how the partitioning done
+    //       Sort the adjacency parts s.t. a single PE gets all edges corresponding to its local vertices
+    //       If multiple PEs have the same number of edges choose a random one
+    //       Only send parts if they at least contain two edges
+    std::vector<std::vector<std::pair<VertexID, PEID>>> edges_for_pe(size_);
+    g.ForallNeighbors(vertex_id, [&](const VertexID w) {
+        edges_for_pe[g.GetPE(w)].emplace_back(g.GetGlobalID(w), g.GetPE(w));
+    });
+    // TODO: Add random tiebreaking
+    PEID num_neighboring_pes = edges_for_pe.size();
+    // std::experimental::reseed(config_.seed + rank_);
+    std::sort(edges_for_pe.begin(), edges_for_pe.end(), [](const auto& lhs, const auto& rhs) {
+        return lhs.size() > rhs.size();
+    });
+
+    VertexID remaining_edges = vertex_deg;
+    VertexID remaining_parts = num_parts;
+    // Check if we can send single large part to PE
+    for (PEID i = 0; i < size_; ++i) {
+      if (edges_for_pe[i].empty()) continue;
+      PEID pe = edges_for_pe[i][0].second;
+      VertexID num_edges = edges_for_pe[i].size();
+      if (num_edges > 0) {
+        if (num_edges >= part_size) {
+          // TODO: Move elements from edges_for_pe to send_buffer
+          send_buffers[pe].emplace_back(g.GetGlobalID(vertex_id));
+          send_buffers[pe].emplace_back(new_vertices_offset + new_vertices_counter);
+          local_edges.emplace_back(new_vertices_offset + new_vertices_counter);
+          local_edges.emplace_back(pe);
+          new_vertices_counter++;
+          for (const auto &kv : edges_for_pe[i]) {
+            send_buffers[pe].emplace_back(kv.first);
+            send_buffers[pe].emplace_back(pe);
+          }
+          remaining_parts -= floor(edges_for_pe[i].size() / part_size);
+          edges_for_pe[i].clear();
+        }
+      }
+    }
+
+    // Distribute the remaining parts greedily between neighboring PEs
+    while (remaining_parts > 0) {
+      // Greedily select PE with most remaining edges
+      PEID current_target_pe = std::numeric_limits<PEID>::max();
+      int remaining_part_size = part_size;
+      for (PEID i = 0; i < size_; ++i) {
+        if (edges_for_pe[i].empty()) continue;
+        if (edges_for_pe[i].size() > 0 && remaining_part_size > 0) {
+          // TODO: Move elements from edges_for_pe to send_buffer
+          // Set current PE as target for following messages
+          PEID pe = edges_for_pe[i][0].second;
+          if (current_target_pe >= size_) {
+            current_target_pe = pe;
+            send_buffers[current_target_pe].emplace_back(g.GetGlobalID(vertex_id));
+            send_buffers[current_target_pe].emplace_back(new_vertices_offset + new_vertices_counter);
+            local_edges.emplace_back(new_vertices_offset + new_vertices_counter);
+            local_edges.emplace_back(current_target_pe);
+            new_vertices_counter++;
+          }
+          // Add edges in current block
+          for (const auto &kv : edges_for_pe[i]) {
+            send_buffers[current_target_pe].emplace_back(kv.first);
+            send_buffers[current_target_pe].emplace_back(pe);
+          }
+          remaining_part_size -= edges_for_pe[i].size(); 
+          if (remaining_part_size <= 0) {
+            PEID current_target_pe = std::numeric_limits<PEID>::max();
+            // First step guarantees that edgelists are now smaller than a part
+            remaining_parts--;
+          }
+          edges_for_pe[i].clear();
+        }
+      }
+    }
+
+    // Update the adjacency list of the original (replicated) vertex
+    g.RemoveAllEdges(vertex_id);
+    for (VertexID i = 0; i < local_edges.size(); i += 2) {
+      VertexID target =  local_edges[i];
+      VertexID target_pe =  local_edges[i+1];
+      g.AddGhostVertex(target, target_pe);
+      g.AddEdge(vertex_id, target, target_pe);
+    }
   }
 
   void ExchangeMessages(std::vector<std::vector<VertexID>> &send_buffers,
@@ -640,6 +689,7 @@ class ExponentialContraction {
   }
 
   void ProcessAdjLists(DynamicGraphCommunicator &g, 
+                       const VertexID &offset,
                        std::vector<std::vector<VertexID>> & receive_buffer,
                        std::vector<std::vector<VertexID>> & send_buffer) {
     // Clear send buffers
@@ -649,36 +699,32 @@ class ExponentialContraction {
     // Process incoming vertices/edges
     for (PEID pe = 0; pe < size_; ++pe) {
       if (receive_buffer[pe].size() > 0) {
-        // std::cout << "R" << rank_ << " recv " << (receive_buffer[pe].size()-1)/2<< " edges from " << pe << std::endl;
-        VertexID source = receive_buffer[pe][0];
-        VertexID copy_vertex = receive_buffer[pe][1];
-        // std::cout << "R" << rank_ << " recv vertex " << source << " new_id " << copy_vertex << " from " << pe << std::endl;
-        VertexID local_copy_id = g.AddVertex(copy_vertex);
-        replicated_vertices_.emplace_back(local_copy_id);
-        // std::cout << "R" << rank_ << " add local vertex " << copy_vertex << std::endl;
-        g.AddEdge(local_copy_id, source, pe);
-        // std::cout << "R" << rank_ << " add edge (" << copy_vertex << "," << source << ") pe(target)=" << pe << std::endl;
-        for (VertexID i = 2; i < receive_buffer[pe].size(); i+=2) {
-          VertexID target = receive_buffer[pe][i];
-          VertexID target_pe = receive_buffer[pe][i+1];
-          // std::cout << "R" << rank_ << " recv edge (" << copy_vertex << "," << target << ") local(target)=" << (target_pe == rank_) << " pe(target)=" << target_pe << " from " << pe << std::endl;
-          // Neighbor is local vertex
-          if (target_pe == rank_) {
-            // g.AddEdge(g.GetLocalID(target), copy_vertex, rank_);
-            // std::cout << "R" << rank_ << " add edge (" << target << "," << copy_vertex << ") pe(target)=" << rank_ << std::endl;
-            g.RelinkEdge(g.GetLocalID(target), source, copy_vertex, rank_);
-            // std::cout << "R" << rank_ << " reroute edge (" << target << "," << source << ") pe(target)=" << g.GetPE(source) << " -> (" << target << "," << copy_vertex << ") pe(target)=" << rank_ << std::endl;
-          // Neighbor is remote vertex
+        VertexID source, copy_vertex;
+        for (VertexID i = 0; i < receive_buffer[pe].size(); i+=2) {
+          // New source
+          // Note: This might not work if number of global vertices is smaller than number of PEs
+          if (receive_buffer[pe][i+1] >= offset) {
+            source = receive_buffer[pe][i];
+            copy_vertex = receive_buffer[pe][i+1];
+            VertexID local_copy_id = g.AddVertex(copy_vertex);
+            replicated_vertices_.emplace_back(local_copy_id);
+            g.AddEdge(local_copy_id, source, pe);
           } else {
-            g.AddGhostVertex(target);
-            // Target PE needs to reroute (target, source) from (original) PE to (target, copy) on sender PE
-            send_buffer[target_pe].emplace_back(target);
-            send_buffer[target_pe].emplace_back(source);
-            send_buffer[target_pe].emplace_back(copy_vertex);
-            // std::cout << "R" << rank_ << " send reroute (" << target << "," << source << ") pe(target)=" << pe << " -> (" << target << "," << copy_vertex << ") pe(target)=" << rank_ << " to " << target_pe << std::endl;
+            VertexID target = receive_buffer[pe][i];
+            VertexID target_pe = receive_buffer[pe][i+1];
+            // Neighbor is local vertex
+            if (target_pe == rank_) {
+              g.RelinkEdge(g.GetLocalID(target), source, copy_vertex, rank_);
+            // Neighbor is remote vertex
+            } else {
+              g.AddGhostVertex(target);
+              // Target PE needs to reroute (target, source) from (original) PE to (target, copy) on sender PE
+              send_buffer[target_pe].emplace_back(target);
+              send_buffer[target_pe].emplace_back(source);
+              send_buffer[target_pe].emplace_back(copy_vertex);
+            }
+            g.AddEdge(g.GetLocalID(copy_vertex), target, target_pe);
           }
-          g.AddEdge(g.GetLocalID(copy_vertex), target, target_pe);
-          // std::cout << "R" << rank_ << " add edge (" << copy_vertex << "," << target << ") pe(target)=" << target_pe << std::endl;
         }
         // Clear receive buffers
         receive_buffer[pe].clear();
@@ -691,19 +737,15 @@ class ExponentialContraction {
     // Process incoming vertices/edges
     for (PEID pe = 0; pe < size_; ++pe) {
       if (receive_buffer[pe].size() > 0) {
-        // std::cout << "R" << rank_ << " recv " << receive_buffer[pe].size()/3 << " reroutes from " << pe << std::endl;
         for (VertexID i = 0; i < receive_buffer[pe].size(); i+=3) {
           VertexID source = receive_buffer[pe][i];
           VertexID old_target = receive_buffer[pe][i+1];
           VertexID new_target = receive_buffer[pe][i+2];
-          // std::cout << "R" << rank_ << " recv reroute (" << source << "," << old_target << ") pe(target)=" << g.GetPE(old_target) << " -> (" << source << "," << new_target << ") pe(target)=" << pe << " from " << pe << std::endl;
 
           if (!g.IsGhostFromGlobal(new_target)) {
-            // std::cout << "R" << rank_ << " add ghost vertex " << new_target << " pe(vertex)=" << pe << std::endl;
             g.AddGhostVertex(new_target, pe);
           }
           g.RelinkEdge(g.GetLocalID(source), old_target, new_target, pe);
-          // std::cout << "R" << rank_ << " reroute edge (" << source << "," << old_target << ") pe(target)=" << g.GetPE(old_target) << " -> (" << source << "," << new_target << ") pe(target)=" << pe << std::endl;
         }
       }
     }
