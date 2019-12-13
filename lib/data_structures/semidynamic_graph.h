@@ -19,8 +19,8 @@
  * this program.  If not, see <http://www.gnu.org/licenses/>.
  *****************************************************************************/
 
-#ifndef _DYNAMIC_GRAPH_H_
-#define _DYNAMIC_GRAPH_H_
+#ifndef _SEMIDYNAMIC_GRAPH_H_
+#define _SEMIDYNAMIC_GRAPH_H_
 
 #include <mpi.h>
 
@@ -44,42 +44,9 @@
 #include "config.h"
 #include "timer.h"
 
-class DynamicGraph {
-  struct Vertex {
-    EdgeID first_edge_;
-
-    Vertex() : first_edge_(std::numeric_limits<EdgeID>::max()) {}
-    explicit Vertex(EdgeID e) : first_edge_(e) {}
-  };
-
-  struct LocalVertexData {
-    bool is_interface_vertex_;
-
-    LocalVertexData()
-        : is_interface_vertex_(false) {}
-    LocalVertexData(const VertexID id, bool interface)
-        : is_interface_vertex_(interface) {}
-  };
-
-  struct GhostVertexData {
-    PEID rank_;
-    VertexID global_id_;
-
-    GhostVertexData()
-        : rank_(0), global_id_(0) {}
-    GhostVertexData(PEID rank, VertexID global_id)
-        : rank_(rank), global_id_(global_id) {}
-  };
-
-  struct Edge {
-    VertexID target_;
-
-    Edge() : target_(0) {}
-    explicit Edge(VertexID target) : target_(target) {}
-  };
-
+class SemidynamicGraph {
  public:
-  DynamicGraph(const PEID rank, const PEID size)
+  SemidynamicGraph(const PEID rank, const PEID size)
     : rank_(rank),
       size_(size),
       number_of_vertices_(0),
@@ -98,7 +65,7 @@ class DynamicGraph {
     global_to_local_map_.set_empty_key(-1);
   }
 
-  virtual ~DynamicGraph() {};
+  virtual ~SemidynamicGraph() {};
 
   //////////////////////////////////////////////
   // Graph construction
@@ -561,7 +528,42 @@ class DynamicGraph {
     return comm_time_;
   }
 
- private:
+ protected:
+  // Structs
+  struct Vertex {
+    EdgeID first_edge_;
+
+    Vertex() : first_edge_(std::numeric_limits<EdgeID>::max()) {}
+    explicit Vertex(EdgeID e) : first_edge_(e) {}
+  };
+
+  struct LocalVertexData {
+    bool is_interface_vertex_;
+
+    LocalVertexData()
+        : is_interface_vertex_(false) {}
+    LocalVertexData(const VertexID id, bool interface)
+        : is_interface_vertex_(interface) {}
+  };
+
+  struct GhostVertexData {
+    PEID rank_;
+    VertexID global_id_;
+
+    GhostVertexData()
+        : rank_(0), global_id_(0) {}
+    GhostVertexData(PEID rank, VertexID global_id)
+        : rank_(rank), global_id_(global_id) {}
+  };
+
+  struct Edge {
+    VertexID target_;
+
+    Edge() : target_(0) {}
+    explicit Edge(VertexID target) : target_(target) {}
+  };
+
+
   // Network information
   PEID rank_, size_;
 

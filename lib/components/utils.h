@@ -24,8 +24,8 @@
 
 #include <queue>
 
-#include "dynamic_graph.h"
 #include "dynamic_graph_comm.h"
+#include "semidynamic_graph.h"
 #include "static_graph.h"
 #include "static_graph_comm.h"
 
