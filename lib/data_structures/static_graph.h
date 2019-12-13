@@ -46,38 +46,6 @@
 
 
 class StaticGraph {
-  struct Vertex {
-    EdgeID first_edge_;
-
-    Vertex() : first_edge_(std::numeric_limits<EdgeID>::max()) {}
-    explicit Vertex(EdgeID e) : first_edge_(e) {}
-  };
-
-  struct LocalVertexData {
-    bool is_interface_vertex_;
-
-    LocalVertexData()
-        : is_interface_vertex_(false) {}
-    LocalVertexData(const VertexID id, bool interface)
-        : is_interface_vertex_(interface) {}
-  };
-
-  struct GhostVertexData {
-    PEID rank_;
-    VertexID global_id_;
-
-    GhostVertexData()
-        : rank_(0), global_id_(0) {}
-    GhostVertexData(PEID rank, VertexID global_id)
-        : rank_(rank), global_id_(global_id) {}
-  };
-
-  struct Edge {
-    VertexID target_;
-
-    Edge() : target_(0) {}
-    explicit Edge(VertexID target) : target_(target) {}
-  };
 
  public:
   StaticGraph(const PEID rank, const PEID size)
@@ -335,6 +303,11 @@ class StaticGraph {
     AddVertex();
     global_to_local_map_[v] = ghost_counter_;
 
+    if (ghost_counter_ > local_vertices_data_.size()) {
+      local_vertices_data_.resize(ghost_counter_ + 1);
+      ghost_vertices_data_.resize(ghost_counter_ + 1);
+    }
+
     // Update data
     local_vertices_data_[ghost_counter_].is_interface_vertex_ = false;
     ghost_vertices_data_[ghost_counter_ - ghost_offset_].rank_ = GetPEFromOffset(v);
@@ -518,7 +491,41 @@ class StaticGraph {
     return comm_time_;
   }
 
- private:
+ protected:
+  // Structs
+  struct Vertex {
+    EdgeID first_edge_;
+
+    Vertex() : first_edge_(std::numeric_limits<EdgeID>::max()) {}
+    explicit Vertex(EdgeID e) : first_edge_(e) {}
+  };
+
+  struct LocalVertexData {
+    bool is_interface_vertex_;
+
+    LocalVertexData()
+        : is_interface_vertex_(false) {}
+    LocalVertexData(const VertexID id, bool interface)
+        : is_interface_vertex_(interface) {}
+  };
+
+  struct GhostVertexData {
+    PEID rank_;
+    VertexID global_id_;
+
+    GhostVertexData()
+        : rank_(0), global_id_(0) {}
+    GhostVertexData(PEID rank, VertexID global_id)
+        : rank_(rank), global_id_(global_id) {}
+  };
+
+  struct Edge {
+    VertexID target_;
+
+    Edge() : target_(0) {}
+    explicit Edge(VertexID target) : target_(target) {}
+  };
+
   // Network information
   PEID rank_, size_;
 
