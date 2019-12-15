@@ -76,14 +76,13 @@ VertexID StaticGraphCommunicator::AddGhostVertex(VertexID v) {
 }
 
 void StaticGraphCommunicator::SetAdjacentPE(const PEID pe, const bool is_adj) {
-    StaticGraph::SetAdjacentPE(pe, is_adj);
-    ghost_comm_->SetAdjacentPE(pe, is_adj);
+  StaticGraph::SetAdjacentPE(pe, is_adj);
+  ghost_comm_->SetAdjacentPE(pe, is_adj);
 }
 
 void StaticGraphCommunicator::ResetAdjacentPEs() {
-  for (PEID i = 0; i < adjacent_pes_.size(); ++i) {
-    SetAdjacentPE(i, false);
-  }
+  StaticGraph::ResetAdjacentPEs();
+  ghost_comm_->ResetAdjacentPEs();
 }
 
 void StaticGraphCommunicator::OutputLocal() {

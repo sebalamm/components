@@ -208,48 +208,6 @@ class ExponentialContraction {
     });
   }
 
-  void FindHighDegreeVertices(DynamicGraphCommunicator &g) {
-    std::vector<VertexID> local_vertices;
-    std::vector<VertexID> local_degrees;
-    // MEMORY: Might be too small
-    int num_local_vertices = 0;
-
-    // Gather local high degree vertices
-    g.ForallLocalVertices([&](const VertexID v) {
-      VertexID degree = g.GetVertexDegree(v);
-      if (degree >= config_.degree_limit) {
-        local_vertices.push_back(g.GetGlobalID(v));
-        local_degrees.push_back(g.GetVertexDegree(v));
-        num_local_vertices++;
-      }
-    });
-
-    // Gather number of high degrees via all-gather
-    std::vector<int> num_vertices(size_);
-    MPI_Allgather(&num_local_vertices, 1, MPI_INT,
-                  &num_vertices[0], 1, MPI_INT,
-                  MPI_COMM_WORLD);
-
-    // Compute displacements
-    std::vector<int> displ(size_);
-    // MEMORY: Might be too small
-    int num_global_vertices = 0;
-    for (PEID i = 0; i < size_; ++i) {
-      displ[i] = num_global_vertices;
-      num_global_vertices += num_vertices[i];
-    }
-
-    // Distribute vertices/degrees using all-gather
-    std::vector<VertexID> global_vertices(num_global_vertices);
-    std::vector<VertexID> global_degrees(num_global_vertices);
-    MPI_Allgatherv(&local_vertices[0], num_local_vertices, MPI_VERTEX,
-                   &global_vertices[0], &num_vertices[0], &displ[0], MPI_VERTEX,
-                   MPI_COMM_WORLD);
-    MPI_Allgatherv(&local_degrees[0], num_local_vertices, MPI_VERTEX,
-                   &global_degrees[0], &num_vertices[0], &displ[0], MPI_VERTEX,
-                   MPI_COMM_WORLD);
-  }
-
   void RunContraction(DynamicGraphCommunicator &g) {
     contraction_timer_.Restart();
     // VertexID global_vertices = g.GatherNumberOfGlobalVertices();
@@ -264,9 +222,6 @@ class ExponentialContraction {
                   // << " [ADD] " << global_vertices << std::endl;
     }
     iteration_timer_.Restart();
-
-    // if (rank_ == ROOT) std::cout << "[STATUS] Find high degree" << std::endl;
-    // FindHighDegreeVertices(g);
     
     std::exponential_distribution<LPFloat> distribution(config_.beta);
     std::mt19937
@@ -539,6 +494,7 @@ class ExponentialContraction {
     VertexID remaining_edges = vertex_deg;
     VertexID remaining_parts = num_parts;
     // Check if we can send single large part to PE
+    // TODO: Change to neihgbor-loop
     for (PEID i = 0; i < size_; ++i) {
       if (edges_for_pe[i].empty()) continue;
       PEID pe = edges_for_pe[i][0].second;
@@ -566,6 +522,7 @@ class ExponentialContraction {
       // Greedily select PE with most remaining edges
       PEID current_target_pe = std::numeric_limits<PEID>::max();
       int remaining_part_size = part_size;
+    // TODO: Change to neihgbor-loop
       for (PEID i = 0; i < size_; ++i) {
         if (edges_for_pe[i].empty()) continue;
         if (edges_for_pe[i].size() > 0 && remaining_part_size > 0) {
@@ -609,12 +566,14 @@ class ExponentialContraction {
   void ExchangeMessages(std::vector<std::vector<VertexID>> &send_buffers,
                         std::vector<std::vector<VertexID>> &receive_buffers) {
     PEID num_requests = 0;
+    // TODO: Change to neihgbor-loop
     for (PEID pe = 0; pe < size_; ++pe) {
       if (send_buffers[pe].size() > 0) num_requests++; 
     }
     std::vector<MPI_Request> requests(num_requests);
 
     int req = 0;
+    // TODO: Change to neihgbor-loop
     for (PEID pe = 0; pe < size_; ++pe) {
       if (send_buffers[pe].size() > 0) {
         MPI_Issend(send_buffers[pe].data(), 
@@ -693,10 +652,12 @@ class ExponentialContraction {
                        std::vector<std::vector<VertexID>> & receive_buffer,
                        std::vector<std::vector<VertexID>> & send_buffer) {
     // Clear send buffers
+    // TODO: Change to neihgbor-loop
     for (PEID pe = 0; pe < size_; ++pe) {
       send_buffer[pe].clear();
     }
     // Process incoming vertices/edges
+    // TODO: Change to neihgbor-loop
     for (PEID pe = 0; pe < size_; ++pe) {
       if (receive_buffer[pe].size() > 0) {
         VertexID source, copy_vertex;
@@ -735,6 +696,7 @@ class ExponentialContraction {
   void ProcessRouting(DynamicGraphCommunicator &g, 
                       std::vector<std::vector<VertexID>> & receive_buffer) {
     // Process incoming vertices/edges
+    // TODO: Change to neihgbor-loop
     for (PEID pe = 0; pe < size_; ++pe) {
       if (receive_buffer[pe].size() > 0) {
         for (VertexID i = 0; i < receive_buffer[pe].size(); i+=3) {
@@ -766,6 +728,7 @@ class ExponentialContraction {
     });
 
     // Update PEs
+    // TODO: Change to neihgbor-loop
     for (PEID i = 0; i < size_; i++) {
       g.SetAdjacentPE(i, is_neighbor[i]);
     }

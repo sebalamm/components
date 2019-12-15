@@ -240,6 +240,7 @@ class ShortcutPropagation {
 
     // Send updates and requests
     int num_requests = 0;
+    // TODO: Change to neihgbor-loop
     for (PEID i = 0; i < size_; ++i) {
       if (i == rank_) continue;
       if (request_buffers[i].size() > 0) num_requests++;
@@ -248,6 +249,7 @@ class ShortcutPropagation {
 
     shortcut_timer_.Restart();
     int req = 0;
+    // TODO: Change to neihgbor-loop
     for (PEID i = 0; i < size_; ++i) {
       if (i == rank_) continue;
       if (request_buffers[i].size() > 0) {
@@ -345,6 +347,7 @@ class ShortcutPropagation {
                                  << "[TIME] " << shortcut_timer_.Elapsed() << std::endl;
 
     num_requests = 0;
+    // TODO: Change to neihgbor-loop
     for (PEID i = 0; i < size_; ++i) {
       if (i == rank_) continue;
       if (update_buffers[i].size() > 0) num_requests++;
@@ -354,6 +357,7 @@ class ShortcutPropagation {
     shortcut_timer_.Restart();
     statuses.resize(num_requests);
     req = 0;
+    // TODO: Change to neihgbor-loop
     for (PEID i = 0; i < size_; ++i) {
       if (i == rank_) continue;
       if (update_buffers[i].size() > 0) {

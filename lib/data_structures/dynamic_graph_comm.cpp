@@ -86,14 +86,13 @@ VertexID DynamicGraphCommunicator::AddGhostVertex(VertexID v, PEID pe) {
 }
 
 void DynamicGraphCommunicator::SetAdjacentPE(const PEID pe, const bool is_adj) {
-    DynamicGraph::SetAdjacentPE(pe, is_adj);
-    ghost_comm_->SetAdjacentPE(pe, is_adj);
+  DynamicGraph::SetAdjacentPE(pe, is_adj);
+  ghost_comm_->SetAdjacentPE(pe, is_adj);
 }
 
 void DynamicGraphCommunicator::ResetAdjacentPEs() {
-  for (PEID i = 0; i < adjacent_pes_.size(); ++i) {
-    SetAdjacentPE(i, false);
-  }
+  DynamicGraph::ResetAdjacentPEs();
+  ghost_comm_->ResetAdjacentPEs();
 }
 
 void DynamicGraphCommunicator::OutputLocal() {

@@ -87,14 +87,13 @@ VertexID SemidynamicGraphCommunicator::AddGhostVertex(VertexID v) {
 }
 
 void SemidynamicGraphCommunicator::SetAdjacentPE(const PEID pe, const bool is_adj) {
-    SemidynamicGraph::SetAdjacentPE(pe, is_adj);
-    ghost_comm_->SetAdjacentPE(pe, is_adj);
+  SemidynamicGraph::SetAdjacentPE(pe, is_adj);
+  ghost_comm_->SetAdjacentPE(pe, is_adj);
 }
 
 void SemidynamicGraphCommunicator::ResetAdjacentPEs() {
-  for (PEID i = 0; i < adjacent_pes_.size(); ++i) {
-    SetAdjacentPE(i, false);
-  }
+  SemidynamicGraph::ResetAdjacentPEs();
+  ghost_comm_->ResetAdjacentPEs();
 }
 
 void SemidynamicGraphCommunicator::OutputLocal() {

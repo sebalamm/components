@@ -44,10 +44,10 @@ class VertexCommunicator {
         rank_(rank),
         size_(size),
         comm_time_(0.0) {
-    packed_pes_.resize(static_cast<unsigned long>(size_), false);
-    adjacent_pes_.resize(static_cast<unsigned long>(size_), false);
-    send_buffers_a_.resize(static_cast<unsigned long>(size_));
-    send_buffers_b_.resize(static_cast<unsigned long>(size_));
+    packed_pes_.set_empty_key(-1);
+    adjacent_pes_.set_empty_key(-1);
+    send_buffers_a_.set_empty_key(-1);
+    send_buffers_b_.set_empty_key(-1);
     current_send_buffers_ = &send_buffers_a_;
     send_tag_ = static_cast<unsigned int>(100 * size_);
     recv_tag_ = static_cast<unsigned int>(100 * size_);
@@ -61,19 +61,49 @@ class VertexCommunicator {
     g_ = g;
   }
 
-  inline void SetAdjacentPE(const PEID neighbor, const bool is_adj) {
-    adjacent_pes_[neighbor] = is_adj;
+  inline PEID GetNumberOfAdjacentPEs() const {
+    return adjacent_pes_.size();
   }
 
-  inline PEID GetNumberOfAdjacentPEs() const {
-    PEID counter = 0;
-    for (PEID i = 0; i < adjacent_pes_.size(); i++) {
-      bool is_adj = adjacent_pes_[i];
-      if (is_adj) {
-        counter++;
-      }
+  template<typename F>
+  void ForallAdjacentPEs(F &&callback) {
+    for (const PEID &pe : adjacent_pes_) {
+      callback(pe);
     }
-    return counter;
+  }
+
+  inline bool IsAdjacentPE(const PEID pe) const {
+    return adjacent_pes_.find(pe) != adjacent_pes_.end();
+  }
+
+  inline bool IsPackedPE(const PEID pe) const {
+    return packed_pes_.find(pe) != packed_pes_.end();
+  }
+
+  void SetAdjacentPE(const PEID pe, const bool is_adj) {
+    if (pe == rank_) return;
+    if (is_adj) {
+      if (IsAdjacentPE(pe)) return;
+      else adjacent_pes_.insert(pe);
+    } else {
+      if (!IsAdjacentPE(pe)) return;
+      else adjacent_pes_.erase(pe);
+    }
+  }
+
+  void SetPackedPE(const PEID pe, const bool is_packed) {
+    if (pe == rank_) return;
+    if (is_packed) {
+      if (IsPackedPE(pe)) return;
+      else packed_pes_.insert(pe);
+    } else {
+      if (!IsPackedPE(pe)) return;
+      else packed_pes_.erase(pe);
+    }
+  }
+
+  void ResetAdjacentPEs() {
+    adjacent_pes_.clear();
   }
 
   void AddMessage(VertexID v, const VertexPayload &msg);
@@ -105,11 +135,11 @@ class VertexCommunicator {
 
   PEID rank_, size_;
 
-  std::vector<bool> adjacent_pes_;
-  std::vector<bool> packed_pes_;
-  std::vector<Buffer> *current_send_buffers_;
-  std::vector<Buffer> send_buffers_a_;
-  std::vector<Buffer> send_buffers_b_;
+  google::dense_hash_set<PEID> adjacent_pes_;
+  google::dense_hash_set<PEID> packed_pes_;
+  google::dense_hash_map<PEID, Buffer> *current_send_buffers_;
+  google::dense_hash_map<PEID, Buffer> send_buffers_a_;
+  google::dense_hash_map<PEID, Buffer> send_buffers_b_;
   std::vector<MPI_Request> isend_requests_;
 
   unsigned int send_tag_;
@@ -120,31 +150,31 @@ class VertexCommunicator {
 
   void SendMessages() {
     send_tag_++;
-    for (PEID pe = 0; pe < size_; ++pe) {
-      if (adjacent_pes_[pe]) {
-        if ((*current_send_buffers_)[pe].empty()) {
-          (*current_send_buffers_)[pe].emplace_back(std::numeric_limits<VertexID>::max());
-          (*current_send_buffers_)[pe].emplace_back(0);
-          (*current_send_buffers_)[pe].emplace_back(0);
-          (*current_send_buffers_)[pe].emplace_back(0);
-        }
-        isend_requests_.emplace_back(MPI_Request());
-        MPI_Isend((*current_send_buffers_)[pe].data(),
-                  static_cast<int>((*current_send_buffers_)[pe].size()),
-                  MPI_VERTEX, pe,
-                  send_tag_, communicator_, &isend_requests_.back());
+    ForallAdjacentPEs([&](const PEID &pe) {
+      if ((*current_send_buffers_)[pe].empty()) {
+        (*current_send_buffers_)[pe].emplace_back(std::numeric_limits<VertexID>::max());
+        (*current_send_buffers_)[pe].emplace_back(0);
+        (*current_send_buffers_)[pe].emplace_back(0);
+        (*current_send_buffers_)[pe].emplace_back(0);
       }
-    }
+      isend_requests_.emplace_back(MPI_Request());
+      MPI_Isend((*current_send_buffers_)[pe].data(),
+                static_cast<int>((*current_send_buffers_)[pe].size()),
+                MPI_VERTEX, pe,
+                send_tag_, communicator_, &isend_requests_.back());
+    });
   }
 
   void ReceiveMessages();
 
   void ClearAndSwitchBuffers() {
     if (current_send_buffers_ == &send_buffers_a_) {
-      for (int i = 0; i < size_; ++i) send_buffers_b_[i].clear();
+      for (auto &kv : send_buffers_b_) kv.second.clear();
+      send_buffers_b_.clear();
       current_send_buffers_ = &send_buffers_b_;
     } else {
-      for (int i = 0; i < size_; ++i) send_buffers_a_[i].clear();
+      for (auto &kv : send_buffers_a_) kv.second.clear();
+      send_buffers_a_.clear();
       current_send_buffers_ = &send_buffers_a_;
     }
   }

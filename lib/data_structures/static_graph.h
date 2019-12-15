@@ -65,6 +65,7 @@ class StaticGraph {
       last_source_(0),
       comm_time_(0.0) {
     global_to_local_map_.set_empty_key(-1);
+    adjacent_pes_.set_empty_key(-1);
   }
 
   virtual ~StaticGraph() {};
@@ -95,8 +96,6 @@ class StaticGraph {
     vertex_counter_ = local_n; 
     edge_counter_ = 0;
     ghost_counter_ = local_n;
-
-    adjacent_pes_.resize(static_cast<unsigned long>(size_), false);
   }
 
   void FinishConstruct() { 
@@ -348,29 +347,34 @@ class StaticGraph {
   // Manage adjacent PEs
   //////////////////////////////////////////////
   inline PEID GetNumberOfAdjacentPEs() const {
-    PEID counter = 0;
-    for (const bool is_adj : adjacent_pes_)
-      if (is_adj) counter++;
-    return counter;
+    return adjacent_pes_.size();
   }
 
-  inline std::vector<PEID> GetAdjacentPEs() const {
-    std::vector<PEID> adjacent_pes;
-    for (PEID i = 0; i < adjacent_pes_.size(); ++i) {
-      if (adjacent_pes_[i]) adjacent_pes.push_back(i);
+  template<typename F>
+  void ForallAdjacentPEs(F &&callback) {
+    for (const PEID &pe : adjacent_pes_) {
+      callback(pe);
     }
-    return adjacent_pes;
   }
 
   inline bool IsAdjacentPE(const PEID pe) const {
-    return adjacent_pes_[pe];
+    return adjacent_pes_.find(pe) != adjacent_pes_.end();
   }
 
-  inline void SetAdjacentPE(const PEID pe, const bool is_adj) {
+  void SetAdjacentPE(const PEID pe, const bool is_adj) {
     if (pe == rank_) return;
-    adjacent_pes_[pe] = is_adj;
+    if (is_adj) {
+      if (IsAdjacentPE(pe)) return;
+      else adjacent_pes_.insert(pe);
+    } else {
+      if (!IsAdjacentPE(pe)) return;
+      else adjacent_pes_.erase(pe);
+    }
   }
 
+  void ResetAdjacentPEs() {
+    adjacent_pes_.clear();
+  }
   //////////////////////////////////////////////
   // I/O
   //////////////////////////////////////////////
@@ -554,7 +558,7 @@ class StaticGraph {
   std::vector<VertexID> contraction_vertices_;
 
   // Adjacent PEs
-  std::vector<bool> adjacent_pes_;
+  google::dense_hash_set<PEID> adjacent_pes_;
 
   // Temporary counters
   VertexID vertex_counter_;

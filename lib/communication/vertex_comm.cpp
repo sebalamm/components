@@ -8,7 +8,7 @@ void VertexCommunicator<GraphType>::AddMessage(const VertexID v,
   g_->ForallNeighbors(v, [&](const VertexID u) {
     if (!g_->IsLocal(u)) {
       PEID neighbor = g_->GetPE(u);
-      if (!packed_pes_[neighbor]) {
+      if (!IsPackedPE(neighbor)) {
         // Unpack msg and add content (Sender, Deviate, Component, PE (of component))
         (*current_send_buffers_)[neighbor].emplace_back(g_->GetGlobalID(v));
         (*current_send_buffers_)[neighbor].emplace_back(msg.deviate_);
@@ -17,13 +17,13 @@ void VertexCommunicator<GraphType>::AddMessage(const VertexID v,
 #ifdef TIEBREAK_DEGREE
         (*current_send_buffers_)[neighbor].emplace_back(msg.degree_);
 #endif
-        packed_pes_[neighbor] = true;
+        SetPackedPE(neighbor, true);
       }
     }
   });
 
   g_->ForallNeighbors(v, [&](const VertexID u) {
-    if (!g_->IsLocal(u)) packed_pes_[g_->GetPE(u)] = false;
+    if (!g_->IsLocal(u)) SetPackedPE(g_->GetPE(u), false);
   });
 }
 
@@ -52,13 +52,6 @@ void VertexCommunicator<GraphType>::ReceiveMessages() {
     if (message_length < 4) continue;
     for (int i = 0; i < message_length; i += 4) {
 #endif
-    // if (rank_ == 0) std::cout 
-    //                   << message[i] 
-    //                   << " "
-    //                   << g_->IsGhostFromGlobal(message[i]) 
-    //                   << " "
-    //                   << st.MPI_SOURCE 
-    //                   << std::endl;
       VertexID global_id = message[i];
       VertexID deviate = message[i + 1];
       VertexID label = message[i + 2];
@@ -66,17 +59,6 @@ void VertexCommunicator<GraphType>::ReceiveMessages() {
 #ifdef TIEBREAK_DEGREE
       VertexID degree = message[i + 4];
 #endif
-// #ifndef NDEBUG
-// if (rank_ == 0) {
-//       std::cout << "[R" << rank_ << "] recv [" << local_id << "]("
-//                 << deviate << "," << label
-//                 << "," << root << ") from pe "
-//                 << st.MPI_SOURCE << " with tag " << recv_tag_
-//                 << " length " << message_length << " ["
-//                 << messages_recv << "/" << GetNumberOfAdjacentPEs() << "]"
-//                 << std::endl;
-//     }
-// #endif
 
       if (global_id == std::numeric_limits<VertexID>::max()) continue;
       VertexID local_id = g_->GetLocalID(global_id);
@@ -89,7 +71,6 @@ void VertexCommunicator<GraphType>::ReceiveMessages() {
 #endif
                             root);
     }
-    // if (rank_ == 11) std::cout << "done" << std::endl;
   }
   for (unsigned int i = 0; i < isend_requests_.size(); ++i) {
     if (isend_requests_[i] != MPI_REQUEST_NULL) {
