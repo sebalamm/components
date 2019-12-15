@@ -194,11 +194,14 @@ class ShortcutPropagation {
   }
 
   void Shortcut(StaticGraphCommunicator &g) {
-    // TODO: Fix size
-    std::vector<std::vector<VertexID>> update_buffers(size_);
-    std::vector<std::vector<VertexID>> request_buffers(size_);
+    google::dense_hash_map<PEID, std::vector<VertexID>> update_buffers;
+    update_buffers.set_empty_key(-1);
+    google::dense_hash_map<PEID, std::vector<VertexID>> request_buffers;
+    request_buffers.set_empty_key(-1);
+
     google::dense_hash_map<VertexID, std::vector<VertexID>> update_lists;
     update_lists.set_empty_key(-1);
+
     google::dense_hash_set<VertexID> request_set;
     request_set.set_empty_key(-1);
 
@@ -227,21 +230,21 @@ class ShortcutPropagation {
 
     // Send updates and requests
     int num_requests = 0;
-    // TODO: Fix iteration
-    for (PEID i = 0; i < size_; ++i) {
-      if (i == rank_) continue;
-      if (request_buffers[i].size() > 0) num_requests++;
+    for (const auto &kv : request_buffers) {
+      PEID pe = kv.first;
+      if (pe == rank_) continue;
+      if (request_buffers[pe].size() > 0) num_requests++;
     }
     std::vector<MPI_Request> answer_requests(num_requests);
 
     shortcut_timer_.Restart();
     int req = 0;
-    // TODO: Fix iteration
-    for (PEID i = 0; i < size_; ++i) {
-      if (i == rank_) continue;
-      if (request_buffers[i].size() > 0) {
-        MPI_Issend(request_buffers[i].data(), request_buffers[i].size(), MPI_VERTEX, i, 
-                   7 * size_ + i, MPI_COMM_WORLD, &answer_requests[req++]);
+    for (const auto &kv : request_buffers) {
+      PEID pe = kv.first;
+      if (pe == rank_) continue;
+      if (request_buffers[pe].size() > 0) {
+        MPI_Issend(request_buffers[pe].data(), request_buffers[pe].size(), MPI_VERTEX, pe, 
+                   7 * size_ + pe, MPI_COMM_WORLD, &answer_requests[req++]);
       }
     }
 
@@ -334,22 +337,22 @@ class ShortcutPropagation {
                                  << "[TIME] " << shortcut_timer_.Elapsed() << std::endl;
 
     num_requests = 0;
-    // TODO: Fix iteration
-    for (PEID i = 0; i < size_; ++i) {
-      if (i == rank_) continue;
-      if (update_buffers[i].size() > 0) num_requests++;
+    for (const auto &kv : request_buffers) {
+      PEID pe = kv.first;
+      if (pe == rank_) continue;
+      if (update_buffers[pe].size() > 0) num_requests++;
     }
     std::vector<MPI_Request> update_requests(num_requests);
 
     shortcut_timer_.Restart();
     statuses.resize(num_requests);
     req = 0;
-    // TODO: Fix iteration
-    for (PEID i = 0; i < size_; ++i) {
-      if (i == rank_) continue;
-      if (update_buffers[i].size() > 0) {
-        MPI_Issend(update_buffers[i].data(), update_buffers[i].size(), MPI_VERTEX, i, 
-                   72 * size_ + i, MPI_COMM_WORLD, &update_requests[req++]);
+    for (const auto &kv : request_buffers) {
+      PEID pe = kv.first;
+      if (pe == rank_) continue;
+      if (update_buffers[pe].size() > 0) {
+        MPI_Issend(update_buffers[pe].data(), update_buffers[pe].size(), MPI_VERTEX, pe, 
+                   72 * size_ + pe, MPI_COMM_WORLD, &update_requests[req++]);
       }
     }
 

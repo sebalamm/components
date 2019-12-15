@@ -430,9 +430,12 @@ class ExponentialContraction {
     if (rank_ == ROOT) std::cout << "avg max deg " << avg_max_deg << std::endl;
 
     VertexID num_new_vertices = 0;
-    // TODO: Fix size
-    std::vector<std::vector<VertexID>> send_buffers(size_);
-    std::vector<std::vector<VertexID>> receive_buffers(size_);
+
+    google::dense_hash_map<PEID, std::vector<VertexID>> send_buffers;
+    send_buffers.set_empty_key(-1);
+    google::dense_hash_map<PEID, std::vector<VertexID>> receive_buffers;
+    receive_buffers.set_empty_key(-1);
+
     if (local_max_deg >= 4 * avg_max_deg) {
       g.ForallLocalVertices([&](const VertexID v) {
         VertexID v_deg = g.GetVertexDegree(v);
@@ -456,7 +459,7 @@ class ExponentialContraction {
                                const VertexID &vertex_deg,
                                const VertexID &new_vertices_offset,
                                VertexID &new_vertices_counter,
-                               std::vector<std::vector<VertexID>> &send_buffers) {
+                               google::dense_hash_map<PEID, std::vector<VertexID>> &send_buffers) {
     // Ensure that its not just a single partition
     VertexID clamped_avg_max_deg = std::max<VertexID>(avg_max_deg, 2);
 
@@ -467,39 +470,47 @@ class ExponentialContraction {
     // Temporary vector for storing new local edges 
     std::vector<VertexID> local_edges;
 
-    std::vector<std::vector<std::pair<VertexID, PEID>>> edges_for_pe(size_);
+    google::dense_hash_map<PEID, std::vector<VertexID>> edges_for_pe;
+    edges_for_pe.set_empty_key(-1);
     g.ForallNeighbors(vertex_id, [&](const VertexID w) {
-        edges_for_pe[g.GetPE(w)].emplace_back(g.GetGlobalID(w), g.GetPE(w));
+        edges_for_pe[g.GetPE(w)].emplace_back(g.GetGlobalID(w));
     });
+    
+    // Copy hash map to vector
+    std::vector<std::pair<PEID, VertexID>> num_edges_for_pe;
+    for (const auto &kv : edges_for_pe) {
+      PEID pe = kv.first;
+      VertexID num_edges = kv.second.size();
+      num_edges_for_pe.emplace_back(pe, num_edges);
+    }
+
+
     // TODO: Add random tiebreaking
+    // TODO: Sorting does not work on hash map
     PEID num_neighboring_pes = edges_for_pe.size();
-    std::sort(edges_for_pe.begin(), edges_for_pe.end(), [](const auto& lhs, const auto& rhs) {
-        return lhs.size() > rhs.size();
+    std::sort(num_edges_for_pe.begin(), num_edges_for_pe.end(), [](const auto& lhs, const auto& rhs) {
+        return lhs.second > rhs.second;
     });
 
     VertexID remaining_edges = vertex_deg;
     VertexID remaining_parts = num_parts;
     // Check if we can send single large part to PE
-    // TODO: Fix iteration
-    for (PEID i = 0; i < size_; ++i) {
-      if (edges_for_pe[i].empty()) continue;
-      PEID pe = edges_for_pe[i][0].second;
-      VertexID num_edges = edges_for_pe[i].size();
-      if (num_edges > 0) {
-        if (num_edges >= part_size) {
-          // TODO: Move elements from edges_for_pe to send_buffer
-          send_buffers[pe].emplace_back(g.GetGlobalID(vertex_id));
-          send_buffers[pe].emplace_back(new_vertices_offset + new_vertices_counter);
-          local_edges.emplace_back(new_vertices_offset + new_vertices_counter);
-          local_edges.emplace_back(pe);
-          new_vertices_counter++;
-          for (const auto &kv : edges_for_pe[i]) {
-            send_buffers[pe].emplace_back(kv.first);
-            send_buffers[pe].emplace_back(pe);
-          }
-          remaining_parts -= floor(edges_for_pe[i].size() / part_size);
-          edges_for_pe[i].clear();
+    for (const auto &kv : num_edges_for_pe) {
+      PEID pe = kv.first;
+      VertexID num_edges = kv.second;
+      if (num_edges >= part_size) {
+        // TODO: Move elements from edges_for_pe to send_buffer
+        send_buffers[pe].emplace_back(g.GetGlobalID(vertex_id));
+        send_buffers[pe].emplace_back(new_vertices_offset + new_vertices_counter);
+        local_edges.emplace_back(new_vertices_offset + new_vertices_counter);
+        local_edges.emplace_back(pe);
+        new_vertices_counter++;
+        for (const auto &v : edges_for_pe[pe]) {
+          send_buffers[pe].emplace_back(v);
+          send_buffers[pe].emplace_back(pe);
         }
+        remaining_parts -= floor(num_edges / part_size);
+        edges_for_pe[pe].clear();
       }
     }
 
@@ -508,13 +519,12 @@ class ExponentialContraction {
       // Greedily select PE with most remaining edges
       PEID current_target_pe = std::numeric_limits<PEID>::max();
       int remaining_part_size = part_size;
-    // TODO: Fix iteration
-      for (PEID i = 0; i < size_; ++i) {
-        if (edges_for_pe[i].empty()) continue;
-        if (edges_for_pe[i].size() > 0 && remaining_part_size > 0) {
+      for (const auto &kv : num_edges_for_pe) {
+        PEID pe = kv.first;
+        PEID num_edges = kv.second;
+        if (num_edges > 0 && remaining_part_size > 0) {
           // TODO: Move elements from edges_for_pe to send_buffer
           // Set current PE as target for following messages
-          PEID pe = edges_for_pe[i][0].second;
           if (current_target_pe >= size_) {
             current_target_pe = pe;
             send_buffers[current_target_pe].emplace_back(g.GetGlobalID(vertex_id));
@@ -524,20 +534,21 @@ class ExponentialContraction {
             new_vertices_counter++;
           }
           // Add edges in current block
-          for (const auto &kv : edges_for_pe[i]) {
-            send_buffers[current_target_pe].emplace_back(kv.first);
+          for (const auto &v : edges_for_pe[pe]) {
+            send_buffers[current_target_pe].emplace_back(v);
             send_buffers[current_target_pe].emplace_back(pe);
           }
-          remaining_part_size -= edges_for_pe[i].size(); 
+          remaining_part_size -= num_edges; 
           if (remaining_part_size <= 0) {
             PEID current_target_pe = std::numeric_limits<PEID>::max();
             // First step guarantees that edgelists are now smaller than a part
             remaining_parts--;
           }
-          edges_for_pe[i].clear();
+          edges_for_pe[pe].clear();
         }
       }
     }
+    edges_for_pe.clear();
 
     // Update the adjacency list of the original (replicated) vertex
     g.RemoveAllEdges(vertex_id);
@@ -549,18 +560,18 @@ class ExponentialContraction {
     }
   }
 
-  void ExchangeMessages(std::vector<std::vector<VertexID>> &send_buffers,
-                        std::vector<std::vector<VertexID>> &receive_buffers) {
+  void ExchangeMessages(google::dense_hash_map<PEID, std::vector<VertexID>> &send_buffers,
+                        google::dense_hash_map<PEID, std::vector<VertexID>> &receive_buffers) {
     PEID num_requests = 0;
-    // TODO: Fix iteration
-    for (PEID pe = 0; pe < size_; ++pe) {
+    for (const auto &kv : send_buffers) {
+      PEID pe = kv.first;
       if (send_buffers[pe].size() > 0) num_requests++; 
     }
     std::vector<MPI_Request> requests(num_requests);
 
     int req = 0;
-    // TODO: Fix iteration
-    for (PEID pe = 0; pe < size_; ++pe) {
+    for (const auto &kv : send_buffers) {
+      PEID pe = kv.first;
       if (send_buffers[pe].size() > 0) {
         MPI_Issend(send_buffers[pe].data(), 
                    static_cast<int>(send_buffers[pe].size()), 
@@ -635,16 +646,17 @@ class ExponentialContraction {
 
   void ProcessAdjLists(DynamicGraphCommunicator &g, 
                        const VertexID &offset,
-                       std::vector<std::vector<VertexID>> & receive_buffer,
-                       std::vector<std::vector<VertexID>> & send_buffer) {
+                       google::dense_hash_map<PEID, std::vector<VertexID>> &receive_buffer,
+                       google::dense_hash_map<PEID, std::vector<VertexID>> &send_buffer) {
     // Clear send buffers
-    // TODO: Fix iteration
-    for (PEID pe = 0; pe < size_; ++pe) {
+    for (const auto &kv : send_buffer) {
+      PEID pe = kv.first;
       send_buffer[pe].clear();
     }
+    send_buffer.clear();
     // Process incoming vertices/edges
-    // TODO: Fix iteration
-    for (PEID pe = 0; pe < size_; ++pe) {
+    for (const auto &kv : receive_buffer) {
+      PEID pe = kv.first;
       if (receive_buffer[pe].size() > 0) {
         VertexID source, copy_vertex;
         for (VertexID i = 0; i < receive_buffer[pe].size(); i+=2) {
@@ -680,10 +692,10 @@ class ExponentialContraction {
   }
 
   void ProcessRouting(DynamicGraphCommunicator &g, 
-                      std::vector<std::vector<VertexID>> & receive_buffer) {
+                      google::dense_hash_map<PEID, std::vector<VertexID>> &receive_buffer) {
     // Process incoming vertices/edges
-    // TODO: Fix iteration
-    for (PEID pe = 0; pe < size_; ++pe) {
+    for (const auto &kv : receive_buffer) {
+      PEID pe = kv.first;
       if (receive_buffer[pe].size() > 0) {
         for (VertexID i = 0; i < receive_buffer[pe].size(); i+=3) {
           VertexID source = receive_buffer[pe][i];
@@ -701,13 +713,15 @@ class ExponentialContraction {
 
   void UpdateInterfaceVertices(DynamicGraphCommunicator &g) {
     // Check if PEs are still connected
-    // TODO: Fix size
-    std::vector<bool> is_neighbor(size_, false);
+    google::dense_hash_set<PEID> neighboring_pes;
+    neighboring_pes.set_empty_key(-1);
     g.ForallLocalVertices([&](const VertexID v) {
       bool ghost_neighbor = false;
       g.ForallNeighbors(v, [&](const VertexID w) {
         if (g.IsGhost(w)) {
-          is_neighbor[g.GetPE(v)] = true;
+          if (neighboring_pes.find(g.GetPE(v)) == neighboring_pes.end()) {
+            neighboring_pes.insert(g.GetPE(v));
+          }
           ghost_neighbor = true;
         }
       });
@@ -715,9 +729,8 @@ class ExponentialContraction {
     });
 
     // Update PEs
-    // TODO: Fix iteration
-    for (PEID i = 0; i < size_; i++) {
-      g.SetAdjacentPE(i, is_neighbor[i]);
+    for (const auto &pe : neighboring_pes) {
+      g.SetAdjacentPE(pe, true);
     }
   }
 
