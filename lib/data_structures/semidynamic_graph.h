@@ -285,9 +285,8 @@ class SemidynamicGraph {
     return vertex_counter_++;
   }
 
-  VertexID  AddGhostVertex(VertexID v) {
-    VertexID local_id = ghost_counter_++;
-    global_to_local_map_[v] = local_id;
+  VertexID AddGhostVertex(VertexID v) {
+    global_to_local_map_[v] = ghost_counter_;
 
     // Fix overflows
     if (ghost_counter_ > local_vertices_data_.size()) {
@@ -297,17 +296,17 @@ class SemidynamicGraph {
     }
 
     // Update data
-    local_vertices_data_[local_id].is_interface_vertex_ = false;
-    ghost_vertices_data_[local_id - ghost_offset_].rank_ = GetPEFromOffset(v);
-    ghost_vertices_data_[local_id - ghost_offset_].global_id_ = v;
+    local_vertices_data_[ghost_counter_].is_interface_vertex_ = false;
+    ghost_vertices_data_[ghost_counter_ - ghost_offset_].rank_ = GetPEFromOffset(v);
+    ghost_vertices_data_[ghost_counter_ - ghost_offset_].global_id_ = v;
 
     // Set adjacent PE
     PEID neighbor = GetPEFromOffset(v);
 
     // Set active
-    is_active_[local_id] = true;
+    is_active_[ghost_counter_] = true;
 
-    return local_id;
+    return ghost_counter_++;
   }
 
   EdgeID AddEdge(VertexID from, VertexID to, PEID rank) {

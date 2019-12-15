@@ -19,8 +19,8 @@
  * this program.  If not, see <http://www.gnu.org/licenses/>.
  *****************************************************************************/
 
-#ifndef _STATIC_GRAPH_H_
-#define _STATIC_GRAPH_H_
+#ifndef _DYNAMIC_GRAPH_H_
+#define _DYNAMIC_GRAPH_H_
 
 #include <mpi.h>
 
@@ -44,11 +44,9 @@
 #include "config.h"
 #include "timer.h"
 
-
-class StaticGraph {
-
+class DynamicGraph {
  public:
-  StaticGraph(const PEID rank, const PEID size)
+  DynamicGraph(const PEID rank, const PEID size)
     : rank_(rank),
       size_(size),
       number_of_vertices_(0),
@@ -57,58 +55,26 @@ class StaticGraph {
       number_of_edges_(0),
       number_of_cut_edges_(0),
       number_of_global_edges_(0),
-      local_offset_(0),
-      ghost_offset_(0),
       vertex_counter_(0),
+      ghost_vertex_counter_(0),
       edge_counter_(0),
-      ghost_counter_(0),
-      last_source_(0),
+      ghost_offset_(0),
       comm_time_(0.0) {
+    label_shortcut_.set_empty_key(-1);
     global_to_local_map_.set_empty_key(-1);
   }
 
-  virtual ~StaticGraph() {};
+  virtual ~DynamicGraph() {};
 
   //////////////////////////////////////////////
   // Graph construction
   //////////////////////////////////////////////
-  void StartConstruct(const VertexID local_n, 
-                      const VertexID ghost_n, 
-                      const VertexID total_m,
-                      const VertexID local_offset) {
-    number_of_local_vertices_ = local_n;
-    number_of_vertices_ = local_n + ghost_n;
-    number_of_edges_ = total_m;
-
-    vertices_.resize(number_of_vertices_ + 1);
-    // Fix first node being isolated
-    if (local_n > 0) vertices_[0].first_edge_ = 0;
-    edges_.resize(number_of_edges_);
-
-    local_vertices_data_.resize(number_of_vertices_);
-    ghost_vertices_data_.resize(ghost_n);
-
-    local_offset_ = local_offset;
-    ghost_offset_ = local_n;
-
-    // Temp counter for properly counting new ghost vertices
-    vertex_counter_ = local_n; 
-    edge_counter_ = 0;
-    ghost_counter_ = local_n;
-
+  void StartConstruct(VertexID local_n, VertexID ghost_n, VertexID ghost_offset) {
+    ghost_offset_ = ghost_offset;
     adjacent_pes_.resize(static_cast<unsigned long>(size_), false);
   }
 
-  void FinishConstruct() { 
-    vertices_.resize(vertex_counter_ + 1);
-    edges_.resize(edge_counter_ + 1);
-
-    for (VertexID v = 1; v <= vertex_counter_; v++) {
-      if (vertices_[v].first_edge_ == std::numeric_limits<EdgeID>::max()) {
-        vertices_[v].first_edge_ = vertices_[v - 1].first_edge_;
-      }
-    }
-  }
+  void FinishConstruct() { number_of_edges_ = edge_counter_; }
 
   //////////////////////////////////////////////
   // Graph iterators
@@ -116,34 +82,39 @@ class StaticGraph {
   template<typename F>
   void ForallLocalVertices(F &&callback) {
     for (VertexID v = 0; v < GetNumberOfLocalVertices(); ++v) {
-      callback(v);
+      if (IsActive(v)) callback(v);
     }
   }
 
   template<typename F>
   void ForallGhostVertices(F &&callback) {
-    for (VertexID v = GetNumberOfLocalVertices(); v < GetNumberOfVertices(); ++v) {
-      callback(v);
+    for (VertexID v = 0; v < GetNumberOfGhostVertices(); ++v) {
+      if (IsActive(v + ghost_offset_)) callback(v + ghost_offset_);
     }
   }
 
   template<typename F>
   void ForallVertices(F &&callback) {
-    for (VertexID v = 0; v < GetNumberOfVertices(); ++v) {
-      callback(v);
-    }
+    ForallLocalVertices(callback);
+    ForallGhostVertices(callback);
   }
 
   template<typename F>
   void ForallNeighbors(const VertexID v, F &&callback) {
-    ForallAdjacentEdges(v, [&](EdgeID e) { 
-        callback(edges_[e].target_); 
-    });
+    if (IsLocal(v)) {
+      ForallAdjacentEdges(v, [&](EdgeID e) { 
+          callback(local_adjacent_edges_[v][e].target_); 
+      });
+    } else {
+      ForallAdjacentEdges(v, [&](EdgeID e) { 
+          callback(ghost_adjacent_edges_[v - ghost_offset_][e].target_); 
+      });
+    }
   }
 
   template<typename F>
   void ForallAdjacentEdges(const VertexID v, F &&callback) {
-    for (EdgeID e = GetFirstEdge(v); e < GetFirstInvalidEdge(v); ++e) {
+    for (EdgeID e = 0; e < GetVertexDegree(v); ++e) {
       callback(e);
     }
   }
@@ -156,20 +127,35 @@ class StaticGraph {
     return adj;
   }
 
+  inline bool IsActive(const VertexID v) {
+    return IsLocal(v) ? local_active_[v]
+                      : ghost_active_[v - ghost_offset_];
+  }
+
+  void SetActive(VertexID v, bool is_active) {
+    if (IsLocal(v)) local_active_[v] = is_active;
+    else ghost_active_[v - ghost_offset_] = is_active;
+  }
+
+
   //////////////////////////////////////////////
   // Graph contraction
   //////////////////////////////////////////////
   inline void AllocateContractionVertices() {
-    contraction_vertices_.resize(GetNumberOfVertices());
+    local_contraction_vertices_.resize(GetNumberOfLocalVertices());
+    ghost_contraction_vertices_.resize(GetNumberOfGhostVertices());
   }
 
   inline void SetContractionVertex(VertexID v, VertexID cv) {
-    contraction_vertices_[v] = cv;
+    if (IsLocal(v)) local_contraction_vertices_[v] = cv;
+    else ghost_contraction_vertices_[v - ghost_offset_] = cv;
   }
 
-  inline VertexID GetContractionVertex(VertexID v) const {
-    return contraction_vertices_[v];
+  inline VertexID GetContractionVertex(VertexID v) {
+    return IsLocal(v) ? local_contraction_vertices_[v]
+                      : ghost_contraction_vertices_[v - ghost_offset_];
   }
+
 
   //////////////////////////////////////////////
   // Vertex mappings
@@ -180,55 +166,58 @@ class StaticGraph {
 
   PEID GetPEFromOffset(const VertexID v) const {
     for (PEID i = 0; i < offset_array_.size(); ++i) {
-      if (v >= offset_array_[i].first && v < offset_array_[i].second) {
-        return i;
-      }
+      if (v >= offset_array_[i].first && v < offset_array_[i].second) return i;
     }
     return rank_;
   }
 
   inline bool IsLocal(VertexID v) const {
-    return v < number_of_local_vertices_;
+    return v < ghost_offset_;
   }
 
-  inline bool IsLocalFromGlobal(VertexID v) const {
-    return local_offset_ <= v && v < local_offset_ + number_of_local_vertices_;
+  inline bool IsLocalFromGlobal(VertexID v) {
+    return global_to_local_map_.find(v) != global_to_local_map_.end() && IsLocal(global_to_local_map_[v]);
   }
 
   inline bool IsGhost(VertexID v) const {
-    return global_to_local_map_.find(GetGlobalID(v))
-        != global_to_local_map_.end();
+    return v >= ghost_offset_;
   }
 
-
-  inline bool IsGhostFromGlobal(VertexID v) const {
-    return global_to_local_map_.find(v) != global_to_local_map_.end();
+  inline bool IsGhostFromGlobal(VertexID v) {
+    return global_to_local_map_.find(v) != global_to_local_map_.end() && IsGhost(global_to_local_map_[v]);
   }
 
-  inline bool IsInterface(VertexID v) const {
-    return local_vertices_data_[v].is_interface_vertex_;
+  inline bool IsInterface(VertexID v) {
+    return IsLocal(v) ? local_vertices_data_[v].is_interface_vertex_ 
+                      : false;
   }
 
-  inline bool IsInterfaceFromGlobal(VertexID v) const {
-    return local_vertices_data_[GetLocalID(v)].is_interface_vertex_;
+  inline void SetInterface(VertexID v, bool is_interface) {
+    if (IsLocal(v)) local_vertices_data_[v].is_interface_vertex_ = is_interface;
   }
 
-  inline VertexID GetLocalID(VertexID v) const {
-    return IsLocalFromGlobal(v) ? v - local_offset_
-                                : global_to_local_map_.find(v)->second;
+  inline bool IsInterfaceFromGlobal(VertexID v) {
+    return IsLocalFromGlobal(v) ? local_vertices_data_[GetLocalID(v)].is_interface_vertex_ 
+                                : false;
   }
 
-  inline VertexID GetGlobalID(VertexID v) const {
-    return IsLocal(v) ? v + local_offset_
+  inline VertexID GetLocalID(VertexID v) {
+    return global_to_local_map_[v];
+  }
+
+  inline VertexID GetGlobalID(VertexID v) {
+    return IsLocal(v) ? local_vertices_data_[v].global_id_ 
                       : ghost_vertices_data_[v - ghost_offset_].global_id_;
   }
 
-  inline PEID GetPE(VertexID v) const {
+  inline PEID GetPE(VertexID v) {
     return IsLocal(v) ? rank_
                       : ghost_vertices_data_[v - ghost_offset_].rank_;
-
   }
 
+  inline void SetPE(VertexID v, PEID pe) {
+    ghost_vertices_data_[v - ghost_offset_].rank_ = pe;
+  }
   //////////////////////////////////////////////
   // Manage local vertices/edges
   //////////////////////////////////////////////
@@ -237,10 +226,6 @@ class StaticGraph {
   inline VertexID GetNumberOfGlobalVertices() const { return number_of_global_vertices_; }
 
   inline VertexID GetNumberOfGlobalEdges() const { return number_of_global_edges_; }
-
-  inline VertexID GetLocalOffset() const {
-    return local_offset_;
-  }
 
   inline VertexID GetNumberOfLocalVertices() const {
     return number_of_local_vertices_;
@@ -253,14 +238,6 @@ class StaticGraph {
   inline EdgeID GetNumberOfCutEdges() const { return number_of_cut_edges_; }
 
   inline void ResetNumberOfCutEdges() { number_of_cut_edges_ = 0; }
-
-  inline EdgeID GetFirstEdge(const VertexID v) const {
-    return vertices_[v].first_edge_;
-  }
-
-  inline EdgeID GetFirstInvalidEdge(const VertexID v) const {
-    return vertices_[v + 1].first_edge_;
-  }
 
   VertexID GatherNumberOfGlobalVertices() {
     VertexID local_vertices = 0;
@@ -295,24 +272,57 @@ class StaticGraph {
     return number_of_global_edges_;
   }
 
-  inline VertexID AddVertex() {
-    return vertex_counter_++;
+  void SetParent(const VertexID v, const VertexID parent_v) {
+    if (IsLocal(v)) local_parent_[v] = parent_v;
+    else ghost_parent_[v - ghost_offset_] = parent_v;
   }
 
-  inline VertexID AddGhostVertex(VertexID v) {
-    global_to_local_map_[v] = ghost_counter_;
+  inline VertexID GetParent(const VertexID v) {
+    return IsLocal(v) ? local_parent_[v] : ghost_parent_[v - ghost_offset_];
+  }
 
-    if (ghost_counter_ > local_vertices_data_.size()) {
-      local_vertices_data_.resize(ghost_counter_ + 1);
-      ghost_vertices_data_.resize(ghost_counter_ + 1);
-    }
+  inline VertexID AddVertex(VertexID v) {
+    VertexID local_id = vertex_counter_++;
+    global_to_local_map_[v] = local_id;
 
     // Update data
-    local_vertices_data_[ghost_counter_].is_interface_vertex_ = false;
-    ghost_vertices_data_[ghost_counter_ - ghost_offset_].rank_ = GetPEFromOffset(v);
-    ghost_vertices_data_[ghost_counter_ - ghost_offset_].global_id_ = v;
+    local_vertices_data_.resize(local_vertices_data_.size() + 1);
+    local_adjacent_edges_.resize(local_adjacent_edges_.size() + 1);
+    local_parent_.resize(local_parent_.size() + 1);
+    local_active_.resize(local_active_.size() + 1);
+    local_vertices_data_[local_id].is_interface_vertex_ = false;
+    local_vertices_data_[local_id].global_id_ = v;
 
-    return ghost_counter_++;
+    // Set active
+    local_active_[local_id] = true;
+
+    number_of_vertices_++;
+    number_of_local_vertices_++;
+    return local_id;
+  }
+
+  VertexID AddGhostVertex(VertexID v) {
+    AddGhostVertex(v, GetPEFromOffset(v));
+  }
+
+  VertexID AddGhostVertex(VertexID v, PEID pe) {
+    VertexID local_id = ghost_vertex_counter_ + ghost_offset_;
+    global_to_local_map_[v] = local_id;
+    ghost_vertex_counter_++;
+
+    // Update data
+    ghost_vertices_data_.resize(ghost_vertices_data_.size() + 1);
+    ghost_adjacent_edges_.resize(ghost_adjacent_edges_.size() + 1);
+    ghost_parent_.resize(ghost_parent_.size() + 1);
+    ghost_active_.resize(ghost_active_.size() + 1);
+    ghost_vertices_data_[local_id - ghost_offset_].global_id_ = v;
+    ghost_vertices_data_[local_id - ghost_offset_].rank_ = pe;
+
+    // Set active
+    ghost_active_[local_id - ghost_offset_] = true;
+
+    number_of_vertices_++;
+    return local_id;
   }
 
   EdgeID AddEdge(VertexID from, VertexID to, PEID rank) {
@@ -320,28 +330,97 @@ class StaticGraph {
       AddLocalEdge(from, to);
     } else {
       PEID neighbor = (rank == size_) ? GetPEFromOffset(to) : rank;
+      // NOTE: from always local
       local_vertices_data_[from].is_interface_vertex_ = true;
       if (IsGhostFromGlobal(to)) { // true if ghost already in map, otherwise false
         number_of_cut_edges_++;
-        AddLocalEdge(from, to);
+        AddGhostEdge(from, to);
         SetAdjacentPE(neighbor, true);
       } else {
         std::cout << "This shouldn't happen" << std::endl;
         exit(1);
       }
     }
-    if (from > last_source_) last_source_ = from;
+    edge_counter_++;
     return edge_counter_;
   }
 
   void AddLocalEdge(VertexID from, VertexID to) {
-    edges_[edge_counter_].target_ = GetLocalID(to);
-    edge_counter_++;
-    vertices_[from + 1].first_edge_ = edge_counter_;
+    if (IsLocal(from)) local_adjacent_edges_[from].emplace_back(global_to_local_map_[to]);
+    else ghost_adjacent_edges_[from - ghost_offset_].emplace_back(global_to_local_map_[to]);
+  }
+
+  void AddGhostEdge(VertexID from, VertexID to) {
+    AddLocalEdge(from, to);
+  }
+
+  EdgeID RemoveEdge(VertexID from, VertexID to) {
+    VertexID delete_pos = ghost_offset_;
+    if (IsLocal(from)) {
+      for (VertexID i = 0; i < local_adjacent_edges_[from].size(); i++) {
+        if (local_adjacent_edges_[from][i].target_ == to) {
+          delete_pos = i;
+          break;
+        }
+      }
+      if (delete_pos != ghost_offset_) {
+        local_adjacent_edges_[from].erase(local_adjacent_edges_[from].begin() + delete_pos);
+      } else {
+        std::cout << "This shouldn't happen" << std::endl;
+        exit(1);
+      }
+    } else {
+      std::cout << "This shouldn't happen" << std::endl;
+      exit(1);
+    }
+  }
+
+  EdgeID RelinkEdge(VertexID from, VertexID old_to, VertexID new_to, PEID rank) {
+    VertexID old_to_local = GetLocalID(old_to);
+    VertexID new_to_local = GetLocalID(new_to);
+
+    // NOTE: Unsure if the ghost offset works with distributing high degree vertices
+    if (IsLocal(new_to_local)) {
+      if (IsGhost(old_to_local)) number_of_cut_edges_--;
+    }
+    else {
+      if (!IsGhost(old_to_local)) number_of_cut_edges_++;
+      PEID neighbor = (rank == size_) ? GetPEFromOffset(new_to) : rank;
+      SetAdjacentPE(neighbor, true);
+    }
+
+    // Actual relink
+    // NOTE: from should always be local
+    for (VertexID i = 0; i < local_adjacent_edges_[from].size(); i++) {
+      if (local_adjacent_edges_[from][i].target_ == old_to_local) {
+        local_adjacent_edges_[from][i].target_ = new_to_local;
+      }
+    }
+
+    return edge_counter_;
+  }
+
+  void ReserveEdgesForVertex(VertexID v, VertexID num_edges) {
+    if (IsLocal(v)) local_adjacent_edges_[v].reserve(num_edges);
+    else ghost_adjacent_edges_[v - ghost_offset_].reserve(num_edges);
+  }
+
+  void RemoveAllEdges(VertexID from) {
+    if (IsLocal(from)) local_adjacent_edges_[from].clear();
+    else ghost_adjacent_edges_[from - ghost_offset_].clear();
+  }
+
+  // Local IDs
+  bool IsConnected(VertexID from, VertexID to) {
+    ForallNeighbors(from, [&](VertexID v) {
+        if (v == to) return true; 
+    });
+    return false;
   }
 
   inline VertexID GetVertexDegree(const VertexID v) const {
-    return vertices_[v + 1].first_edge_ - vertices_[v].first_edge_; 
+    return IsLocal(v) ? local_adjacent_edges_[v].size()
+                      : ghost_adjacent_edges_[v - ghost_offset_].size();
   }
 
   //////////////////////////////////////////////
@@ -366,14 +445,36 @@ class StaticGraph {
     return adjacent_pes_[pe];
   }
 
-  inline void SetAdjacentPE(const PEID pe, const bool is_adj) {
+  void SetAdjacentPE(const PEID pe, const bool is_adj) {
     if (pe == rank_) return;
     adjacent_pes_[pe] = is_adj;
   }
 
+  void ResetAdjacentPEs() {
+    for (PEID i = 0; i < adjacent_pes_.size(); ++i) {
+      SetAdjacentPE(i, false);
+    }
+  }
+
+
   //////////////////////////////////////////////
   // I/O
   //////////////////////////////////////////////
+  bool CheckDuplicates() {
+    // google::dense_hash_set<VertexID> neighbors;
+    ForallLocalVertices([&](const VertexID v) {
+      std::unordered_set<VertexID> neighbors;
+      ForallNeighbors(v, [&](const VertexID w) {
+        if (neighbors.find(w) != end(neighbors)) {
+          std::cout << "[R" << rank_ << ":0] DUPL (" << GetGlobalID(v) << "," << GetGlobalID(w) << "[" << GetPE(w) << "])" << std::endl;
+          return true;
+        }
+        neighbors.insert(w);
+      });
+    });
+    return false;
+  }
+
   void OutputLocal() {
     ForallLocalVertices([&](const VertexID v) {
       std::stringstream out;
@@ -397,7 +498,11 @@ class StaticGraph {
   }
 
   void OutputGhosts() {
-    std::cout << "[R" << rank_ << "] [G] [ ";
+    PEID rank, size;
+    MPI_Comm_rank(MPI_COMM_WORLD, &rank);
+    MPI_Comm_size(MPI_COMM_WORLD, &size);
+
+    std::cout << "[R" << rank << "] [G] [ ";
     for (auto &e : global_to_local_map_) {
       std::cout << e.first << " ";
     }
@@ -458,8 +563,7 @@ class StaticGraph {
         global_component_sizes[c] += size;
       }
 
-      google::dense_hash_map<VertexID, VertexID> condensed_component_sizes; 
-      condensed_component_sizes.set_empty_key(-1);
+      google::dense_hash_map<VertexID, VertexID> condensed_component_sizes; condensed_component_sizes.set_empty_key(-1);
       for (auto &cs : global_component_sizes) {
         VertexID c = cs.first;
         VertexID size = cs.second;
@@ -481,7 +585,6 @@ class StaticGraph {
         std::cout << "size=" << comp.first << " (num=" << comp.second << ") ";
       std::cout << "]" << std::endl;
     }
-
   }
 
   void Logging(bool active);
@@ -501,11 +604,12 @@ class StaticGraph {
 
   struct LocalVertexData {
     bool is_interface_vertex_;
+    VertexID global_id_;
 
     LocalVertexData()
-        : is_interface_vertex_(false) {}
-    LocalVertexData(const VertexID id, bool interface)
-        : is_interface_vertex_(interface) {}
+        : global_id_(0), is_interface_vertex_(false) {}
+    LocalVertexData(VertexID global_id, bool interface)
+        : global_id_(global_id), is_interface_vertex_(interface) {}
   };
 
   struct GhostVertexData {
@@ -529,11 +633,16 @@ class StaticGraph {
   PEID rank_, size_;
 
   // Vertices and edges
-  std::vector<Vertex> vertices_;
-  std::vector<Edge> edges_;
+  std::vector<std::vector<Edge>> local_adjacent_edges_;
+  std::vector<std::vector<Edge>> ghost_adjacent_edges_;
 
   std::vector<LocalVertexData> local_vertices_data_;
   std::vector<GhostVertexData> ghost_vertices_data_;
+
+  // Shortcutting
+  std::vector<VertexID> local_parent_;
+  std::vector<VertexID> ghost_parent_;
+  google::dense_hash_map<VertexID, VertexID> label_shortcut_;
 
   VertexID number_of_vertices_;
   VertexID number_of_local_vertices_;
@@ -544,23 +653,23 @@ class StaticGraph {
   EdgeID number_of_global_edges_;
 
   // Vertex mapping
-  VertexID local_offset_;
   std::vector<std::pair<VertexID, VertexID>> offset_array_;
-
-  VertexID ghost_offset_;
   google::dense_hash_map<VertexID, VertexID> global_to_local_map_;
 
   // Contraction
-  std::vector<VertexID> contraction_vertices_;
+  std::vector<VertexID> local_contraction_vertices_;
+  std::vector<VertexID> ghost_contraction_vertices_;
+  std::vector<bool> local_active_;
+  std::vector<bool> ghost_active_;
 
   // Adjacent PEs
   std::vector<bool> adjacent_pes_;
 
   // Temporary counters
   VertexID vertex_counter_;
+  VertexID ghost_vertex_counter_;
   EdgeID edge_counter_;
-  VertexID ghost_counter_;
-  VertexID last_source_;
+  VertexID ghost_offset_;
 
   // Statistics
   float comm_time_;

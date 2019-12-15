@@ -28,6 +28,7 @@
 
 #include "config.h"
 #include "dynamic_graph_comm.h"
+#include "semidynamic_graph_comm.h"
 #include "static_graph_comm.h"
 
 using Buffer = std::vector<VertexID>;
@@ -150,6 +151,7 @@ class VertexCommunicator {
 };
 
 template class VertexCommunicator<DynamicGraphCommunicator>;
+template class VertexCommunicator<SemidynamicGraphCommunicator>;
 template class VertexCommunicator<StaticGraphCommunicator>;
 
 #endif

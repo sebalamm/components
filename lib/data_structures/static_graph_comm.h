@@ -151,50 +151,10 @@ class StaticGraphCommunicator : public StaticGraph {
   float GetCommTime();
 
  private:
-  // Network information
-  PEID rank_, size_;
-
-  // Vertices and edges
-  std::vector<Vertex> vertices_;
-  std::vector<Edge> edges_;
-
-  std::vector<LocalVertexData> local_vertices_data_;
-  std::vector<GhostVertexData> ghost_vertices_data_;
   std::vector<VertexPayload> vertex_payload_;
-
-  VertexID number_of_vertices_;
-  VertexID number_of_local_vertices_;
-  VertexID number_of_global_vertices_;
-
-  EdgeID number_of_edges_;
-  EdgeID number_of_cut_edges_;
-  EdgeID number_of_global_edges_;
-
-  // Vertex mapping
-  VertexID local_offset_;
-  std::vector<std::pair<VertexID, VertexID>> offset_array_;
-
-  VertexID ghost_offset_;
-  google::dense_hash_map<VertexID, VertexID> global_to_local_map_;
-
-  // Contraction
-  std::vector<VertexID> contraction_vertices_;
-
-  // Adjacent PEs
-  std::vector<bool> adjacent_pes_;
 
   // Communication interface
   VertexCommunicator<StaticGraphCommunicator> *ghost_comm_;
-
-  // Temporary counters
-  VertexID vertex_counter_;
-  EdgeID edge_counter_;
-  VertexID ghost_counter_;
-  VertexID last_source_;
-
-  // Statistics
-  float comm_time_;
-  Timer comm_timer_;
 };
 
 #endif

@@ -61,6 +61,7 @@ set(SOURCES
           lib/contraction
           lib/data_structures
           lib/data_structures/dynamic_graph_comm.cpp
+          lib/data_structures/semidynamic_graph_comm.cpp
           lib/data_structures/static_graph_comm.cpp
           lib/io
           lib/tools
