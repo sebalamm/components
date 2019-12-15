@@ -72,7 +72,6 @@ class DynamicGraphCommunicator : public DynamicGraph {
     });
 
     // Init shortcuts
-    // std::unordered_map<VertexID, std::pair<VertexID, VertexID>> smallest_deviate;
     google::dense_hash_map<VertexID, std::pair<VertexID, VertexID>> smallest_deviate; 
     smallest_deviate.set_empty_key(-1);
     FindSmallestDeviates(labels, smallest_deviate);

@@ -43,6 +43,7 @@ class CAGBuilder {
         vertex_buffers_(size),
         comm_time_(0.0) {
     local_components_.set_empty_key(-1);
+    vertex_buffers_.set_empty_key(-1);
     offset_ = g_.GatherNumberOfGlobalVertices();
   }
   virtual ~CAGBuilder() = default;
@@ -84,7 +85,7 @@ class CAGBuilder {
   std::vector<std::pair<VertexID, VertexID>> edges_;
 
   // Send buffers
-  std::vector<std::vector<VertexID>> vertex_buffers_;
+  google::dense_hash_map<PEID, std::vector<VertexID>> vertex_buffers_;
   std::vector<bool> received_message_;
 
   // Statistics
@@ -233,12 +234,12 @@ class CAGBuilder {
       }
     });
 
-    for (PEID i = 0; i < size_; ++i) {
-      if (largest_component_size[i] > 0) {
-        vertex_buffers_[i].push_back(std::numeric_limits<VertexID>::max() - 1); 
-        vertex_buffers_[i].push_back(largest_component_id[i]); 
+    g_.ForallAdjacentPEs([&](const PEID &pe) {
+      if (largest_component_size[pe] > 0) {
+        vertex_buffers_[pe].push_back(std::numeric_limits<VertexID>::max() - 1); 
+        vertex_buffers_[pe].push_back(largest_component_id[pe]); 
       }
-    }
+    });
   }
 
   void AddComponentMessages() {
@@ -248,7 +249,9 @@ class CAGBuilder {
     };
 
     // Gather components with the same neighbor
-    std::vector<google::sparse_hash_set<VertexID>> unique_neighbors(size_);
+    // TODO: Can we do this more efficiently?
+    google::dense_hash_map<PEID, google::sparse_hash_set<VertexID>> unique_neighbors;
+    unique_neighbors.set_empty_key(-1);
     g_.ForallLocalVertices([&](const VertexID v) {
       if (g_.IsInterface(v)) {
         g_.ForallNeighbors(v, [&](const VertexID w) {
@@ -259,11 +262,8 @@ class CAGBuilder {
             // Only send message if not part of largest component
             if (contraction_vertex != largest_component) {
               // Avoid duplicates by hashing the message
-              // TODO: We would like to actually do this, but this needs more work later on
               VertexID comp_pair = pair(w, g_.GetContractionVertex(v));
-              // VertexID comp_pair = pair(v, g_.GetContractionVertex(v));
               if (unique_neighbors[target_pe].find(comp_pair) == end(unique_neighbors[target_pe])) {
-                // std::cout << "R" << rank_ << " send v " << g_.GetGlobalID(v) << " cid " << contraction_vertex << " to " << target_pe << std::endl;
                 unique_neighbors[target_pe].insert(comp_pair);
                 vertex_buffers_[target_pe].push_back(g_.GetGlobalID(v));
                 vertex_buffers_[target_pe].push_back(contraction_vertex);
@@ -278,19 +278,17 @@ class CAGBuilder {
   void SendBuffers(std::vector<MPI_Request> &requests) {
     requests.clear();
 
-    for (PEID i = 0; i < size_; ++i) {
-      if (g_.IsAdjacentPE(i)) {
-        if (vertex_buffers_[i].empty()) {
-          vertex_buffers_[i].emplace_back(std::numeric_limits<VertexID>::max());
-          vertex_buffers_[i].emplace_back(0);
-        }
-        requests.emplace_back(MPI_Request());
-        MPI_Isend(&vertex_buffers_[i][0],
-                  static_cast<int>(vertex_buffers_[i].size()),
-                  MPI_VERTEX, i, i + 42 * size_,
-                  MPI_COMM_WORLD, &requests.back());
-      };
-    }
+    g_.ForallAdjacentPEs([&](const PEID &pe) {
+      if (vertex_buffers_[pe].empty()) {
+        vertex_buffers_[pe].emplace_back(std::numeric_limits<VertexID>::max());
+        vertex_buffers_[pe].emplace_back(0);
+      }
+      requests.emplace_back(MPI_Request());
+      MPI_Isend(&vertex_buffers_[pe][0],
+                static_cast<int>(vertex_buffers_[pe].size()),
+                MPI_VERTEX, pe, pe + 42 * size_,
+                MPI_COMM_WORLD, &requests.back());
+    });
   }
 
   void ReceiveBuffers(google::dense_hash_map<PEID, VertexID> & largest_component, 
@@ -327,7 +325,6 @@ class CAGBuilder {
         if (global_id == std::numeric_limits<VertexID>::max() - 1) {
           largest_component[st.MPI_SOURCE] = contraction_id;
         } else {
-          // if (rank_ == 13) std::cout << "R" << rank_ << " recv " << global_id << " cid " << contraction_id << " from " << st.MPI_SOURCE << std::endl;
           vertex_message[g_.GetLocalID(global_id)] = contraction_id;
           received_message_[g_.GetLocalID(global_id)] = true;
         }
@@ -348,11 +345,12 @@ class CAGBuilder {
     });
 
     g_.ForallLocalVertices([&](const VertexID v) {
-      std::vector<VertexID> component_id(size_);
+      google::dense_hash_map<PEID, VertexID> component_id;
+      component_id.set_empty_key(-1);
       if (g_.IsInterface(v)) {
         // Store largest component for each PE
-        for (int i = 0; i < size_; i++) {
-          component_id[i] = largest_component[i];
+        for (auto &kv : largest_component) {
+          component_id[kv.first] = kv.second;
         }
         g_.ForallNeighbors(v, [&](const VertexID w) {
           if (g_.IsGhost(w)) {
@@ -432,6 +430,7 @@ class CAGBuilder {
     MPI_Type_commit(&MPI_COMP);
 
     // Gather vertex distribution
+    // TODO: Get rid of allgather
     std::pair<VertexID, VertexID> range(from, to + 1);
     std::vector<std::pair<VertexID, VertexID>> vertex_dist(size_);
     MPI_Allgather(&range, 1, MPI_COMP,
@@ -447,7 +446,6 @@ class CAGBuilder {
 
     // Initialize local vertices
     for (VertexID v = 0; v < num_local_components_; v++) {
-        // std::cout << "R" << rank_ << " add v " << from + v << std::endl;
         cg.AddVertex(from + v);
         cg.SetVertexLabel(v, from + v);
         cg.SetVertexRoot(v, rank_);
@@ -461,7 +459,6 @@ class CAGBuilder {
 
     for (auto &edge : edges_) {
       cg.AddEdge(cg.GetLocalID(edge.first), edge.second, size_);
-      // std::cout << "R" << rank_ << " add e (" << edge.first << "," << edge.second << ")" << std::endl;
     }
 
     cg.FinishConstruct();
@@ -498,6 +495,7 @@ class CAGBuilder {
     MPI_Type_commit(&MPI_COMP);
 
     // Gather vertex distribution
+    // TODO: Get rid of allgather
     std::pair<VertexID, VertexID> range(from, to + 1);
     std::vector<std::pair<VertexID, VertexID>> vertex_dist(size_);
     MPI_Allgather(&range, 1, MPI_COMP,

@@ -49,9 +49,6 @@ class AllReduce {
   void FindComponents(GraphType &g, std::vector<VertexID> &g_labels) {
     rng_offset_ = size_ + config_.seed;
     contraction_timer_.Restart();
-    // g.OutputLocal();
-    // MPI_Barrier(MPI_COMM_WORLD);
-    // exit(1);
     // Init local data
     InitLocalData(g, g_labels);
 
@@ -231,7 +228,6 @@ class AllReduce {
     for (int i = 0; i < num_local_vertices; ++i) {
       VertexID v = local_vertices_[i];
       g_labels[i] = local_labels_[i];
-      // std::cout << "R" << rank_ << " v " << v << " l " << g_labels[i] << std::endl;
     }
   }
 

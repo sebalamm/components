@@ -39,8 +39,9 @@ class DynamicContraction {
         size_(size),
         contraction_level_(0),
         comm_time_(0.0) { 
-    // inactive_level_.resize(g_.GetNumberOfVertices(), -1);
+    inactive_level_.set_empty_key(-1);
   }
+
   virtual ~DynamicContraction() = default;
 
   void ExponentialContraction() {
@@ -54,21 +55,22 @@ class DynamicContraction {
     VertexID num_vertices = g_.GetNumberOfVertices();
 
     // Update with new vertices added during last contraction
-    // inactive_level_.resize(num_vertices, -1);
     g_.ForallVertices([&](VertexID v) {
       inactive_level_[v] = -1;
     });
 
     // Determine edges to communicate
     // Gather labels to communicate
-    google::dense_hash_set<VertexID> send_ids(size_); 
+    google::dense_hash_set<VertexID> send_ids; 
     send_ids.set_empty_key(-1);
 
+    // TODO: Fix size
     std::vector<std::vector<VertexID>> send_buffers_a(size_);
     std::vector<std::vector<VertexID>> send_buffers_b(size_);
     std::vector<std::vector<VertexID>>* current_send_buffers = &send_buffers_a;
     std::vector<std::vector<VertexID>> receive_buffers(size_);
 
+    // TODO: Fix iteration
     for (int i = 0; i < size_; ++i) {
       send_buffers_a[i].clear();
       send_buffers_b[i].clear();
@@ -77,6 +79,8 @@ class DynamicContraction {
 
     google::dense_hash_set<VertexID> inserted_edges; 
     inserted_edges.set_empty_key(-1);
+
+    // TODO: Fix size
     std::vector<std::vector<std::pair<VertexID, VertexID>>> edges_to_add(size_);
 
     std::cout << "[STATUS] |--- R" << rank_ << " Allocation took " 
@@ -93,6 +97,7 @@ class DynamicContraction {
     std::cout << "[STATUS] |--- R" << rank_ << " Detecting conflicting edges took " 
               << "[TIME] " << contraction_timer_.Elapsed() << std::endl;
 
+    // TODO: Fix size
     std::vector<bool> is_adj(size_);
     PEID num_adj = FindAdjacentPEs(is_adj);
 
@@ -170,17 +175,16 @@ class DynamicContraction {
     VertexID num_global_vertices = g_.GatherNumberOfGlobalVertices();
     VertexID num_vertices = g_.GetNumberOfVertices();
 
-    // Update with new vertices added during last contraction
-    // inactive_level_.resize(num_vertices, -1);
-
     // Determine edges to communicate
     // Gather labels to communicate
-    google::dense_hash_set<VertexID> send_ids(size_); 
+    google::dense_hash_set<VertexID> send_ids; 
     send_ids.set_empty_key(-1);
 
+    // TODO: Fix size
     std::vector<std::vector<VertexID>> send_buffers(size_);
     std::vector<std::vector<VertexID>> receive_buffers(size_);
 
+    // TODO: Fix iteration
     for (int i = 0; i < size_; ++i) {
       send_buffers[i].clear();
       receive_buffers[i].clear();
@@ -188,6 +192,8 @@ class DynamicContraction {
 
     google::dense_hash_set<VertexID> inserted_edges; 
     inserted_edges.set_empty_key(-1);
+
+    // TODO: Fix size
     std::vector<std::vector<std::pair<VertexID, VertexID>>> edges_to_add(size_);
 
     std::cout << "[STATUS] |--- R" << rank_ << " Allocation took " 
@@ -208,12 +214,14 @@ class DynamicContraction {
     int num_requests = 0;
 
     comm_timer_.Restart();
+    // TODO: Fix iteration
     for (PEID pe = 0; pe < size_; ++pe) {
       if (send_buffers[pe].size() > 0) num_requests++; 
     }
     std::vector<MPI_Request> requests(num_requests);
 
     int req = 0;
+    // TODO: Fix iteration
     for (PEID pe = 0; pe < size_; ++pe) {
       if (send_buffers[pe].size() > 0) {
         MPI_Issend(send_buffers[pe].data(), 
@@ -287,6 +295,7 @@ class DynamicContraction {
     }
     comm_time_ += comm_timer_.Elapsed();
 
+    // TODO: Fix iteration
     for (PEID pe = 0; pe < size_; ++pe) {
       if (receive_buffers[pe].size() < 3) continue;
       for (int i = 0; i < receive_buffers[pe].size(); i += 3) {
@@ -357,21 +366,22 @@ class DynamicContraction {
     VertexID num_vertices = g_.GetNumberOfVertices();
 
     // Update with new vertices added during last contraction
-    // inactive_level_.resize(num_vertices, -1);
     g_.ForallVertices([&](VertexID v) {
       inactive_level_[v] = -1;
     });
 
     // Determine edges to communicate
     // Gather labels to communicate
-    google::dense_hash_set<VertexID> send_ids(size_); 
+    google::dense_hash_set<VertexID> send_ids;
     send_ids.set_empty_key(-1);
 
+    // TODO: Fix size
     std::vector<std::vector<VertexID>> send_buffers_a(size_);
     std::vector<std::vector<VertexID>> send_buffers_b(size_);
     std::vector<std::vector<VertexID>>* current_send_buffers = &send_buffers_a;
     std::vector<std::vector<VertexID>> receive_buffers(size_);
 
+    // TODO: Fix iteration
     for (int i = 0; i < size_; ++i) {
       send_buffers_a[i].clear();
       send_buffers_b[i].clear();
@@ -380,14 +390,17 @@ class DynamicContraction {
 
     google::dense_hash_set<VertexID> inserted_edges; 
     inserted_edges.set_empty_key(-1);
+
+    // TODO: Fix size
     std::vector<std::vector<std::pair<VertexID, VertexID>>> edges_to_add(size_);
 
     FindLocalConflictingEdges(num_global_vertices, 
-                                    inserted_edges, 
-                                    edges_to_add, 
-                                    send_ids, 
-                                    current_send_buffers);
+                              inserted_edges, 
+                              edges_to_add, 
+                              send_ids, 
+                              current_send_buffers);
 
+    // TODO: Fix size
     std::vector<bool> is_adj(size_);
     PEID num_adj = FindAdjacentPEs(is_adj);
 
@@ -562,6 +575,7 @@ class DynamicContraction {
   PEID FindAdjacentPEs(std::vector<bool> &is_adj) {
     // Get adjacency (otherwise we get deadlocks with added edges)
     PEID num_adj = 0;
+    // TODO: Fix iteration
     for (PEID pe = 0; pe < size_; pe++) {
       is_adj[pe] = g_.IsAdjacentPE(pe);
       if (is_adj[pe]) num_adj++;
@@ -576,6 +590,7 @@ class DynamicContraction {
     // Receive edges
     PEID messages_recv = 0;
     int message_length = 0;
+    // TODO: Fix iteration
     for (int i = 0; i < size_; ++i) receive_buffers[i].clear();
     receive_buffers[rank_] = (*send_buffers)[rank_]; // copy (TODO: avoid)
     while (messages_recv < adjacent_pes) {
@@ -602,6 +617,7 @@ class DynamicContraction {
   void SendMessages(std::vector<bool> &is_adj,
                     std::vector<std::vector<VertexID>> *send_buffers,
                     std::vector<MPI_Request> &requests) {
+    // TODO: Fix iteration
     for (PEID pe = 0; pe < size_; ++pe) {
       if (is_adj[pe]) {
         if ((*send_buffers)[pe].empty()) {
@@ -630,6 +646,7 @@ class DynamicContraction {
                                  std::vector<std::vector<VertexID>> *send_buffers) {
     int propagate = 0;
     // Receive edges and apply updates
+    // TODO: Fix iteration
     for (PEID pe = 0; pe < size_; ++pe) {
       if (receive_buffers[pe].size() < 4) continue;
       for (int i = 0; i < receive_buffers[pe].size(); i += 4) {
@@ -680,6 +697,7 @@ class DynamicContraction {
                            std::vector<std::vector<VertexID>> *send_buffers) {
     int propagate = 0;
     // Receive edges and apply updates
+    // TODO: Fix iteration
     for (PEID pe = 0; pe < size_; ++pe) {
       if (receive_buffers[pe].size() < 4) continue;
       for (int i = 0; i < receive_buffers[pe].size(); i += 4) {
@@ -745,12 +763,10 @@ class DynamicContraction {
     for (auto &kv : inactive_level_) {
       if (kv.second == -1) inactive_level_[kv.first] = contraction_level_ - 1;
     }
-    // for (VertexID i = 0; i < inactive_level_.size(); ++i) {
-    //   if (inactive_level_[i] == -1) inactive_level_[i] = contraction_level_ - 1;
-    // }
   }
 
   void InsertEdges(std::vector<std::vector<std::pair<VertexID, VertexID>>> &new_edges) {
+    // TODO: Fix iteration
     for (PEID pe = 0; pe < size_; pe++) {
       for (auto &e : new_edges[pe]) {
         VertexID vlabel = e.first;
@@ -759,7 +775,6 @@ class DynamicContraction {
         // TODO: Check if this is needed
         if (!g_.IsLocalFromGlobal(wlabel) && !g_.IsGhostFromGlobal(wlabel)) {
           g_.AddGhostVertex(wlabel);
-          // inactive_level_.resize(inactive_level_.size() + 1);
         }
         // Add edge
         g_.AddEdge(vlocal, wlabel, pe);
@@ -789,9 +804,6 @@ class DynamicContraction {
   }
 
   void UpdateGraphVertices() {
-    // for (VertexID i = 0; i < inactive_level_.size(); ++i) {
-    //   g_.SetActive(i, inactive_level_[i] == -1);
-    // }
     for (auto &kv : inactive_level_) {
       g_.SetActive(kv.first, kv.second == -1);
     }
@@ -801,6 +813,7 @@ class DynamicContraction {
                    std::vector<std::vector<VertexID>> &a_buffers,
                    std::vector<std::vector<VertexID>> &b_buffers) {
     // Switch buffers
+    // TODO: Fix iteration
     if (buffers == &a_buffers) {
       for (int i = 0; i < size_; ++i) b_buffers[i].clear();
       buffers = &b_buffers;
@@ -899,9 +912,6 @@ class DynamicContraction {
   }
 
   void EnableActiveVertices() {
-    // for (VertexID i = 0; i < inactive_level_.size(); ++i) {
-    //   if (inactive_level_[i] == contraction_level_) inactive_level_[i] = - 1;
-    // }
     for (auto &kv : inactive_level_) {
       if (kv.second == contraction_level_) inactive_level_[kv.first] = -1;
     }
@@ -930,8 +940,7 @@ class DynamicContraction {
   // Variables
   VertexID contraction_level_;
   std::stack<std::pair<VertexID, VertexID>> removed_edges_;
-  // std::vector<short> inactive_level_;
-  google::sparse_hash_map<VertexID, short> inactive_level_;
+  google::dense_hash_map<VertexID, short> inactive_level_;
 
   // Statistics
   float comm_time_;

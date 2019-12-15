@@ -422,7 +422,6 @@ class StaticGraph {
 
     // Gather component message
     std::vector<std::pair<VertexID, VertexID>> local_components;
-    // local_components.reserve(local_component_sizes.size());
     for(auto &kv : local_component_sizes)
       local_components.emplace_back(kv.first, kv.second);
     // TODO [MEMORY]: Might be too small

@@ -488,7 +488,6 @@ class DynamicGraph {
       out << "[R" << rank_ << "] [N] "
           << GetGlobalID(v) << " -> ";
       ForallNeighbors(v, [&](VertexID u) {
-        // out << GetGlobalID(u) << " ";
         out << GetGlobalID(u) << " (local_id=" << u
             << ", pe=" << GetPE(u) << ") ";
       });

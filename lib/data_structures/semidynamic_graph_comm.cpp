@@ -115,7 +115,6 @@ void SemidynamicGraphCommunicator::OutputLocal() {
     out << "[R" << rank << "] [N] "
         << GetGlobalID(v) << " -> ";
     ForallNeighbors(v, [&](VertexID u) {
-      // out << GetGlobalID(u) << " ";
       out << GetGlobalID(u) << " (local_id=" << u << ", msg="
           << GetVertexString(u) << ", pe="
           << GetPE(u) << ") ";

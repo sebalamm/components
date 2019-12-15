@@ -133,42 +133,22 @@ class Propagation {
   }
 
   void FindMinLabels(StaticGraphCommunicator &g) {
-    // std::vector<bool> changed(g.GetNumberOfLocalVertices(), false);
-    // bool label_changed = true;
-    // while(label_changed) {
-    //   label_changed = false;
-      g.ForallLocalVertices([&](VertexID v) {
-        // Gather min label of all neighbors
-        VertexID v_label = g.GetVertexLabel(v);
-        g.ForallNeighbors(v, [&](VertexID u) {
-          if (g.GetVertexLabel(u) < v_label) {
-            // label_changed = true;
-            // changed[v] = true;
-            v_label = g.GetVertexLabel(u);
-          }
-        });
-        // g.SetVertexLabel(v, v_label);
-        g.SetVertexPayload(v,
-                           {g.GetVertexDeviate(v), 
-                            v_label,
+    g.ForallLocalVertices([&](VertexID v) {
+      // Gather min label of all neighbors
+      VertexID v_label = g.GetVertexLabel(v);
+      g.ForallNeighbors(v, [&](VertexID u) {
+        if (g.GetVertexLabel(u) < v_label) {
+          v_label = g.GetVertexLabel(u);
+        }
+      });
+      g.SetVertexPayload(v,
+                         {g.GetVertexDeviate(v), 
+                          v_label,
 #ifdef TIEBREAK_DEGREE
-                            0,
+                          0,
 #endif
-                            g.GetVertexRoot(v)});
-        });
-    // }
-
-//     g.ForallLocalVertices([&](VertexID v) {
-//         if (changed[v] && g.IsInterface(v)) {
-//           g.ForceVertexPayload(v,
-//                                {g.GetVertexDeviate(v), 
-//                                 g.GetVertexLabel(v),
-// #ifdef TIEBREAK_DEGREE
-//                                 0,
-// #endif
-//                                 g.GetVertexRoot(v)});
-//         } 
-//       });
+                          g.GetVertexRoot(v)});
+      });
   }
 
   bool CheckConvergence(StaticGraphCommunicator &g) {

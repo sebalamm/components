@@ -75,7 +75,7 @@ class ExponentialContraction {
                   << "[TIME] " << contraction_timer_.Elapsed() << std::endl;
       }
 
-      // MEMORY: Delete original graph?
+      // TODO: Delete original graph?
       // Keep contraction labeling for later
       contraction_timer_.Restart();
       std::vector<VertexID> cag_labels(cag.GetNumberOfVertices(), 0);
@@ -123,7 +123,6 @@ class ExponentialContraction {
                     + exp_contraction_->GetCommTime()
                     + ccag.GetCommTime() + cag.GetCommTime() + g.GetCommTime();
     } else {
-      // TODO: Contraction does not work on static graph
       // exp_contraction_ = new DynamicContraction(g, rank_, size_);
 
       // PerformDecomposition(g);
@@ -210,16 +209,13 @@ class ExponentialContraction {
 
   void RunContraction(DynamicGraphCommunicator &g) {
     contraction_timer_.Restart();
-    // VertexID global_vertices = g.GatherNumberOfGlobalVertices();
     if (rank_ == ROOT) {
       if (iteration_ == 1)
         std::cout << "[STATUS] |-- Iteration " << iteration_ 
                   << " [TIME] " << "-" << std::endl;
-                  // << " [ADD] " << global_vertices << std::endl;
       else
         std::cout << "[STATUS] |-- Iteration " << iteration_ 
                   << " [TIME] " << iteration_timer_.Elapsed() << std::endl;
-                  // << " [ADD] " << global_vertices << std::endl;
     }
     iteration_timer_.Restart();
     
@@ -416,7 +412,6 @@ class ExponentialContraction {
   }
 
   void DistributeHighDegreeVertices(DynamicGraphCommunicator &g) {
-    if (rank_ == 6) g.OutputLocal();
     // Offset for new vertex IDs
     VertexID global_vertices = g.GatherNumberOfGlobalVertices();
     VertexID vertex_offset = global_vertices * (rank_ + 1);
@@ -435,6 +430,7 @@ class ExponentialContraction {
     if (rank_ == ROOT) std::cout << "avg max deg " << avg_max_deg << std::endl;
 
     VertexID num_new_vertices = 0;
+    // TODO: Fix size
     std::vector<std::vector<VertexID>> send_buffers(size_);
     std::vector<std::vector<VertexID>> receive_buffers(size_);
     if (local_max_deg >= 4 * avg_max_deg) {
@@ -452,11 +448,6 @@ class ExponentialContraction {
     ExchangeMessages(send_buffers, receive_buffers);
     ProcessRouting(g, receive_buffers);
     UpdateInterfaceVertices(g);
-
-    // TODO: Relink local edges to original vertex to replicated ones (further reduces messages)
-    //       Actually do this by partitioning the vertices properly on the sender side
-    // TODO: Reintroduce Semidynamic graph class
-    if (rank_ == 6) g.OutputLocal();
   }
 
   void ComputeEdgePartitioning(DynamicGraphCommunicator &g,
@@ -476,17 +467,12 @@ class ExponentialContraction {
     // Temporary vector for storing new local edges 
     std::vector<VertexID> local_edges;
 
-    // TODO: Improve how the partitioning done
-    //       Sort the adjacency parts s.t. a single PE gets all edges corresponding to its local vertices
-    //       If multiple PEs have the same number of edges choose a random one
-    //       Only send parts if they at least contain two edges
     std::vector<std::vector<std::pair<VertexID, PEID>>> edges_for_pe(size_);
     g.ForallNeighbors(vertex_id, [&](const VertexID w) {
         edges_for_pe[g.GetPE(w)].emplace_back(g.GetGlobalID(w), g.GetPE(w));
     });
     // TODO: Add random tiebreaking
     PEID num_neighboring_pes = edges_for_pe.size();
-    // std::experimental::reseed(config_.seed + rank_);
     std::sort(edges_for_pe.begin(), edges_for_pe.end(), [](const auto& lhs, const auto& rhs) {
         return lhs.size() > rhs.size();
     });
@@ -494,7 +480,7 @@ class ExponentialContraction {
     VertexID remaining_edges = vertex_deg;
     VertexID remaining_parts = num_parts;
     // Check if we can send single large part to PE
-    // TODO: Change to neihgbor-loop
+    // TODO: Fix iteration
     for (PEID i = 0; i < size_; ++i) {
       if (edges_for_pe[i].empty()) continue;
       PEID pe = edges_for_pe[i][0].second;
@@ -522,7 +508,7 @@ class ExponentialContraction {
       // Greedily select PE with most remaining edges
       PEID current_target_pe = std::numeric_limits<PEID>::max();
       int remaining_part_size = part_size;
-    // TODO: Change to neihgbor-loop
+    // TODO: Fix iteration
       for (PEID i = 0; i < size_; ++i) {
         if (edges_for_pe[i].empty()) continue;
         if (edges_for_pe[i].size() > 0 && remaining_part_size > 0) {
@@ -566,14 +552,14 @@ class ExponentialContraction {
   void ExchangeMessages(std::vector<std::vector<VertexID>> &send_buffers,
                         std::vector<std::vector<VertexID>> &receive_buffers) {
     PEID num_requests = 0;
-    // TODO: Change to neihgbor-loop
+    // TODO: Fix iteration
     for (PEID pe = 0; pe < size_; ++pe) {
       if (send_buffers[pe].size() > 0) num_requests++; 
     }
     std::vector<MPI_Request> requests(num_requests);
 
     int req = 0;
-    // TODO: Change to neihgbor-loop
+    // TODO: Fix iteration
     for (PEID pe = 0; pe < size_; ++pe) {
       if (send_buffers[pe].size() > 0) {
         MPI_Issend(send_buffers[pe].data(), 
@@ -652,12 +638,12 @@ class ExponentialContraction {
                        std::vector<std::vector<VertexID>> & receive_buffer,
                        std::vector<std::vector<VertexID>> & send_buffer) {
     // Clear send buffers
-    // TODO: Change to neihgbor-loop
+    // TODO: Fix iteration
     for (PEID pe = 0; pe < size_; ++pe) {
       send_buffer[pe].clear();
     }
     // Process incoming vertices/edges
-    // TODO: Change to neihgbor-loop
+    // TODO: Fix iteration
     for (PEID pe = 0; pe < size_; ++pe) {
       if (receive_buffer[pe].size() > 0) {
         VertexID source, copy_vertex;
@@ -696,7 +682,7 @@ class ExponentialContraction {
   void ProcessRouting(DynamicGraphCommunicator &g, 
                       std::vector<std::vector<VertexID>> & receive_buffer) {
     // Process incoming vertices/edges
-    // TODO: Change to neihgbor-loop
+    // TODO: Fix iteration
     for (PEID pe = 0; pe < size_; ++pe) {
       if (receive_buffer[pe].size() > 0) {
         for (VertexID i = 0; i < receive_buffer[pe].size(); i+=3) {
@@ -715,6 +701,7 @@ class ExponentialContraction {
 
   void UpdateInterfaceVertices(DynamicGraphCommunicator &g) {
     // Check if PEs are still connected
+    // TODO: Fix size
     std::vector<bool> is_neighbor(size_, false);
     g.ForallLocalVertices([&](const VertexID v) {
       bool ghost_neighbor = false;
@@ -728,7 +715,7 @@ class ExponentialContraction {
     });
 
     // Update PEs
-    // TODO: Change to neihgbor-loop
+    // TODO: Fix iteration
     for (PEID i = 0; i < size_; i++) {
       g.SetAdjacentPE(i, is_neighbor[i]);
     }

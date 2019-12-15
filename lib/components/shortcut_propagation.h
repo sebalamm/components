@@ -163,34 +163,20 @@ class ShortcutPropagation {
   } 
 
   void FindMinLabels(StaticGraphCommunicator &g) {
-    // std::vector<bool> changed(g.GetNumberOfLocalVertices(), false);
     // TODO: Use BFS instead
-    // bool label_changed = true;
-    // while(label_changed) {
-    //   label_changed = false;
-      g.ForallLocalVertices([&](VertexID v) {
-        // Gather min label of all neighbors
-        VertexID v_label = g.GetVertexLabel(v);
-        VertexID v_rank = g.GetVertexRoot(v);
-        g.ForallNeighbors(v, [&](VertexID u) {
-          if (g.GetVertexLabel(u) < v_label) {
-            // label_changed = true;
-            // changed[v] = true;
-            v_label = g.GetVertexLabel(u);
-            v_rank = g.GetVertexRoot(u);
-          }
-        });
-        // g.SetVertexLabel(v, v_label);
-        // g.SetVertexRoot(v, v_rank);
-        labels_[v] = v_label;
-        ranks_[v] = v_rank;
+    g.ForallLocalVertices([&](VertexID v) {
+      // Gather min label of all neighbors
+      VertexID v_label = g.GetVertexLabel(v);
+      VertexID v_rank = g.GetVertexRoot(v);
+      g.ForallNeighbors(v, [&](VertexID u) {
+        if (g.GetVertexLabel(u) < v_label) {
+          v_label = g.GetVertexLabel(u);
+          v_rank = g.GetVertexRoot(u);
+        }
       });
-    // }
-
-    // g.ForallLocalVertices([&](VertexID v) {
-    //   labels_[v] = g.GetVertexLabel(v);
-    //   ranks_[v] = g.GetVertexRoot(v);
-    // });
+      labels_[v] = v_label;
+      ranks_[v] = v_rank;
+    });
   }
 
   void FindHeavyHitters(StaticGraphCommunicator &g) {
@@ -208,6 +194,7 @@ class ShortcutPropagation {
   }
 
   void Shortcut(StaticGraphCommunicator &g) {
+    // TODO: Fix size
     std::vector<std::vector<VertexID>> update_buffers(size_);
     std::vector<std::vector<VertexID>> request_buffers(size_);
     google::dense_hash_map<VertexID, std::vector<VertexID>> update_lists;
@@ -240,7 +227,7 @@ class ShortcutPropagation {
 
     // Send updates and requests
     int num_requests = 0;
-    // TODO: Change to neihgbor-loop
+    // TODO: Fix iteration
     for (PEID i = 0; i < size_; ++i) {
       if (i == rank_) continue;
       if (request_buffers[i].size() > 0) num_requests++;
@@ -249,7 +236,7 @@ class ShortcutPropagation {
 
     shortcut_timer_.Restart();
     int req = 0;
-    // TODO: Change to neihgbor-loop
+    // TODO: Fix iteration
     for (PEID i = 0; i < size_; ++i) {
       if (i == rank_) continue;
       if (request_buffers[i].size() > 0) {
@@ -347,7 +334,7 @@ class ShortcutPropagation {
                                  << "[TIME] " << shortcut_timer_.Elapsed() << std::endl;
 
     num_requests = 0;
-    // TODO: Change to neihgbor-loop
+    // TODO: Fix iteration
     for (PEID i = 0; i < size_; ++i) {
       if (i == rank_) continue;
       if (update_buffers[i].size() > 0) num_requests++;
@@ -357,7 +344,7 @@ class ShortcutPropagation {
     shortcut_timer_.Restart();
     statuses.resize(num_requests);
     req = 0;
-    // TODO: Change to neihgbor-loop
+    // TODO: Fix iteration
     for (PEID i = 0; i < size_; ++i) {
       if (i == rank_) continue;
       if (update_buffers[i].size() > 0) {
