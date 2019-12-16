@@ -94,7 +94,6 @@ class StaticGraph {
 
     // Temp counter for properly counting new ghost vertices
     vertex_counter_ = local_n; 
-    edge_counter_ = 0;
     ghost_counter_ = local_n;
   }
 
@@ -173,19 +172,6 @@ class StaticGraph {
   //////////////////////////////////////////////
   // Vertex mappings
   //////////////////////////////////////////////
-  inline void SetOffsetArray(std::vector<std::pair<VertexID, VertexID>> &&vertex_dist) {
-    offset_array_ = vertex_dist;
-  }
-
-  PEID GetPEFromOffset(const VertexID v) const {
-    for (PEID i = 0; i < offset_array_.size(); ++i) {
-      if (v >= offset_array_[i].first && v < offset_array_[i].second) {
-        return i;
-      }
-    }
-    return rank_;
-  }
-
   inline bool IsLocal(VertexID v) const {
     return v < number_of_local_vertices_;
   }
@@ -298,7 +284,7 @@ class StaticGraph {
     return vertex_counter_++;
   }
 
-  inline VertexID AddGhostVertex(VertexID v) {
+  inline VertexID AddGhostVertex(VertexID v, PEID pe) {
     global_to_local_map_[v] = ghost_counter_;
 
     if (ghost_counter_ > local_vertices_data_.size()) {
@@ -308,7 +294,7 @@ class StaticGraph {
 
     // Update data
     local_vertices_data_[ghost_counter_].is_interface_vertex_ = false;
-    ghost_vertices_data_[ghost_counter_ - ghost_offset_].rank_ = GetPEFromOffset(v);
+    ghost_vertices_data_[ghost_counter_ - ghost_offset_].rank_ = pe;
     ghost_vertices_data_[ghost_counter_ - ghost_offset_].global_id_ = v;
 
     return ghost_counter_++;
@@ -318,12 +304,15 @@ class StaticGraph {
     if (IsLocalFromGlobal(to)) {
       AddLocalEdge(from, to);
     } else {
-      PEID neighbor = (rank == size_) ? GetPEFromOffset(to) : rank;
+      if (rank == size_) {
+        std::cout << "This shouldn't happen" << std::endl;
+        exit(1);
+      }
       local_vertices_data_[from].is_interface_vertex_ = true;
       if (IsGhostFromGlobal(to)) { // true if ghost already in map, otherwise false
         number_of_cut_edges_++;
         AddLocalEdge(from, to);
-        SetAdjacentPE(neighbor, true);
+        SetAdjacentPE(rank, true);
       } else {
         std::cout << "This shouldn't happen" << std::endl;
         exit(1);
@@ -548,8 +537,6 @@ class StaticGraph {
 
   // Vertex mapping
   VertexID local_offset_;
-  std::vector<std::pair<VertexID, VertexID>> offset_array_;
-
   VertexID ghost_offset_;
   google::dense_hash_map<VertexID, VertexID> global_to_local_map_;
 

@@ -676,7 +676,7 @@ class ExponentialContraction {
               g.RelinkEdge(g.GetLocalID(target), source, copy_vertex, rank_);
             // Neighbor is remote vertex
             } else {
-              g.AddGhostVertex(target);
+              g.AddGhostVertex(target, target_pe);
               // Target PE needs to reroute (target, source) from (original) PE to (target, copy) on sender PE
               send_buffer[target_pe].emplace_back(target);
               send_buffer[target_pe].emplace_back(source);

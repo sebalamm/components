@@ -82,7 +82,7 @@ class CAGBuilder {
 
   // Local edges
   EdgeHash local_edges_{};
-  std::vector<std::pair<VertexID, VertexID>> edges_;
+  std::vector<std::tuple<VertexID, VertexID, PEID>> edges_;
 
   // Send buffers
   google::dense_hash_map<PEID, std::vector<VertexID>> vertex_buffers_;
@@ -201,6 +201,7 @@ class CAGBuilder {
     comm_time_ += comm_timer_.Elapsed();
   }
 
+  // TODO: Do this per PE?
   void IdentifyLargestInterfaceComponents() {
     // Compute sizes of components for interface vertices
     google::dense_hash_map<VertexID, VertexID> interface_component_size;
@@ -252,8 +253,11 @@ class CAGBuilder {
     // TODO: Can we do this more efficiently?
     google::dense_hash_map<PEID, google::sparse_hash_set<VertexID>> unique_neighbors;
     unique_neighbors.set_empty_key(-1);
+    VertexID buffer_size = 0;
     g_.ForallLocalVertices([&](const VertexID v) {
       if (g_.IsInterface(v)) {
+        google::dense_hash_set<PEID> receiving_pes;
+        receiving_pes.set_empty_key(-1);
         g_.ForallNeighbors(v, [&](const VertexID w) {
           if (!g_.IsLocal(w)) {
             PEID target_pe = g_.GetPE(w);
@@ -263,16 +267,20 @@ class CAGBuilder {
             if (contraction_vertex != largest_component) {
               // Avoid duplicates by hashing the message
               VertexID comp_pair = pair(w, g_.GetContractionVertex(v));
-              if (unique_neighbors[target_pe].find(comp_pair) == end(unique_neighbors[target_pe])) {
+              if (unique_neighbors[target_pe].find(comp_pair) == end(unique_neighbors[target_pe]) &&
+                  receiving_pes.find(target_pe) == end(receiving_pes)) {
                 unique_neighbors[target_pe].insert(comp_pair);
+                receiving_pes.insert(target_pe);
                 vertex_buffers_[target_pe].push_back(g_.GetGlobalID(v));
                 vertex_buffers_[target_pe].push_back(contraction_vertex);
+                buffer_size++;
               }
             }
           }
         });
       }
     });
+    std::cout << "R" << rank_ << " buffer size " << buffer_size << std::endl;
   }
 
   void SendBuffers(std::vector<MPI_Request> &requests) {
@@ -390,11 +398,12 @@ class CAGBuilder {
       g_.ForallNeighbors(v, [&](const VertexID w) {
         VertexID cw = g_.GetContractionVertex(w);
         if (cv != cw) {
-          auto h_edge = HashedEdge{num_global_components_, cv, cw, g_.GetPE(w)};
+          PEID pe = g_.GetPE(w);
+          auto h_edge = HashedEdge{num_global_components_, cv, cw, pe};
           if (local_edges_.find(h_edge) == end(local_edges_)) {
             local_edges_.insert(h_edge);
-            edges_.emplace_back(cv, cw);
-            edges_.emplace_back(cw, cv);
+            edges_.emplace_back(cv, cw, pe);
+            edges_.emplace_back(cw, cv, rank_);
           }
         }
       });
@@ -405,44 +414,27 @@ class CAGBuilder {
     VertexID from = num_smaller_components_;
     VertexID to = num_smaller_components_ + num_local_components_ - 1;
 
-    google::dense_hash_set<VertexID> ghost_vertices; 
-    ghost_vertices.set_empty_key(-1);
+    google::dense_hash_map<VertexID, PEID> ghost_pe; 
+    ghost_pe.set_empty_key(-1);
 
+    // Identify ghost vertices
     for (auto &e : edges_) {
-      VertexID source = e.first;
-      VertexID target = e.second;
-
-      // Source
-      if (from > target || target > to) {
-        if (ghost_vertices.find(target) == end(ghost_vertices)) {
-            ghost_vertices.insert(target);
+      VertexID target = std::get<1>(e);
+      PEID pe = std::get<2>(e);
+      if (std::get<2>(e) != rank_) {
+        if (ghost_pe.find(target) == ghost_pe.end()) {
+            ghost_pe[target] = pe;
         } 
-      } 
+      }
     }
 
-    VertexID number_of_ghost_vertices = ghost_vertices.size();
+    VertexID number_of_ghost_vertices = ghost_pe.size();
     VertexID number_of_edges = edges_.size();
-
-    // Add datatype
-    comm_timer_.Restart();
-    MPI_Datatype MPI_COMP;
-    MPI_Type_vector(1, 2, 0, MPI_VERTEX, &MPI_COMP);
-    MPI_Type_commit(&MPI_COMP);
-
-    // Gather vertex distribution
-    // TODO: Get rid of allgather
-    std::pair<VertexID, VertexID> range(from, to + 1);
-    std::vector<std::pair<VertexID, VertexID>> vertex_dist(size_);
-    MPI_Allgather(&range, 1, MPI_COMP,
-                  &vertex_dist[0], 1, MPI_COMP, MPI_COMM_WORLD);
-    comm_time_ += comm_timer_.Elapsed();
 
     DynamicGraphCommunicator cg(rank_, size_);
     cg.StartConstruct(num_local_components_,
                       number_of_ghost_vertices,
                       num_global_components_);
-
-    cg.SetOffsetArray(std::move(vertex_dist));
 
     // Initialize local vertices
     for (VertexID v = 0; v < num_local_components_; v++) {
@@ -452,17 +444,15 @@ class CAGBuilder {
     }
 
     // Initialize ghost vertices
-    // This will also set the payload
-    for (auto &v : ghost_vertices) {
-      cg.AddGhostVertex(v);
+    for (const auto &kv : ghost_pe) {
+      cg.AddGhostVertex(kv.first, kv.second);
     }
 
     for (auto &edge : edges_) {
-      cg.AddEdge(cg.GetLocalID(edge.first), edge.second, size_);
+      cg.AddEdge(cg.GetLocalID(std::get<0>(edge)), std::get<1>(edge), std::get<2>(edge));
     }
 
     cg.FinishConstruct();
-    // cg.OutputLocal();
     return cg;
   }
 
@@ -470,37 +460,22 @@ class CAGBuilder {
     VertexID from = num_smaller_components_;
     VertexID to = num_smaller_components_ + num_local_components_ - 1;
 
-    google::dense_hash_set<VertexID> ghost_vertices; 
-    ghost_vertices.set_empty_key(-1);
+    google::dense_hash_map<VertexID, PEID> ghost_pe; 
+    ghost_pe.set_empty_key(-1);
 
+    // Identify ghost vertices
     for (auto &e : edges_) {
-      VertexID source = e.first;
-      VertexID target = e.second;
-
-      // Source
-      if (from > target || target > to) {
-        if (ghost_vertices.find(target) == end(ghost_vertices)) {
-            ghost_vertices.insert(target);
+      VertexID target = std::get<1>(e);
+      PEID pe = std::get<2>(e);
+      if (std::get<2>(e) != rank_) {
+        if (ghost_pe.find(target) == ghost_pe.end()) {
+            ghost_pe[target] = pe;
         } 
-      } 
+      }
     }
 
-    VertexID number_of_ghost_vertices = ghost_vertices.size();
+    VertexID number_of_ghost_vertices = ghost_pe.size();
     VertexID number_of_edges = edges_.size();
-
-    // Add datatype
-    comm_timer_.Restart();
-    MPI_Datatype MPI_COMP;
-    MPI_Type_vector(1, 2, 0, MPI_VERTEX, &MPI_COMP);
-    MPI_Type_commit(&MPI_COMP);
-
-    // Gather vertex distribution
-    // TODO: Get rid of allgather
-    std::pair<VertexID, VertexID> range(from, to + 1);
-    std::vector<std::pair<VertexID, VertexID>> vertex_dist(size_);
-    MPI_Allgather(&range, 1, MPI_COMP,
-                  &vertex_dist[0], 1, MPI_COMP, MPI_COMM_WORLD);
-    comm_time_ += comm_timer_.Elapsed();
 
     StaticGraph cg(rank_, size_);
     cg.StartConstruct(num_local_components_,
@@ -508,27 +483,36 @@ class CAGBuilder {
                       edges_.size(),
                       from);
 
-    cg.SetOffsetArray(std::move(vertex_dist));
-
-    for (auto &v : ghost_vertices) {
-      cg.AddGhostVertex(v);
+    // Initialize ghost vertices
+    for (const auto &kv : ghost_pe) {
+      cg.AddGhostVertex(kv.first, kv.second);
     }
 
     std::sort(edges_.begin(), edges_.end(), [&](const auto &left, const auto &right) {
-        VertexID lhs_source = cg.GetLocalID(left.first);
-        VertexID lhs_target = cg.GetLocalID(left.second);
-        VertexID rhs_source = cg.GetLocalID(right.first);
-        VertexID rhs_target = cg.GetLocalID(right.second);
+        VertexID lhs_source = cg.GetLocalID(std::get<0>(left));
+        VertexID lhs_target = cg.GetLocalID(std::get<1>(left));
+        VertexID rhs_source = cg.GetLocalID(std::get<0>(right));
+        VertexID rhs_target = cg.GetLocalID(std::get<1>(right));
         return (lhs_source < rhs_source
                   || (lhs_source == rhs_source && lhs_target < rhs_target));
     });
 
     for (auto &edge : edges_) {
-      cg.AddEdge(cg.GetLocalID(edge.first), edge.second, size_);
+      cg.AddEdge(cg.GetLocalID(std::get<0>(edge)), std::get<1>(edge), std::get<2>(edge));
     }
 
     cg.FinishConstruct();
     return cg;
+  }
+
+  PEID GetPEFromOffset(const VertexID v, 
+                       std::vector<std::pair<VertexID, VertexID>> offset_array) const {
+    for (PEID i = 0; i < offset_array.size(); ++i) {
+      if (v >= offset_array[i].first && v < offset_array[i].second) {
+        return i;
+      }
+    }
+    return rank_;
   }
 };
 

@@ -161,17 +161,6 @@ class SemidynamicGraph {
   //////////////////////////////////////////////
   // Vertex mappings
   //////////////////////////////////////////////
-  inline void SetOffsetArray(std::vector<std::pair<VertexID, VertexID>> &&vertex_dist) {
-    offset_array_ = vertex_dist;
-  }
-
-  PEID GetPEFromOffset(const VertexID v) const {
-    for (PEID i = 0; i < offset_array_.size(); ++i) {
-      if (v >= offset_array_[i].first && v < offset_array_[i].second) return i;
-    }
-    return rank_;
-  }
-
   inline bool IsLocal(VertexID v) const {
     return v < number_of_local_vertices_;
   }
@@ -284,7 +273,7 @@ class SemidynamicGraph {
     return vertex_counter_++;
   }
 
-  VertexID AddGhostVertex(VertexID v) {
+  VertexID AddGhostVertex(VertexID v, PEID pe) {
     global_to_local_map_[v] = ghost_counter_;
 
     // Fix overflows
@@ -296,11 +285,8 @@ class SemidynamicGraph {
 
     // Update data
     local_vertices_data_[ghost_counter_].is_interface_vertex_ = false;
-    ghost_vertices_data_[ghost_counter_ - ghost_offset_].rank_ = GetPEFromOffset(v);
+    ghost_vertices_data_[ghost_counter_ - ghost_offset_].rank_ = pe;
     ghost_vertices_data_[ghost_counter_ - ghost_offset_].global_id_ = v;
-
-    // Set adjacent PE
-    PEID neighbor = GetPEFromOffset(v);
 
     // Set active
     is_active_[ghost_counter_] = true;
@@ -312,18 +298,21 @@ class SemidynamicGraph {
     if (IsLocalFromGlobal(to)) {
       AddLocalEdge(from, to);
     } else {
-      PEID neighbor = (rank == size_) ? GetPEFromOffset(to) : rank;
+      if (rank == size_) {
+        std::cout << "This shouldn't happen" << std::endl;
+        exit(1);
+      }
       local_vertices_data_[from].is_interface_vertex_ = true;
       if (IsGhostFromGlobal(to)) { // true if ghost already in map, otherwise false
         number_of_cut_edges_++;
         AddGhostEdge(from, to);
-        SetAdjacentPE(neighbor, true);
+        SetAdjacentPE(rank, true);
       } else {
         std::cout << "This shouldn't happen" << std::endl;
         exit(1);
       }
     }
-    edge_counter_ += 2;
+    edge_counter_++;
     return edge_counter_;
   }
 
@@ -583,8 +572,6 @@ class SemidynamicGraph {
 
   // Vertex mapping
   VertexID local_offset_;
-  std::vector<std::pair<VertexID, VertexID>> offset_array_;
-
   VertexID ghost_offset_;
   google::dense_hash_map<VertexID, VertexID> global_to_local_map_;
 

@@ -153,7 +153,7 @@ class SemidynamicGraphCommunicator : public SemidynamicGraph {
     vertex_payload_[v].root_ = root;
   }
 
-  VertexID AddGhostVertex(VertexID v);
+  VertexID AddGhostVertex(VertexID v, PEID pe);
 
   VertexID GetMaxDegree() {
     if (!max_degree_computed_) {

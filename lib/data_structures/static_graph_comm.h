@@ -63,7 +63,7 @@ class StaticGraphCommunicator : public StaticGraph {
   //////////////////////////////////////////////
   // Manage local vertices/edges
   //////////////////////////////////////////////
-  VertexID AddGhostVertex(VertexID v);
+  VertexID AddGhostVertex(VertexID v, PEID pe);
 
   void SetVertexPayload(VertexID v, VertexPayload &&msg, bool propagate = true);
 

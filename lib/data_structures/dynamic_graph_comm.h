@@ -185,8 +185,6 @@ class DynamicGraphCommunicator : public DynamicGraph {
     return local_id;
   }
 
-  VertexID AddGhostVertex(VertexID v);
-
   VertexID AddGhostVertex(VertexID v, PEID pe);
 
   //////////////////////////////////////////////

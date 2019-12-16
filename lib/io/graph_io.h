@@ -93,8 +93,6 @@ class GraphIO {
 
     if (rank == ROOT) std::cout << "done start construct... mem " << GetFreePhysMem() << std::endl;
 
-    g.SetOffsetArray(std::move(vertex_dist));
-
     // Initialize local vertices
     if constexpr (std::is_same<GraphOutputType, StaticGraphCommunicator>::value) {
       for (VertexID v = 0; v < number_of_local_vertices; v++) {
@@ -105,7 +103,7 @@ class GraphIO {
 
     // Initialize ghost vertices
     for (auto &v : ghost_vertices) {
-      g.AddGhostVertex(v);
+      g.AddGhostVertex(v, GetPEFromOffset(v, vertex_dist, rank));
     }
 
     if (rank == ROOT) std::cout << "done adding ghosts... mem " << GetFreePhysMem() << std::endl;
@@ -119,7 +117,7 @@ class GraphIO {
                   || (lhs_source == rhs_source && lhs_target < rhs_target));
     });
     for (auto &edge : edge_list) {
-      g.AddEdge(g.GetLocalID(edge.first), edge.second, size);
+      g.AddEdge(g.GetLocalID(edge.first), edge.second, GetPEFromOffset(edge.second, vertex_dist, rank));
     }
 
     if (rank == ROOT) std::cout << "done adding edges... mem " << GetFreePhysMem() << std::endl;
@@ -170,8 +168,6 @@ class GraphIO {
                      number_of_ghost_vertices, 
                      from);
 
-    g.SetOffsetArray(std::move(vertex_dist));
-
     // Initialize local vertices
     if constexpr (std::is_same<GraphOutputType, DynamicGraphCommunicator>::value) {
       for (VertexID v = 0; v < number_of_local_vertices; v++) {
@@ -181,13 +177,12 @@ class GraphIO {
     }
 
     // Initialize ghost vertices
-    // This will also set the payload
     for (auto &v : ghost_vertices) {
-      g.AddGhostVertex(v);
+      g.AddGhostVertex(v, GetPEFromOffset(v, vertex_dist, rank));
     }
 
     for (auto &edge : edge_list) {
-      g.AddEdge(g.GetLocalID(edge.first), edge.second, size);
+      g.AddEdge(g.GetLocalID(edge.first), edge.second, GetPEFromOffset(edge.second, vertex_dist, rank));
     }
 
     g.FinishConstruct();
@@ -298,11 +293,10 @@ class GraphIO {
                      ghost_vertices.size(), 
                      edge_list.size(),
                      from); 
-    g.SetOffsetArray(std::move(vertex_dist));
 
     // Initialize ghost vertices
     for (auto &v : ghost_vertices) {
-      g.AddGhostVertex(v);
+      g.AddGhostVertex(v, GetPEFromOffset(v, vertex_dist, rank));
     }
 
     // Initialize local vertices
@@ -322,7 +316,7 @@ class GraphIO {
                   || (lhs_source == rhs_source && lhs_target < rhs_target));
     });
     for (auto &edge : edge_list) {
-      g.AddEdge(g.GetLocalID(edge.first), edge.second, size);
+      g.AddEdge(g.GetLocalID(edge.first), edge.second, GetPEFromOffset(edge.second, vertex_dist, rank));
     }
 
     g.FinishConstruct();
@@ -432,7 +426,6 @@ class GraphIO {
     g.StartConstruct(number_of_local_vertices, 
                      ghost_vertices.size(), 
                      from);
-    g.SetOffsetArray(std::move(vertex_dist));
 
     // Initialize local vertices
     if constexpr (std::is_same<GraphOutputType, DynamicGraphCommunicator>::value) {
@@ -443,13 +436,12 @@ class GraphIO {
     }
 
     // Initialize ghost vertices
-    // This will also set the payload
     for (auto &v : ghost_vertices) {
-      g.AddGhostVertex(v);
+      g.AddGhostVertex(v, GetPEFromOffset(v, vertex_dist, rank));
     }
 
     for (auto &edge : edge_list) {
-      g.AddEdge(g.GetLocalID(edge.first), edge.second, size);
+      g.AddEdge(g.GetLocalID(edge.first), edge.second, GetPEFromOffset(edge.second, vertex_dist, rank));
     }
 
     g.FinishConstruct();
@@ -545,11 +537,10 @@ class GraphIO {
                      ghost_vertices.size(), 
                      edge_list.size(),
                      from); 
-    g.SetOffsetArray(std::move(vertex_dist));
 
     // Initialize ghost vertices
     for (auto &v : ghost_vertices) {
-      g.AddGhostVertex(v);
+      g.AddGhostVertex(v, GetPEFromOffset(v, vertex_dist, rank));
     }
 
     // Initialize local vertices
@@ -569,7 +560,7 @@ class GraphIO {
                   || (lhs_source == rhs_source && lhs_target < rhs_target));
     });
     for (auto &edge : edge_list) {
-      g.AddEdge(g.GetLocalID(edge.first), edge.second, size);
+      g.AddEdge(g.GetLocalID(edge.first), edge.second, GetPEFromOffset(edge.second, vertex_dist, rank));
     }
 
     g.FinishConstruct();
@@ -665,7 +656,6 @@ class GraphIO {
     g.StartConstruct(number_of_local_vertices, 
                      ghost_vertices.size(), 
                      from);
-    g.SetOffsetArray(std::move(vertex_dist));
 
     // Initialize local vertices
     if constexpr (std::is_same<GraphOutputType, DynamicGraphCommunicator>::value) {
@@ -676,13 +666,12 @@ class GraphIO {
     }
 
     // Initialize ghost vertices
-    // This will also set the payload
     for (auto &v : ghost_vertices) {
-      g.AddGhostVertex(v);
+      g.AddGhostVertex(v, GetPEFromOffset(v, vertex_dist, rank));
     }
 
     for (auto &edge : edge_list) {
-      g.AddEdge(g.GetLocalID(edge.first), edge.second, size);
+      g.AddEdge(g.GetLocalID(edge.first), edge.second, GetPEFromOffset(edge.second, vertex_dist, rank));
     }
 
     g.FinishConstruct();
@@ -701,6 +690,17 @@ class GraphIO {
 
     return freePhysMem;
   } 
+
+  static PEID GetPEFromOffset(const VertexID v, 
+                              std::vector<std::pair<VertexID, VertexID>> offset_array,
+                              PEID default_rank) {
+    for (PEID i = 0; i < offset_array.size(); ++i) {
+      if (v >= offset_array[i].first && v < offset_array[i].second) {
+        return i;
+      }
+    }
+    return default_rank;
+  }
 
  private:
 };

@@ -49,10 +49,6 @@ void DynamicGraphCommunicator::ForceVertexPayload(const VertexID v,
   SetVertexMessage(v, std::move(msg));
 }
 
-VertexID DynamicGraphCommunicator::AddGhostVertex(VertexID v) {
-  AddGhostVertex(v, GetPEFromOffset(v));
-}
-
 VertexID DynamicGraphCommunicator::AddGhostVertex(VertexID v, PEID pe) {
   VertexID local_id = ghost_vertex_counter_ + ghost_offset_;
   global_to_local_map_[v] = local_id;
@@ -67,9 +63,6 @@ VertexID DynamicGraphCommunicator::AddGhostVertex(VertexID v, PEID pe) {
   ghost_vertices_data_[local_id - ghost_offset_].global_id_ = v;
   ghost_vertices_data_[local_id - ghost_offset_].rank_ = pe;
 
-  // Set adjacent PE
-  PEID neighbor = pe;
-
   // Set active
   ghost_active_[local_id - ghost_offset_] = true;
 
@@ -79,7 +72,7 @@ VertexID DynamicGraphCommunicator::AddGhostVertex(VertexID v, PEID pe) {
 #ifdef TIEBREAK_DEGREE
                                               0,
 #endif
-                                              neighbor};
+                                              pe};
 
   number_of_vertices_++;
   return local_id;

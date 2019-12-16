@@ -41,13 +41,13 @@ void StaticGraphCommunicator::SetVertexPayload(const VertexID v,
 }
 
 void StaticGraphCommunicator::ForceVertexPayload(const VertexID v,
-                                     VertexPayload &&msg) {
+                                                 VertexPayload &&msg) {
   if (local_vertices_data_[v].is_interface_vertex_)
     ghost_comm_->AddMessage(v, msg);
   SetVertexMessage(v, std::move(msg));
 }
 
-VertexID StaticGraphCommunicator::AddGhostVertex(VertexID v) {
+VertexID StaticGraphCommunicator::AddGhostVertex(VertexID v, PEID pe) {
   global_to_local_map_[v] = ghost_counter_;
 
   if (ghost_counter_ > local_vertices_data_.size()) {
@@ -58,11 +58,8 @@ VertexID StaticGraphCommunicator::AddGhostVertex(VertexID v) {
 
   // Update data
   local_vertices_data_[ghost_counter_].is_interface_vertex_ = false;
-  ghost_vertices_data_[ghost_counter_ - ghost_offset_].rank_ = GetPEFromOffset(v);
+  ghost_vertices_data_[ghost_counter_ - ghost_offset_].rank_ = pe;
   ghost_vertices_data_[ghost_counter_ - ghost_offset_].global_id_ = v;
-
-  // Set adjacent PE
-  PEID neighbor = GetPEFromOffset(v);
 
   // Set payload
   vertex_payload_[ghost_counter_] = {std::numeric_limits<VertexID>::max() - 1, 
@@ -70,7 +67,7 @@ VertexID StaticGraphCommunicator::AddGhostVertex(VertexID v) {
 #ifdef TIEBREAK_DEGREE
                                      0,
 #endif
-                                     neighbor};
+                                     pe};
 
   return ghost_counter_++;
 }

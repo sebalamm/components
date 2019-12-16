@@ -56,7 +56,7 @@ void SemidynamicGraphCommunicator::ForceVertexPayload(const VertexID v,
   SetVertexMessage(v, std::move(msg));
 }
 
-VertexID SemidynamicGraphCommunicator::AddGhostVertex(VertexID v) {
+VertexID SemidynamicGraphCommunicator::AddGhostVertex(VertexID v, PEID pe) {
   global_to_local_map_[v] = ghost_counter_;
 
   // Fix overflows
@@ -69,11 +69,8 @@ VertexID SemidynamicGraphCommunicator::AddGhostVertex(VertexID v) {
 
   // Update data
   local_vertices_data_[ghost_counter_].is_interface_vertex_ = false;
-  ghost_vertices_data_[ghost_counter_ - ghost_offset_].rank_ = GetPEFromOffset(v);
+  ghost_vertices_data_[ghost_counter_ - ghost_offset_].rank_ = pe;
   ghost_vertices_data_[ghost_counter_ - ghost_offset_].global_id_ = v;
-
-  // Set adjacent PE
-  PEID neighbor = GetPEFromOffset(v);
 
   // Set payload
   vertex_payload_[ghost_counter_] = {std::numeric_limits<VertexID>::max() - 1, 
@@ -81,7 +78,7 @@ VertexID SemidynamicGraphCommunicator::AddGhostVertex(VertexID v) {
 #ifdef TIEBREAK_DEGREE
                                0,
 #endif
-                               neighbor};
+                               pe};
 
   return ghost_counter_++;
 }
