@@ -413,7 +413,7 @@ class StaticGraph {
     std::vector<std::pair<VertexID, VertexID>> local_components;
     for(auto &kv : local_component_sizes)
       local_components.emplace_back(kv.first, kv.second);
-    // TODO [MEMORY]: Might be too small
+    // [MEMORY]: Might be too small
     int num_local_components = local_components.size();
 
     // Exchange number of local components
@@ -422,7 +422,7 @@ class StaticGraph {
 
     // Compute diplacements
     std::vector<int> displ_components(size_, 0);
-    // TODO [MEMORY]: Might be too small
+    // [MEMORY]: Might be too small
     int num_global_components = 0;
     for (PEID i = 0; i < size_; ++i) {
       displ_components[i] = num_global_components;

@@ -67,7 +67,6 @@ class LocalContraction {
       DynamicGraphCommunicator ccag = second_contraction.BuildDynamicComponentAdjacencyGraph();
       OutputStats<DynamicGraphCommunicator>(ccag);
 
-      // TODO: Delete intermediate graph?
       // Keep contraction labeling for later
       local_contraction_ = new DynamicContraction(ccag, rank_, size_);
 
@@ -267,7 +266,6 @@ class LocalContraction {
     g.SendAndReceiveGhostVertices();
 
     // Determine remaining active vertices
-    // TODO: Build shortcuts?
     local_contraction_->LocalContraction();
 
     OutputStats<DynamicGraphCommunicator>(g);

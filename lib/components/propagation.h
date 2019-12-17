@@ -54,7 +54,6 @@ class Propagation {
       // StaticGraphCommunicator cag = first_contraction.BuildDynamicComponentAdjacencyGraph();
       // OutputStats<StaticGraphCommunicator>(cag);
 
-      // // TODO: Delete original graph?
       // // Keep contraction labeling for later
       // std::vector<VertexID> cag_labels(cag.GetNumberOfVertices(), 0);
       // FindLocalComponents(cag, cag_labels);

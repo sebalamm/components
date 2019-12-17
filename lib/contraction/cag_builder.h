@@ -212,9 +212,8 @@ class CAGBuilder {
       }
     });
 
-    // TODO: Fix size
-    std::vector<VertexID> largest_component_size(size_, 0);
-    std::vector<VertexID> largest_component_id(size_, 0);
+    google::dense_hash_map<PEID, std::pair<VertexID, VertexID>> largest_component;
+    largest_component.set_empty_key(-1);
 
     // Identify largest component for each adjacent PE
     g_.ForallLocalVertices([&](const VertexID v) {
@@ -223,21 +222,20 @@ class CAGBuilder {
         g_.ForallNeighbors(v, [&](const VertexID w) {
           if (!g_.IsLocal(w)) {
             PEID target_pe = g_.GetPE(w);
-            if (interface_component_size[cv] > largest_component_size[target_pe]) {
-              largest_component_size[target_pe] = interface_component_size[cv];
-              largest_component_id[target_pe] = cv;
+            if (largest_component.find(target_pe) == largest_component.end()) {
+              largest_component[target_pe] = std::make_pair(interface_component_size[cv], cv);
+            } else if (interface_component_size[cv] > largest_component[target_pe].first) {
+              largest_component[target_pe] = std::make_pair(interface_component_size[cv], cv);
             } 
           }
         });
       }
     });
 
-    g_.ForallAdjacentPEs([&](const PEID &pe) {
-      if (largest_component_size[pe] > 0) {
-        send_buffers_[pe].push_back(std::numeric_limits<VertexID>::max() - 1); 
-        send_buffers_[pe].push_back(largest_component_id[pe]); 
-      }
-    });
+    for (const auto &kv : largest_component) {
+      send_buffers_[kv.first].emplace_back(std::numeric_limits<VertexID>::max() - 1);
+      send_buffers_[kv.first].emplace_back(kv.second.second);
+    }
   }
 
   void AddComponentMessages() {
@@ -247,7 +245,7 @@ class CAGBuilder {
     };
 
     // Gather components with the same neighbor
-    // TODO: Can we do this more efficiently?
+    // TODO: Can we use something else than a hashmap of hashmaps?
     google::dense_hash_map<PEID, google::sparse_hash_set<VertexID>> unique_neighbors;
     unique_neighbors.set_empty_key(-1);
     VertexID buffer_size = 0;

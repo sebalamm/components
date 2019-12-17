@@ -439,7 +439,8 @@ class DynamicContraction {
         if (propagated_edges_.find(update_id) != end(propagated_edges_)) continue;
 
         // Get link information
-        // TODO: We use this parent as link, this is wrong if the current (link) vertex points to a different partition
+        // TODO: We use this parent as link 
+        //       This is wrong if the current (link) vertex points to a different partition
         if (g_.IsLocalFromGlobal(vlabel)) {
           edges_to_add_[wroot].emplace_back(vlabel);
           edges_to_add_[wroot].emplace_back(wlabel);

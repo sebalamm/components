@@ -57,7 +57,6 @@ class ShortcutPropagation {
       // StaticGraphCommunicator cag = first_contraction.BuildDynamicComponentAdjacencyGraph();
       // OutputStats<StaticGraphCommunicator>(cag);
 
-      // // TODO: Delete original graph?
       // // Keep contraction labeling for later
       // std::vector<VertexID> cag_labels(cag.GetNumberOfVertices(), 0);
       // FindLocalComponents(cag, cag_labels);
@@ -163,7 +162,6 @@ class ShortcutPropagation {
   } 
 
   void FindMinLabels(StaticGraphCommunicator &g) {
-    // TODO: Use BFS instead
     g.ForallLocalVertices([&](VertexID v) {
       // Gather min label of all neighbors
       VertexID v_label = g.GetVertexLabel(v);

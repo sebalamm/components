@@ -72,7 +72,6 @@ class ExponentialContraction {
                   << "[TIME] " << contraction_timer_.Elapsed() << std::endl;
       }
 
-      // TODO: Delete original graph?
       // Keep contraction labeling for later
       contraction_timer_.Restart();
       std::vector<VertexID> cag_labels(cag.GetNumberOfVertices(), 0);
@@ -98,7 +97,6 @@ class ExponentialContraction {
         DistributeHighDegreeVertices(ccag);
       }
 
-      // MEMORY: Delete intermediate graph?
       // Keep contraction labeling for later
       exp_contraction_ = new DynamicContraction(ccag, rank_, size_);
 
@@ -424,10 +422,8 @@ class ExponentialContraction {
                   1, MPI_VERTEX, 
                   MPI_SUM, MPI_COMM_WORLD);
     VertexID avg_max_deg = global_max_deg / size_; 
-    if (rank_ == ROOT) std::cout << "avg max deg " << avg_max_deg << std::endl;
 
     VertexID num_new_vertices = 0;
-
     google::dense_hash_map<PEID, VertexBuffer> send_buffers;
     send_buffers.set_empty_key(-1);
     google::dense_hash_map<PEID, VertexBuffer> receive_buffers;
@@ -454,7 +450,7 @@ class ExponentialContraction {
     comm_timer_.Restart();
     CommunicationUtility::ClearBuffers(send_buffers);
     comm_time_ += comm_timer_.Elapsed();
-    ProcessRouting(g, receive_buffers);
+    ProcessRelinking(g, receive_buffers);
     CommunicationUtility::ClearBuffers(receive_buffers);
 
     UpdateInterfaceVertices(g);
@@ -491,10 +487,8 @@ class ExponentialContraction {
       num_edges_for_pe.emplace_back(pe, num_edges);
     }
 
-
-    // TODO: Add random tiebreaking
-    // TODO: Sorting does not work on hash map
     PEID num_neighboring_pes = edges_for_pe.size();
+    std::random_shuffle(num_edges_for_pe.begin(), num_edges_for_pe.end());
     std::sort(num_edges_for_pe.begin(), num_edges_for_pe.end(), [](const auto& lhs, const auto& rhs) {
         return lhs.second > rhs.second;
     });
@@ -506,14 +500,13 @@ class ExponentialContraction {
       PEID pe = kv.first;
       VertexID num_edges = kv.second;
       if (num_edges >= part_size) {
-        // TODO: Move elements from edges_for_pe to send_buffer
         send_buffers[pe].emplace_back(g.GetGlobalID(vertex_id));
         send_buffers[pe].emplace_back(new_vertices_offset + new_vertices_counter);
         local_edges.emplace_back(new_vertices_offset + new_vertices_counter);
         local_edges.emplace_back(pe);
         new_vertices_counter++;
         for (const auto &v : edges_for_pe[pe]) {
-          send_buffers[pe].emplace_back(v);
+          send_buffers[pe].emplace_back(std::move(v));
           send_buffers[pe].emplace_back(pe);
         }
         remaining_parts -= floor(num_edges / part_size);
@@ -530,7 +523,6 @@ class ExponentialContraction {
         PEID pe = kv.first;
         PEID num_edges = kv.second;
         if (num_edges > 0 && remaining_part_size > 0) {
-          // TODO: Move elements from edges_for_pe to send_buffer
           // Set current PE as target for following messages
           if (current_target_pe >= size_) {
             current_target_pe = pe;
@@ -542,7 +534,7 @@ class ExponentialContraction {
           }
           // Add edges in current block
           for (const auto &v : edges_for_pe[pe]) {
-            send_buffers[current_target_pe].emplace_back(v);
+            send_buffers[current_target_pe].emplace_back(std::move(v));
             send_buffers[current_target_pe].emplace_back(pe);
           }
           remaining_part_size -= num_edges; 
@@ -613,7 +605,7 @@ class ExponentialContraction {
     }
   }
 
-  void ProcessRouting(DynamicGraphCommunicator &g, 
+  void ProcessRelinking(DynamicGraphCommunicator &g, 
                       google::dense_hash_map<PEID, VertexBuffer> &receive_buffer) {
     // Process incoming vertices/edges
     for (const auto &kv : receive_buffer) {
