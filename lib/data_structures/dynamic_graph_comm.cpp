@@ -26,16 +26,12 @@ void DynamicGraphCommunicator::SendAndReceiveGhostVertices() {
   ghost_comm_->SendAndReceiveGhostVertices();
 }
 
-void DynamicGraphCommunicator::ReceiveAndSendGhostVertices() {
-  ghost_comm_->ReceiveAndSendGhostVertices();
-}
-
 // NOTE: v should always be local
 void DynamicGraphCommunicator::SetVertexPayload(const VertexID v,
                                           VertexPayload &&msg,
                                           bool propagate) {
   if (GetVertexMessage(v) != msg
-      && local_vertices_data_[v].is_interface_vertex_
+      && IsInterface(v)
       && propagate)
     ghost_comm_->AddMessage(v, msg);
   SetVertexMessage(v, std::move(msg));
@@ -44,7 +40,7 @@ void DynamicGraphCommunicator::SetVertexPayload(const VertexID v,
 // NOTE: v should always be local?
 void DynamicGraphCommunicator::ForceVertexPayload(const VertexID v,
                                      VertexPayload &&msg) {
-  if (local_vertices_data_[v].is_interface_vertex_)
+  if (IsInterface(v))
     ghost_comm_->AddMessage(v, msg);
   SetVertexMessage(v, std::move(msg));
 }
@@ -76,16 +72,6 @@ VertexID DynamicGraphCommunicator::AddGhostVertex(VertexID v, PEID pe) {
 
   number_of_vertices_++;
   return local_id;
-}
-
-void DynamicGraphCommunicator::SetAdjacentPE(const PEID pe, const bool is_adj) {
-  DynamicGraph::SetAdjacentPE(pe, is_adj);
-  ghost_comm_->SetAdjacentPE(pe, is_adj);
-}
-
-void DynamicGraphCommunicator::ResetAdjacentPEs() {
-  DynamicGraph::ResetAdjacentPEs();
-  ghost_comm_->ResetAdjacentPEs();
 }
 
 void DynamicGraphCommunicator::OutputLocal() {

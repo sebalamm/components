@@ -22,11 +22,13 @@
 #ifndef _GRAPH_DEFINITIONS_H_
 #define _GRAPH_DEFINITIONS_H_
 
+#include <vector> 
+
 #define MPI_VERTEX MPI_UNSIGNED_LONG_LONG
 // #define MPI_VERTEX MPI_UNSIGNED_LONG
 
 // Constants
-typedef int PEID;
+using PEID = int;
 const PEID ROOT = 0;
 
 // High/low prec
@@ -35,13 +37,15 @@ const PEID ROOT = 0;
 // typedef int LONG;
 // typedef unsigned int ULONG;
 
-typedef long double HPFloat;
-typedef double LPFloat;
-typedef long long LONG;
-typedef unsigned long long ULONG;
+using HPFloat = long double;
+using LPFloat = double;
+using LONG = long long;
+using ULONG = unsigned long long;
 
 // Graph access
-typedef ULONG VertexID;
-typedef ULONG EdgeID;
+using VertexID = ULONG;
+using EdgeID = ULONG;
+
+using VertexBuffer = std::vector<VertexID>;
 
 #endif

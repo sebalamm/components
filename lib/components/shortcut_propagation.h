@@ -140,7 +140,7 @@ class ShortcutPropagation {
 
     // Compute components
     g.ForallLocalVertices([&](const VertexID v) {
-      if (!marked[v]) Utility<StaticGraphCommunicator>::BFS(g, v, marked, parent);
+      if (!marked[v]) Utility::BFS<StaticGraphCommunicator>(g, v, marked, parent);
     });
 
     // Set vertex label for contraction
@@ -194,9 +194,9 @@ class ShortcutPropagation {
   }
 
   void Shortcut(StaticGraphCommunicator &g) {
-    google::dense_hash_map<PEID, std::vector<VertexID>> update_buffers;
+    google::dense_hash_map<PEID, VertexBuffer> update_buffers;
     update_buffers.set_empty_key(-1);
-    google::dense_hash_map<PEID, std::vector<VertexID>> request_buffers;
+    google::dense_hash_map<PEID, VertexBuffer> request_buffers;
     request_buffers.set_empty_key(-1);
 
     google::dense_hash_map<VertexID, std::vector<VertexID>> update_lists;
@@ -275,7 +275,7 @@ class ShortcutPropagation {
       if (iprobe_success) {
         int message_length;
         MPI_Get_count(&st, MPI_VERTEX, &message_length);
-        std::vector<VertexID> message(message_length);
+        VertexBuffer message(message_length);
         MPI_Status rst{};
         MPI_Recv(&message[0], message_length, MPI_VERTEX, st.MPI_SOURCE,
                  st.MPI_TAG, MPI_COMM_WORLD, &rst);
@@ -310,7 +310,7 @@ class ShortcutPropagation {
       if (iprobe_success) {
         int message_length;
         MPI_Get_count(&st, MPI_VERTEX, &message_length);
-        std::vector<VertexID> message(message_length);
+        VertexBuffer message(message_length);
         MPI_Status rst{};
         MPI_Recv(&message[0], message_length, MPI_VERTEX, st.MPI_SOURCE,
                  st.MPI_TAG, MPI_COMM_WORLD, &rst);
@@ -381,7 +381,7 @@ class ShortcutPropagation {
 
     // Process remote answers
     shortcut_timer_.Restart();
-    std::vector<VertexID> receive_buffer;
+    VertexBuffer receive_buffer;
     isend_done = 0;
     while(!isend_done) {
       // Check for messages
@@ -391,7 +391,7 @@ class ShortcutPropagation {
       if (iprobe_success) {
         int message_length;
         MPI_Get_count(&st, MPI_VERTEX, &message_length);
-        std::vector<VertexID> message(message_length);
+        VertexBuffer message(message_length);
         MPI_Status rst{};
         MPI_Recv(&message[0], message_length, MPI_VERTEX, st.MPI_SOURCE,
                  st.MPI_TAG, MPI_COMM_WORLD, &rst);
@@ -423,7 +423,7 @@ class ShortcutPropagation {
       if (iprobe_success) {
         int message_length;
         MPI_Get_count(&st, MPI_VERTEX, &message_length);
-        std::vector<VertexID> message(message_length);
+        VertexBuffer message(message_length);
         MPI_Status rst{};
         MPI_Recv(&message[0], message_length, MPI_VERTEX, st.MPI_SOURCE,
                  st.MPI_TAG, MPI_COMM_WORLD, &rst);

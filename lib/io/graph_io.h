@@ -33,6 +33,7 @@
 #include <sys/sysinfo.h>
 
 #include "config.h"
+#include "utils.h"
 #include "dynamic_graph_comm.h"
 #include "semidynamic_graph.h"
 #include "static_graph.h"
@@ -68,7 +69,7 @@ class GraphIO {
       } 
     }
 
-    if (rank == ROOT) std::cout << "done finding ghosts... mem " << GetFreePhysMem() << std::endl;
+    if (rank == ROOT) std::cout << "done finding ghosts... mem " << Utility::GetFreePhysMem() << std::endl;
 
     VertexID number_of_ghost_vertices = ghost_vertices.size();
     VertexID number_of_edges = edge_list.size();
@@ -91,7 +92,7 @@ class GraphIO {
                      from);
 
 
-    if (rank == ROOT) std::cout << "done start construct... mem " << GetFreePhysMem() << std::endl;
+    if (rank == ROOT) std::cout << "done start construct... mem " << Utility::GetFreePhysMem() << std::endl;
 
     // Initialize local vertices
     if constexpr (std::is_same<GraphOutputType, StaticGraphCommunicator>::value) {
@@ -106,7 +107,7 @@ class GraphIO {
       g.AddGhostVertex(v, GetPEFromOffset(v, vertex_dist, rank));
     }
 
-    if (rank == ROOT) std::cout << "done adding ghosts... mem " << GetFreePhysMem() << std::endl;
+    if (rank == ROOT) std::cout << "done adding ghosts... mem " << Utility::GetFreePhysMem() << std::endl;
 
     std::sort(edge_list.begin(), edge_list.end(), [&](auto &left, auto &right) {
         VertexID lhs_source = g.GetLocalID(left.first);
@@ -120,7 +121,7 @@ class GraphIO {
       g.AddEdge(g.GetLocalID(edge.first), edge.second, GetPEFromOffset(edge.second, vertex_dist, rank));
     }
 
-    if (rank == ROOT) std::cout << "done adding edges... mem " << GetFreePhysMem() << std::endl;
+    if (rank == ROOT) std::cout << "done adding edges... mem " << Utility::GetFreePhysMem() << std::endl;
 
     g.FinishConstruct();
   }
@@ -676,20 +677,6 @@ class GraphIO {
 
     g.FinishConstruct();
   }
-
-  static long long GetFreePhysMem() {
-    struct sysinfo memInfo;
-    sysinfo (&memInfo);
-    long long totalPhysMem = memInfo.totalram;
-    long long freePhysMem = memInfo.freeram;
-
-    totalPhysMem *= memInfo.mem_unit;
-    freePhysMem *= memInfo.mem_unit;
-    totalPhysMem *= 1e-9;
-    freePhysMem *= 1e-9;
-
-    return freePhysMem;
-  } 
 
   static PEID GetPEFromOffset(const VertexID v, 
                               std::vector<std::pair<VertexID, VertexID>> offset_array,

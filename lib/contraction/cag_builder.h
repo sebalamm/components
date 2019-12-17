@@ -28,6 +28,7 @@
 
 #include "config.h"
 #include "definitions.h"
+#include "comm_utils.h"
 #include "dynamic_graph_comm.h"
 #include "static_graph.h"
 #include "edge_hash.h"
@@ -40,10 +41,10 @@ class CAGBuilder {
         num_smaller_components_(0),
         num_local_components_(0),
         num_global_components_(0),
-        vertex_buffers_(size),
         comm_time_(0.0) {
     local_components_.set_empty_key(-1);
-    vertex_buffers_.set_empty_key(-1);
+    send_buffers_.set_empty_key(-1);
+    receive_buffers_.set_empty_key(-1);
     offset_ = g_.GatherNumberOfGlobalVertices();
   }
   virtual ~CAGBuilder() = default;
@@ -85,8 +86,8 @@ class CAGBuilder {
   std::vector<std::tuple<VertexID, VertexID, PEID>> edges_;
 
   // Send buffers
-  google::dense_hash_map<PEID, std::vector<VertexID>> vertex_buffers_;
-  std::vector<bool> received_message_;
+  google::dense_hash_map<PEID, VertexBuffer> send_buffers_;
+  google::dense_hash_map<PEID, VertexBuffer> receive_buffers_;
 
   // Statistics
   float comm_time_;
@@ -181,27 +182,22 @@ class CAGBuilder {
     IdentifyLargestInterfaceComponents();
     AddComponentMessages();
 
-    // Send ghost vertex updates O(cut size) (communication)
-    comm_timer_.Restart();
-    std::vector<MPI_Request> requests;
-    SendBuffers(requests);
-
     google::dense_hash_map<PEID, VertexID> largest_component; 
     google::dense_hash_map<VertexID, VertexID> vertex_message; 
     largest_component.set_empty_key(-1); 
     vertex_message.set_empty_key(-1);
 
-    received_message_.resize(g_.GetNumberOfVertices(), false);
-    ReceiveBuffers(largest_component, vertex_message);
+    // Send ghost vertex updates O(cut size) (communication)
+    comm_timer_.Restart();
+    CommunicationUtility::SparseAllToAll(send_buffers_, receive_buffers_, rank_, size_, 42);
     comm_time_ += comm_timer_.Elapsed();
+    CommunicationUtility::ClearBuffers(send_buffers_);
+    HandleMessages(largest_component, vertex_message);
+    CommunicationUtility::ClearBuffers(receive_buffers_);
 
     ApplyUpdatesToGhostVertices(largest_component, vertex_message);
-    comm_timer_.Restart();
-    CheckRequests(requests);
-    comm_time_ += comm_timer_.Elapsed();
   }
 
-  // TODO: Do this per PE?
   void IdentifyLargestInterfaceComponents() {
     // Compute sizes of components for interface vertices
     google::dense_hash_map<VertexID, VertexID> interface_component_size;
@@ -216,6 +212,7 @@ class CAGBuilder {
       }
     });
 
+    // TODO: Fix size
     std::vector<VertexID> largest_component_size(size_, 0);
     std::vector<VertexID> largest_component_id(size_, 0);
 
@@ -237,8 +234,8 @@ class CAGBuilder {
 
     g_.ForallAdjacentPEs([&](const PEID &pe) {
       if (largest_component_size[pe] > 0) {
-        vertex_buffers_[pe].push_back(std::numeric_limits<VertexID>::max() - 1); 
-        vertex_buffers_[pe].push_back(largest_component_id[pe]); 
+        send_buffers_[pe].push_back(std::numeric_limits<VertexID>::max() - 1); 
+        send_buffers_[pe].push_back(largest_component_id[pe]); 
       }
     });
   }
@@ -262,7 +259,7 @@ class CAGBuilder {
           if (!g_.IsLocal(w)) {
             PEID target_pe = g_.GetPE(w);
             VertexID contraction_vertex = g_.GetContractionVertex(v);
-            VertexID largest_component = vertex_buffers_[target_pe][1];
+            VertexID largest_component = send_buffers_[target_pe][1];
             // Only send message if not part of largest component
             if (contraction_vertex != largest_component) {
               // Avoid duplicates by hashing the message
@@ -271,8 +268,8 @@ class CAGBuilder {
                   receiving_pes.find(target_pe) == end(receiving_pes)) {
                 unique_neighbors[target_pe].insert(comp_pair);
                 receiving_pes.insert(target_pe);
-                vertex_buffers_[target_pe].push_back(g_.GetGlobalID(v));
-                vertex_buffers_[target_pe].push_back(contraction_vertex);
+                send_buffers_[target_pe].push_back(g_.GetGlobalID(v));
+                send_buffers_[target_pe].push_back(contraction_vertex);
                 buffer_size++;
               }
             }
@@ -280,73 +277,31 @@ class CAGBuilder {
         });
       }
     });
-    std::cout << "R" << rank_ << " buffer size " << buffer_size << std::endl;
   }
 
-  void SendBuffers(std::vector<MPI_Request> &requests) {
-    requests.clear();
-
-    g_.ForallAdjacentPEs([&](const PEID &pe) {
-      if (vertex_buffers_[pe].empty()) {
-        vertex_buffers_[pe].emplace_back(std::numeric_limits<VertexID>::max());
-        vertex_buffers_[pe].emplace_back(0);
-      }
-      requests.emplace_back(MPI_Request());
-      MPI_Isend(&vertex_buffers_[pe][0],
-                static_cast<int>(vertex_buffers_[pe].size()),
-                MPI_VERTEX, pe, pe + 42 * size_,
-                MPI_COMM_WORLD, &requests.back());
-    });
-  }
-
-  void ReceiveBuffers(google::dense_hash_map<PEID, VertexID> & largest_component, 
-                      google::dense_hash_map<VertexID, VertexID> & vertex_message) {
-    // Optimization for receiving largest component
-    // Receive updates O(cut size)
-    PEID num_adjacent_pes = g_.GetNumberOfAdjacentPEs();
-    PEID recv_messages = 0;
-    while (recv_messages < num_adjacent_pes) {
-      MPI_Status st{};
-      MPI_Probe(MPI_ANY_SOURCE, rank_ + 42 * size_, MPI_COMM_WORLD, &st);
-
-      int message_length;
-      MPI_Get_count(&st, MPI_VERTEX, &message_length);
-      std::vector<VertexID> message(static_cast<unsigned long>(message_length));
-
-      MPI_Status rst{};
-      MPI_Recv(&message[0],
-               message_length,
-               MPI_VERTEX,
-               st.MPI_SOURCE,
-               rank_ + 42 * size_,
-               MPI_COMM_WORLD,
-               &rst);
-      recv_messages++;
-
-      if (message_length < 2) continue;
-      for (int i = 0; i < message_length - 1; i += 2) {
-        VertexID global_id = message[i];
-        VertexID contraction_id = message[i + 1];
-
-        if (global_id == std::numeric_limits<VertexID>::max()) continue;
+  void HandleMessages(google::dense_hash_map<PEID, VertexID> &largest_component, 
+                      google::dense_hash_map<VertexID, VertexID> &vertex_message) {
+    for (auto &kv : receive_buffers_) {
+      auto &buffer = kv.second;
+      for (VertexID i = 0; i < buffer.size(); i += 2) {
+        VertexID global_id = buffer[i];
+        VertexID contraction_id = buffer[i + 1];
 
         if (global_id == std::numeric_limits<VertexID>::max() - 1) {
-          largest_component[st.MPI_SOURCE] = contraction_id;
+          largest_component[kv.first] = contraction_id;
         } else {
           vertex_message[g_.GetLocalID(global_id)] = contraction_id;
-          received_message_[g_.GetLocalID(global_id)] = true;
         }
       }
     }
   }
 
-  void ApplyUpdatesToGhostVertices(google::dense_hash_map<PEID, VertexID> & largest_component, 
-                                   google::dense_hash_map<VertexID, VertexID> & vertex_message) {
+  void ApplyUpdatesToGhostVertices(google::dense_hash_map<PEID, VertexID> &largest_component, 
+                                   google::dense_hash_map<VertexID, VertexID> &vertex_message) {
     g_.ForallGhostVertices([&](const VertexID v) {
       PEID pe = g_.GetPE(v);
-      VertexID cid = vertex_message[v];
-      if (received_message_[v]) {
-        g_.SetContractionVertex(v, cid);
+      if (vertex_message.find(v) != vertex_message.end()) {
+        g_.SetContractionVertex(v, vertex_message[v]);
       } else {
         g_.SetContractionVertex(v, largest_component[pe]);
       }
@@ -381,14 +336,6 @@ class CAGBuilder {
         });
       }
     });
-  }
-
-  void CheckRequests(std::vector<MPI_Request> &requests) {
-    for (unsigned int i = 0; i < requests.size(); ++i) {
-      if (requests[i] != MPI_REQUEST_NULL) {
-        MPI_Request_free(&requests[i]);
-      }
-    }
   }
 
   void GenerateLocalContractionEdges() {

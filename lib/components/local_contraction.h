@@ -117,7 +117,7 @@ class LocalContraction {
 
     // Compute components
     g.ForallLocalVertices([&](const VertexID v) {
-      if (!marked[v]) Utility<DynamicGraphCommunicator>::BFS(g, v, marked, parent);
+      if (!marked[v]) Utility::BFS<DynamicGraphCommunicator>(g, v, marked, parent);
     });
 
     // Set vertex label for contraction
@@ -136,7 +136,7 @@ class LocalContraction {
 
     // Compute components
     g.ForallLocalVertices([&](const VertexID v) {
-      if (!marked[v]) Utility<StaticGraph>::BFS(g, v, marked, parent);
+      if (!marked[v]) Utility::BFS<StaticGraph>(g, v, marked, parent);
     });
 
     // Set vertex label for contraction

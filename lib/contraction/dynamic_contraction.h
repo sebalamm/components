@@ -37,9 +37,15 @@ class DynamicContraction {
       : g_(g), 
         rank_(rank), 
         size_(size),
+        global_num_vertices_(0),
         contraction_level_(0),
         comm_time_(0.0) { 
     inactive_level_.set_empty_key(-1);
+    send_buffers_.set_empty_key(-1);
+    receive_buffers_.set_empty_key(-1);
+    inserted_edges_.set_empty_key(-1);
+    propagated_edges_.set_empty_key(-1);
+    edges_to_add_.set_empty_key(-1);
   }
 
   virtual ~DynamicContraction() = default;
@@ -48,79 +54,39 @@ class DynamicContraction {
     // Statistics
     Timer propagation_timer;
     propagation_timer.Restart();
-    edge_counter_ = 0;
-
-    contraction_timer_.Restart();
-    VertexID num_global_vertices = g_.GatherNumberOfGlobalVertices();
-    VertexID num_vertices = g_.GetNumberOfVertices();
+    global_num_vertices_ = g_.GatherNumberOfGlobalVertices();
 
     // Update with new vertices added during last contraction
     g_.ForallVertices([&](VertexID v) {
       inactive_level_[v] = -1;
     });
 
-    // Determine edges to communicate
-    // Gather labels to communicate
-    google::dense_hash_set<VertexID> send_ids; 
-    send_ids.set_empty_key(-1);
-
-    google::dense_hash_map<PEID, std::vector<VertexID>> send_buffers_a;
-    send_buffers_a.set_empty_key(-1);
-    google::dense_hash_map<PEID, std::vector<VertexID>> send_buffers_b;
-    send_buffers_b.set_empty_key(-1);
-    google::dense_hash_map<PEID, std::vector<VertexID>> *current_send_buffers = &send_buffers_a;
-
-    google::dense_hash_map<PEID, std::vector<VertexID>> receive_buffers;
-    receive_buffers.set_empty_key(-1);
-
-    google::dense_hash_set<VertexID> inserted_edges; 
-    inserted_edges.set_empty_key(-1);
-
-    google::dense_hash_map<PEID, std::vector<std::pair<VertexID, VertexID>>> edges_to_add;
-    edges_to_add.set_empty_key(-1);
-
-    std::cout << "[STATUS] |--- R" << rank_ << " Allocation took " 
-              << "[TIME] " << contraction_timer_.Elapsed() << std::endl;
-
-
     contraction_timer_.Restart();
-    FindExponentialConflictingEdges(num_global_vertices, 
-                                    inserted_edges, 
-                                    edges_to_add, 
-                                    send_ids, 
-                                    current_send_buffers);
+    FindExponentialConflictingEdges();
     
     std::cout << "[STATUS] |--- R" << rank_ << " Detecting conflicting edges took " 
               << "[TIME] " << contraction_timer_.Elapsed() << std::endl;
 
     // Propagate edge buffers until all vertices are converged
-    std::vector<MPI_Request> requests;
-    requests.clear();
     int converged_globally = 0;
     int local_iterations = 0;
     while (converged_globally == 0) {
 
       contraction_timer_.Restart();
       comm_timer_.Restart();
-      SendMessages(current_send_buffers, requests);
-      ReceiveMessages(requests, current_send_buffers, receive_buffers);
-      SwapBuffers(current_send_buffers, send_buffers_a, send_buffers_b);
+      CommunicationUtility::SparseAllToAll(send_buffers_, receive_buffers_, rank_, size_, 1000);
       comm_time_ += comm_timer_.Elapsed();
-
       std::cout << "[STATUS] |---- R" << rank_ << " Message exchange took " 
                 << "[TIME] " << contraction_timer_.Elapsed() << std::endl;
+      CommunicationUtility::ClearBuffers(send_buffers_);
 
       contraction_timer_.Restart();
-      int converged_locally = ProcessExponentialMessages(num_global_vertices, inserted_edges, edges_to_add, 
-                                                         send_ids, receive_buffers, current_send_buffers);
+      int converged_locally = ProcessExponentialMessages();
       std::cout << "[STATUS] |---- R" << rank_ << " Processing messages took " 
                 << "[TIME] " << contraction_timer_.Elapsed() << std::endl;
-
-      std::cout << "[STATUS] |---- R" << rank_ << " Processing messages took " 
-                << "[TIME] " << contraction_timer_.Elapsed() << std::endl;
+      CommunicationUtility::ClearBuffers(receive_buffers_);
 
       // Check if all PEs are done
-      // if (++local_iterations % 6 == 0) {
       contraction_timer_.Restart();
       comm_timer_.Restart();
       MPI_Allreduce(&converged_locally,
@@ -130,15 +96,17 @@ class DynamicContraction {
                     MPI_MIN,
                     MPI_COMM_WORLD);
       comm_time_ += comm_timer_.Elapsed();
-      // } 
       local_iterations++;
-        std::cout << "[STATUS] |---- R" << rank_ << " Convergence test took " 
-                  << "[TIME] " << contraction_timer_.Elapsed() << std::endl;
+      std::cout << "[STATUS] |---- R" << rank_ << " Convergence test took " 
+                << "[TIME] " << contraction_timer_.Elapsed() << std::endl;
     }
 
     std::cout << "[STATUS] |---- R" << rank_ << " Propagation done " 
               << "[INFO] rounds "  << local_iterations << " "
               << "[TIME] " << propagation_timer.Elapsed() << std::endl;
+
+    inserted_edges_.clear();
+    propagated_edges_.clear();
 
     // Insert edges and keep corresponding vertices
     contraction_timer_.Restart();
@@ -148,11 +116,10 @@ class DynamicContraction {
     UpdateActiveVertices();
     g_.ResetNumberOfCutEdges();
     g_.ResetAdjacentPEs();
-    InsertEdges(edges_to_add);
+    InsertAndClearEdges();
 
     std::cout << "[STATUS] |---- R" << rank_ << " Updating edges took " 
-              << "[TIME] " << contraction_timer_.Elapsed() 
-              << " " << edge_counter_ << " edges" << std::endl;
+              << "[TIME] " << contraction_timer_.Elapsed() << std::endl;
 
     UpdateGraphVertices();
   }
@@ -161,39 +128,18 @@ class DynamicContraction {
     // Statistics
     Timer propagation_timer;
     propagation_timer.Restart();
-    edge_counter_ = 0;
+    global_num_vertices_ = g_.GatherNumberOfGlobalVertices();
 
-    contraction_timer_.Restart();
-    VertexID num_global_vertices = g_.GatherNumberOfGlobalVertices();
-    VertexID num_vertices = g_.GetNumberOfVertices();
+    // Update with new vertices added during last contraction
+    g_.ForallVertices([&](VertexID v) {
+      inactive_level_[v] = -1;
+    });
 
-    // Determine edges to communicate
-    // Gather labels to communicate
     google::dense_hash_set<VertexID> send_ids; 
     send_ids.set_empty_key(-1);
 
-    google::dense_hash_map<PEID, std::vector<VertexID>> send_buffers;
-    send_buffers.set_empty_key(-1);
-
-    google::dense_hash_map<PEID, std::vector<VertexID>> receive_buffers;
-    receive_buffers.set_empty_key(-1);
-
-    google::dense_hash_set<VertexID> inserted_edges; 
-    inserted_edges.set_empty_key(-1);
-
-    google::dense_hash_map<PEID, std::vector<std::pair<VertexID, VertexID>>> edges_to_add;
-    edges_to_add.set_empty_key(-1);
-
-    std::cout << "[STATUS] |--- R" << rank_ << " Allocation took " 
-              << "[TIME] " << contraction_timer_.Elapsed() << std::endl;
-
-
     contraction_timer_.Restart();
-    FindDirectConflictingEdges(num_global_vertices, 
-                               inserted_edges, 
-                               edges_to_add, 
-                               send_ids, 
-                               send_buffers);
+    FindDirectConflictingEdges();
     
     std::cout << "[STATUS] |--- R" << rank_ << " Detecting conflicting edges took " 
               << "[TIME] " << contraction_timer_.Elapsed() << std::endl;
@@ -202,117 +148,14 @@ class DynamicContraction {
     int num_requests = 0;
 
     comm_timer_.Restart();
-    for (const auto &kv : send_buffers) {
-      if (send_buffers[kv.first].size() > 0) num_requests++; 
-    }
-    std::vector<MPI_Request> requests(num_requests);
-
-    int req = 0;
-    for (const auto &kv : send_buffers) {
-      PEID pe = kv.first;
-      if (send_buffers[pe].size() > 0) {
-        MPI_Issend(send_buffers[pe].data(), 
-                   static_cast<int>(send_buffers[pe].size()), 
-                   MPI_VERTEX, pe, 1000 * size_ + pe, MPI_COMM_WORLD, &requests[req++]);
-        if (pe == rank_) {
-          std::cout << "R" << rank_ << " ERROR selfmessage" << std::endl;
-          exit(1);
-        }
-      } 
-    }
-
-    std::vector<MPI_Status> statuses(num_requests);
-    int isend_done = 0;
-    while (isend_done == 0) {
-      // Check for messages
-      int iprobe_success = 1;
-      while (iprobe_success > 0) {
-        iprobe_success = 0;
-        MPI_Status st{};
-        MPI_Iprobe(MPI_ANY_SOURCE, 1000 * size_ + rank_, MPI_COMM_WORLD, &iprobe_success, &st);
-        if (iprobe_success > 0) {
-          int message_length;
-          MPI_Get_count(&st, MPI_VERTEX, &message_length);
-          std::vector<VertexID> message(message_length);
-          MPI_Status rst{};
-          MPI_Recv(message.data(), message_length, MPI_VERTEX, st.MPI_SOURCE,
-                   st.MPI_TAG, MPI_COMM_WORLD, &rst);
-
-          for (const VertexID &m : message) {
-            receive_buffers[st.MPI_SOURCE].emplace_back(m);
-          }
-        }
-      }
-      // Check if all ISend successful
-      isend_done = 0;
-      MPI_Testall(num_requests, requests.data(), &isend_done, statuses.data());
-    }
-
-    MPI_Request barrier_request;
-    MPI_Ibarrier(MPI_COMM_WORLD, &barrier_request);
-
-    int ibarrier_done = 0;
-    while (ibarrier_done == 0) {
-      int iprobe_success = 1;
-      while (iprobe_success > 0) {
-        iprobe_success = 0;
-        MPI_Status st{};
-        MPI_Iprobe(MPI_ANY_SOURCE, 1000 * size_ + rank_, MPI_COMM_WORLD, &iprobe_success, &st);
-        if (iprobe_success > 0) {
-          int message_length;
-          MPI_Get_count(&st, MPI_VERTEX, &message_length);
-          std::vector<VertexID> message(message_length);
-          MPI_Status rst{};
-          MPI_Recv(message.data(), message_length, MPI_VERTEX, st.MPI_SOURCE,
-                   st.MPI_TAG, MPI_COMM_WORLD, &rst);
-
-          for (const VertexID &m : message) {
-            receive_buffers[st.MPI_SOURCE].emplace_back(m);
-          }
-        }
-      }
-        
-      // Check if all reached Ibarrier
-      MPI_Status tst{};
-      MPI_Test(&barrier_request, &ibarrier_done, &tst);
-      if (tst.MPI_ERROR != MPI_SUCCESS) {
-        std::cout << "R" << rank_ << " mpi_test (barrier) failed" << std::endl;
-        exit(1);
-      }
-    }
+    CommunicationUtility::SparseAllToAll(send_buffers_, receive_buffers_, rank_, size_, 1000);
     comm_time_ += comm_timer_.Elapsed();
+    CommunicationUtility::ClearBuffers(send_buffers_);
+    ProcessDirectMessages();
+    CommunicationUtility::ClearBuffers(receive_buffers_);
 
-    for (const auto &kv : receive_buffers) {
-      PEID pe = kv.first;
-      if (receive_buffers[pe].size() < 3) continue;
-      for (int i = 0; i < receive_buffers[pe].size(); i += 3) {
-        VertexID vlabel = receive_buffers[pe][i];
-        VertexID wlabel = receive_buffers[pe][i + 1];
-        VertexID wroot = receive_buffers[pe][i + 2];
-
-        // Check for dummy message
-        if (vlabel == std::numeric_limits<VertexID>::max()) continue;
-
-        // Continue if already inserted
-        VertexID update_id = vlabel + num_global_vertices * wlabel;
-        if (inserted_edges.find(update_id) != end(inserted_edges)) continue;
-
-        // If vlabel is on same PE just insert the edge
-        if (g_.IsLocalFromGlobal(vlabel)) {
-          edges_to_add[wroot].emplace_back(vlabel, wlabel);
-          edge_counter_++;
-          inserted_edges.insert(update_id);
-          if (wroot == rank_) {
-            edges_to_add[rank_].emplace_back(wlabel, vlabel);
-            edge_counter_++;
-            inserted_edges.insert(wlabel + num_global_vertices * vlabel);
-          }
-        } else {
-          std::cout << "R" << rank_ << " incorrect message in direct contraction" << std::endl;
-          exit(1);
-        }
-      }
-    }
+    inserted_edges_.clear();
+    propagated_edges_.clear();
 
     // Insert edges and keep corresponding vertices
     contraction_timer_.Restart();
@@ -322,84 +165,45 @@ class DynamicContraction {
     UpdateActiveVertices();
     g_.ResetNumberOfCutEdges();
     g_.ResetAdjacentPEs();
-    InsertEdges(edges_to_add);
+    InsertAndClearEdges();
 
     std::cout << "[STATUS] |---- R" << rank_ << " Updating edges took " 
-              << "[TIME] " << contraction_timer_.Elapsed() 
-              << " " << edge_counter_ << " edges" << std::endl;
+              << "[TIME] " << contraction_timer_.Elapsed() << std::endl;
 
-    // max_degree_computed_ = false;
     UpdateGraphVertices();
-
-    unsigned int unresolved_requests = 0;
-    for (unsigned int i = 0; i < num_requests; ++i) {
-      if (requests[i] != MPI_REQUEST_NULL) {
-        MPI_Request_free(&requests[i]);
-        unresolved_requests++;
-      }
-    }
-    if (unresolved_requests > 0) {
-      std::cerr << "R" << rank_ << " Error unresolved requests in shortcut propagation" << std::endl;
-      exit(0);
-    }
   }
 
   void LocalContraction() {
     // Statistics
     Timer propagation_timer;
     propagation_timer.Restart();
-
-    VertexID num_global_vertices = g_.GatherNumberOfGlobalVertices();
-    VertexID num_vertices = g_.GetNumberOfVertices();
+    global_num_vertices_ = g_.GatherNumberOfGlobalVertices();
 
     // Update with new vertices added during last contraction
     g_.ForallVertices([&](VertexID v) {
       inactive_level_[v] = -1;
     });
 
-    // Determine edges to communicate
-    // Gather labels to communicate
     google::dense_hash_set<VertexID> send_ids;
     send_ids.set_empty_key(-1);
 
-    google::dense_hash_map<PEID, std::vector<VertexID>> send_buffers_a;
-    send_buffers_a.set_empty_key(-1);
-    google::dense_hash_map<PEID, std::vector<VertexID>> send_buffers_b;
-    send_buffers_b.set_empty_key(-1);
-    google::dense_hash_map<PEID, std::vector<VertexID>> *current_send_buffers = &send_buffers_a;
-
-    google::dense_hash_map<PEID, std::vector<VertexID>> receive_buffers;
-    receive_buffers.set_empty_key(-1);
-
-    google::dense_hash_set<VertexID> inserted_edges; 
-    inserted_edges.set_empty_key(-1);
-
-    google::dense_hash_map<PEID, std::vector<std::pair<VertexID, VertexID>>> edges_to_add;
-    edges_to_add.set_empty_key(-1);
-
-    FindLocalConflictingEdges(num_global_vertices, 
-                              inserted_edges, 
-                              edges_to_add, 
-                              send_ids, 
-                              current_send_buffers);
+    FindLocalConflictingEdges();
 
     // Propagate edge buffers until all vertices are converged
-    std::vector<MPI_Request> requests;
-    requests.clear();
     int converged_globally = 0;
     int local_iterations = 0;
     while (converged_globally == 0) {
       comm_timer_.Restart();
-      SendMessages(current_send_buffers, requests);
-      ReceiveMessages(requests, current_send_buffers, receive_buffers);
-      SwapBuffers(current_send_buffers, send_buffers_a, send_buffers_b);
+      CommunicationUtility::SparseAllToAll(send_buffers_, receive_buffers_, rank_, size_, 1000);
       comm_time_ += comm_timer_.Elapsed();
+      CommunicationUtility::ClearBuffers(send_buffers_);
 
-      int converged_locally = ProcessLocalMessages(num_global_vertices, inserted_edges, edges_to_add, 
-                                                   send_ids, receive_buffers, current_send_buffers);
+      int converged_locally = ProcessLocalMessages();
+      CommunicationUtility::ClearBuffers(receive_buffers_);
 
 
       // Check if all PEs are done
+      contraction_timer_.Restart();
       comm_timer_.Restart();
       MPI_Allreduce(&converged_locally,
                     &converged_globally,
@@ -409,10 +213,17 @@ class DynamicContraction {
                     MPI_COMM_WORLD);
       comm_time_ += comm_timer_.Elapsed();
       local_iterations++;
+      if (rank_ == ROOT) {
+        std::cout << "[status] |--- Convergence test took " 
+                  << "[time] " << contraction_timer_.Elapsed() << std::endl;
+      }
     }
     if (rank_ == ROOT) 
       std::cout << "[STATUS] |---- Propagation done " 
                 << "[TIME] " << propagation_timer.Elapsed() << std::endl;
+
+    inserted_edges_.clear();
+    propagated_edges_.clear();
 
     // Insert edges and keep corresponding vertices
     g_.ForallLocalVertices([&](VertexID v) { g_.RemoveAllEdges(v); });
@@ -421,44 +232,40 @@ class DynamicContraction {
     UpdateActiveVertices();
     g_.ResetNumberOfCutEdges();
     g_.ResetAdjacentPEs();
-    InsertEdges(edges_to_add);
+    InsertAndClearEdges();
 
     // max_degree_computed_ = false;
     UpdateGraphVertices();
   }
 
-  void FindExponentialConflictingEdges(VertexID num_global_vertices,
-                                       google::dense_hash_set<VertexID> &inserted_edges, 
-                                       google::dense_hash_map<PEID, std::vector<std::pair<VertexID, VertexID>>> &local_edges,
-                                       google::dense_hash_set<VertexID> &sent_edges,
-                                       google::dense_hash_map<PEID, std::vector<VertexID>> *send_buffers) {
+  void FindExponentialConflictingEdges() {
     g_.ForallLocalVertices([&](VertexID v) {
       VertexID vlabel = g_.GetVertexLabel(v);
       g_.ForallNeighbors(v, [&](VertexID w) {
         VertexID wlabel = g_.GetVertexLabel(w);
         if (vlabel != wlabel) {
-          VertexID update_id = vlabel + num_global_vertices * wlabel;
+          VertexID update_id = vlabel + global_num_vertices_ * wlabel;
           PEID wroot = g_.GetVertexRoot(w);
 
-          if (inserted_edges.find(update_id) == end(inserted_edges) 
+          if (inserted_edges_.find(update_id) == end(inserted_edges_) 
                 && g_.IsLocalFromGlobal(vlabel)) {
-            local_edges[wroot].emplace_back(vlabel, wlabel);
-            edge_counter_++;
-            inserted_edges.insert(update_id);
-            sent_edges.insert(update_id);
+            edges_to_add_[wroot].emplace_back(vlabel);
+            edges_to_add_[wroot].emplace_back(wlabel);
+            inserted_edges_.insert(update_id);
+            propagated_edges_.insert(update_id);
             if (wroot == rank_) {
-              local_edges[rank_].emplace_back(wlabel, vlabel);
-              edge_counter_++;
-              inserted_edges.insert(wlabel + num_global_vertices * vlabel);
-              sent_edges.insert(wlabel + num_global_vertices * vlabel);
+              edges_to_add_[rank_].emplace_back(wlabel);
+              edges_to_add_[rank_].emplace_back(vlabel);
+              inserted_edges_.insert(wlabel + global_num_vertices_ * vlabel);
+              propagated_edges_.insert(wlabel + global_num_vertices_ * vlabel);
             }
-          } else if (sent_edges.find(update_id) == end(sent_edges)) {
+          } else if (propagated_edges_.find(update_id) == end(propagated_edges_)) {
             // Local propagation with shortcuts
             VertexID parent = g_.GetShortcutForLabel(vlabel);
             PEID pe = g_.GetPE(g_.GetLocalID(parent));
             // Send edge
-            sent_edges.insert(update_id);
-            PlaceInBuffer(pe, vlabel, wlabel, wroot, parent, send_buffers);
+            propagated_edges_.insert(update_id);
+            PlaceInBuffer(pe, vlabel, wlabel, wroot, parent);
           }
         }
         removed_edges_.emplace(v, g_.GetGlobalID(w));
@@ -468,40 +275,35 @@ class DynamicContraction {
     removed_edges_.emplace(std::numeric_limits<VertexID>::max() - 1, std::numeric_limits<VertexID>::max() - 1);
   }
 
-  void FindDirectConflictingEdges(VertexID num_global_vertices,
-                                  google::dense_hash_set<VertexID> &inserted_edges, 
-                                  google::dense_hash_map<PEID, std::vector<std::pair<VertexID, VertexID>>> &local_edges,
-                                  google::dense_hash_set<VertexID> &sent_edges,
-                                  google::dense_hash_map<PEID, std::vector<VertexID>> &send_buffers) {
+  void FindDirectConflictingEdges() {
     g_.ForallLocalVertices([&](VertexID v) {
       VertexID vlabel = g_.GetVertexLabel(v);
       g_.ForallNeighbors(v, [&](VertexID w) {
         VertexID wlabel = g_.GetVertexLabel(w);
         if (vlabel != wlabel) {
-          VertexID update_id = vlabel + num_global_vertices * wlabel;
+          VertexID update_id = vlabel + global_num_vertices_ * wlabel;
           PEID wroot = g_.GetVertexRoot(w);
 
-          if (inserted_edges.find(update_id) == end(inserted_edges) 
+          if (inserted_edges_.find(update_id) == end(inserted_edges_) 
                 && g_.IsLocalFromGlobal(vlabel)) {
-            local_edges[wroot].emplace_back(vlabel, wlabel);
-            edge_counter_++;
-            inserted_edges.insert(update_id);
-            sent_edges.insert(update_id);
+            edges_to_add_[wroot].emplace_back(vlabel);
+            edges_to_add_[wroot].emplace_back(wlabel);
+            inserted_edges_.insert(update_id);
+            propagated_edges_.insert(update_id);
             if (wroot == rank_) {
-              local_edges[rank_].emplace_back(wlabel, vlabel);
-              edge_counter_++;
-              inserted_edges.insert(wlabel + num_global_vertices * vlabel);
-              sent_edges.insert(wlabel + num_global_vertices * vlabel);
+              edges_to_add_[rank_].emplace_back(wlabel);
+              edges_to_add_[rank_].emplace_back(vlabel);
+              inserted_edges_.insert(wlabel + global_num_vertices_ * vlabel);
+              propagated_edges_.insert(wlabel + global_num_vertices_ * vlabel);
             }
-          } else if (sent_edges.find(update_id) == end(sent_edges)) {
+          } else if (propagated_edges_.find(update_id) == end(propagated_edges_)) {
             // Direct propagation to root
             PEID pe = g_.GetVertexRoot(v);
             // Send edge
-            sent_edges.insert(update_id);
-            send_buffers[pe].emplace_back(vlabel);
-            send_buffers[pe].emplace_back(wlabel);
-            send_buffers[pe].emplace_back(wroot);
-            // std::cout << "R" << rank_ << " send (" << vlabel << "," << wlabel << ") (" << wroot << ") to " << pe << std::endl;
+            propagated_edges_.insert(update_id);
+            send_buffers_[pe].emplace_back(vlabel);
+            send_buffers_[pe].emplace_back(wlabel);
+            send_buffers_[pe].emplace_back(wroot);
           }
         }
         removed_edges_.emplace(v, g_.GetGlobalID(w));
@@ -511,38 +313,34 @@ class DynamicContraction {
     removed_edges_.emplace(std::numeric_limits<VertexID>::max() - 1, std::numeric_limits<VertexID>::max() - 1);
   }
 
-  void FindLocalConflictingEdges(VertexID num_global_vertices,
-                                 google::dense_hash_set<VertexID> &inserted_edges, 
-                                 google::dense_hash_map<PEID, std::vector<std::pair<VertexID, VertexID>>> &local_edges,
-                                 google::dense_hash_set<VertexID> &sent_edges,
-                                 google::dense_hash_map<PEID, std::vector<VertexID>> *send_buffers) {
+  void FindLocalConflictingEdges() {
     g_.ForallLocalVertices([&](VertexID v) {
       VertexID vlabel = g_.GetVertexLabel(v);
       g_.ForallNeighbors(v, [&](VertexID w) {
         VertexID wlabel = g_.GetVertexLabel(w);
         if (vlabel != wlabel) {
-          VertexID update_id = vlabel + num_global_vertices * wlabel;
+          VertexID update_id = vlabel + global_num_vertices_ * wlabel;
           PEID wroot = g_.GetVertexRoot(w);
 
-          if (inserted_edges.find(update_id) == end(inserted_edges) 
+          if (inserted_edges_.find(update_id) == end(inserted_edges_) 
                 && g_.IsLocalFromGlobal(vlabel)) {
-            local_edges[wroot].emplace_back(vlabel, wlabel);
-            edge_counter_++;
-            inserted_edges.insert(update_id);
-            sent_edges.insert(update_id);
+            edges_to_add_[wroot].emplace_back(vlabel);
+            edges_to_add_[wroot].emplace_back(wlabel);
+            inserted_edges_.insert(update_id);
+            propagated_edges_.insert(update_id);
             if (wroot == rank_) {
-              local_edges[rank_].emplace_back(wlabel, vlabel);
-              edge_counter_++;
-              inserted_edges.insert(wlabel + num_global_vertices * vlabel);
-              sent_edges.insert(wlabel + num_global_vertices * vlabel);
+              edges_to_add_[rank_].emplace_back(wlabel);
+              edges_to_add_[rank_].emplace_back(vlabel);
+              inserted_edges_.insert(wlabel + global_num_vertices_ * vlabel);
+              propagated_edges_.insert(wlabel + global_num_vertices_ * vlabel);
             }
-          } else if (sent_edges.find(update_id) == sent_edges.end()) {
+          } else if (propagated_edges_.find(update_id) == propagated_edges_.end()) {
             // Local propagation
             VertexID parent = g_.GetParent(v);
             PEID pe = g_.GetPE(g_.GetLocalID(parent));
             // Send edge
-            sent_edges.insert(update_id);
-            PlaceInBuffer(pe, vlabel, wlabel, g_.GetVertexRoot(w), parent, send_buffers);
+            propagated_edges_.insert(update_id);
+            PlaceInBuffer(pe, vlabel, wlabel, g_.GetVertexRoot(w), parent);
           }
         }
         removed_edges_.emplace(v, g_.GetGlobalID(w));
@@ -551,100 +349,41 @@ class DynamicContraction {
     removed_edges_.emplace(std::numeric_limits<VertexID>::max() - 1, std::numeric_limits<VertexID>::max() - 1);
   }
 
-  void ReceiveMessages(std::vector<MPI_Request> &requests,
-                       google::dense_hash_map<PEID, std::vector<VertexID>> *send_buffers,
-                       google::dense_hash_map<PEID, std::vector<VertexID>> &receive_buffers) {
-    // Receive edges
-    PEID messages_recv = 0;
-    int message_length = 0;
-    for (const auto &kv : receive_buffers) receive_buffers[kv.first].clear();
-    receive_buffers.clear();
-    receive_buffers[rank_] = (*send_buffers)[rank_]; // copy (TODO: Use move)
-    while (messages_recv < g_.GetNumberOfAdjacentPEs()) {
-      MPI_Status st{};
-      MPI_Probe(MPI_ANY_SOURCE, 95 * size_ + rank_, MPI_COMM_WORLD, &st);
-      MPI_Get_count(&st, MPI_VERTEX, &message_length);
-      messages_recv++;
-
-      receive_buffers[st.MPI_SOURCE].resize(message_length);
-      MPI_Status rst{};
-      MPI_Recv(&receive_buffers[st.MPI_SOURCE][0], 
-               message_length, MPI_VERTEX, 
-               st.MPI_SOURCE, st.MPI_TAG, MPI_COMM_WORLD, &rst);
-    }
-
-    for (unsigned int i = 0; i < requests.size(); ++i) {
-      if (requests[i] != MPI_REQUEST_NULL) {
-        MPI_Request_free(&requests[i]);
-      }
-    }
-    requests.clear();
-  }
-
-  void SendMessages(google::dense_hash_map<PEID, std::vector<VertexID>> *send_buffers,
-                    std::vector<MPI_Request> &requests) {
-    g_.ForallAdjacentPEs([&](const PEID &pe) {
-      if ((*send_buffers)[pe].empty()) {
-        (*send_buffers)[pe].emplace_back(std::numeric_limits<VertexID>::max());
-        (*send_buffers)[pe].emplace_back(0);
-        (*send_buffers)[pe].emplace_back(0);
-        (*send_buffers)[pe].emplace_back(0);
-      }
-      requests.emplace_back(MPI_Request());
-      MPI_Isend((*send_buffers)[pe].data(), 
-                static_cast<int>((*send_buffers)[pe].size()), 
-                MPI_VERTEX, pe, 95 * size_ + pe, MPI_COMM_WORLD, &requests.back());
-      if (pe == rank_) {
-        std::cout << "R" << rank_ << " ERROR selfmessage" << std::endl;
-        exit(1);
-      }
-    });
-  }
-
-  int ProcessExponentialMessages(VertexID num_global_vertices,
-                                 google::dense_hash_set<VertexID> &inserted_edges, 
-                                 google::dense_hash_map<PEID, std::vector<std::pair<VertexID, VertexID>>> &new_edges,
-                                 google::dense_hash_set<VertexID> &propagated_edges,
-                                 google::dense_hash_map<PEID, std::vector<VertexID>> &receive_buffers,
-                                 google::dense_hash_map<PEID, std::vector<VertexID>> *send_buffers) {
+  int ProcessExponentialMessages() {
     int propagate = 0;
     // Receive edges and apply updates
-    for (const auto &kv : receive_buffers) {
-      PEID pe = kv.first;
-      if (receive_buffers[pe].size() < 4) continue;
-      for (int i = 0; i < receive_buffers[pe].size(); i += 4) {
-        VertexID vlabel = receive_buffers[pe][i];
-        VertexID wlabel = receive_buffers[pe][i + 1];
-        VertexID wroot = receive_buffers[pe][i + 2];
-        VertexID link = receive_buffers[pe][i + 3];
-
-        // Check for dummy message
-        if (vlabel == std::numeric_limits<VertexID>::max()) continue;
+    for (auto &kv : receive_buffers_) {
+      auto &buffer = kv.second;
+      for (int i = 0; i < buffer.size(); i += 4) {
+        VertexID vlabel = buffer[i];
+        VertexID wlabel = buffer[i + 1];
+        VertexID wroot = buffer[i + 2];
+        VertexID link = buffer[i + 3];
 
         // Continue if already inserted
-        VertexID update_id = vlabel + num_global_vertices * wlabel;
-        if (inserted_edges.find(update_id) != end(inserted_edges)) continue;
-        if (propagated_edges.find(update_id) != end(propagated_edges)) continue;
+        VertexID update_id = vlabel + global_num_vertices_ * wlabel;
+        if (inserted_edges_.find(update_id) != end(inserted_edges_)) continue;
+        if (propagated_edges_.find(update_id) != end(propagated_edges_)) continue;
 
         // If vlabel is on same PE just insert the edge
         if (g_.IsLocalFromGlobal(vlabel)) {
-          new_edges[wroot].emplace_back(vlabel, wlabel);
-          edge_counter_++;
-          inserted_edges.insert(update_id);
-          propagated_edges.insert(update_id);
+          edges_to_add_[wroot].emplace_back(vlabel);
+          edges_to_add_[wroot].emplace_back(wlabel);
+          inserted_edges_.insert(update_id);
+          propagated_edges_.insert(update_id);
           if (wroot == rank_) {
-            new_edges[rank_].emplace_back(wlabel, vlabel);
-            edge_counter_++;
-            inserted_edges.insert(wlabel + num_global_vertices * vlabel);
-            propagated_edges.insert(wlabel + num_global_vertices * vlabel);
+            edges_to_add_[rank_].emplace_back(wlabel);
+            edges_to_add_[rank_].emplace_back(vlabel);
+            inserted_edges_.insert(wlabel + global_num_vertices_ * vlabel);
+            propagated_edges_.insert(wlabel + global_num_vertices_ * vlabel);
           }
         } else {
           // Local propagation with shortcuts
           VertexID parent = g_.GetShortcutForLabel(vlabel);
           PEID pe = g_.GetPE(g_.GetLocalID(parent));
           // Send edge
-          propagated_edges.insert(update_id);
-          PlaceInBuffer(pe, vlabel, wlabel, wroot, parent, send_buffers);
+          propagated_edges_.insert(update_id);
+          PlaceInBuffer(pe, vlabel, wlabel, wroot, parent);
           propagate = 1;
         }
       }
@@ -652,56 +391,80 @@ class DynamicContraction {
     return !propagate;
   }
 
-  int ProcessLocalMessages(VertexID num_global_vertices,
-                           google::dense_hash_set<VertexID> &inserted_edges, 
-                           google::dense_hash_map<PEID, std::vector<std::pair<VertexID, VertexID>>> &new_edges,
-                           google::dense_hash_set<VertexID> &propagated_edges,
-                           google::dense_hash_map<PEID, std::vector<VertexID>> &receive_buffers,
-                           google::dense_hash_map<PEID, std::vector<VertexID>> *send_buffers) {
-    int propagate = 0;
-    // Receive edges and apply updates
-    for (const auto &kv : receive_buffers) {
-      PEID pe = kv.first;
-      if (receive_buffers[pe].size() < 4) continue;
-      for (int i = 0; i < receive_buffers[pe].size(); i += 4) {
-        VertexID vlabel = receive_buffers[pe][i];
-        VertexID wlabel = receive_buffers[pe][i + 1];
-        VertexID wroot = receive_buffers[pe][i + 2];
-        VertexID link = receive_buffers[pe][i + 3];
-
-        // Check for dummy message
-        if (vlabel == std::numeric_limits<VertexID>::max()) continue;
+  int ProcessDirectMessages() {
+    // Handle receive buffers
+    for (auto &kv : receive_buffers_) {
+      auto &buffer = kv.second;
+      for (int i = 0; i < buffer.size(); i += 3) {
+        VertexID vlabel = buffer[i];
+        VertexID wlabel = buffer[i + 1];
+        VertexID wroot = buffer[i + 2];
 
         // Continue if already inserted
-        VertexID update_id = vlabel + num_global_vertices * wlabel;
-        if (inserted_edges.find(update_id) != end(inserted_edges)) continue;
-        if (propagated_edges.find(update_id) != end(propagated_edges)) continue;
+        VertexID update_id = vlabel + global_num_vertices_ * wlabel;
+        if (inserted_edges_.find(update_id) != end(inserted_edges_)) continue;
+
+        // If vlabel is on same PE just insert the edge
+        if (g_.IsLocalFromGlobal(vlabel)) {
+          edges_to_add_[wroot].emplace_back(vlabel);
+          edges_to_add_[wroot].emplace_back(wlabel);
+          inserted_edges_.insert(update_id);
+          if (wroot == rank_) {
+            edges_to_add_[rank_].emplace_back(wlabel);
+            edges_to_add_[rank_].emplace_back(vlabel);
+            inserted_edges_.insert(wlabel + global_num_vertices_ * vlabel);
+          }
+        } else {
+          std::cout << "R" << rank_ << " incorrect message in direct contraction" << std::endl;
+          exit(1);
+        }
+      }
+    }
+  }
+
+  int ProcessLocalMessages() {
+    int propagate = 0;
+    // Receive edges and apply updates
+    for (auto &kv : receive_buffers_) {
+      auto &buffer = kv.second;
+      for (int i = 0; i < buffer.size(); i += 4) {
+        VertexID vlabel = buffer[i];
+        VertexID wlabel = buffer[i + 1];
+        VertexID wroot = buffer[i + 2];
+        VertexID link = buffer[i + 3];
+
+        // Continue if already inserted
+        VertexID update_id = vlabel + global_num_vertices_ * wlabel;
+        if (inserted_edges_.find(update_id) != end(inserted_edges_)) continue;
+        if (propagated_edges_.find(update_id) != end(propagated_edges_)) continue;
 
         // Get link information
         // TODO: We use this parent as link, this is wrong if the current (link) vertex points to a different partition
         if (g_.IsLocalFromGlobal(vlabel)) {
-          new_edges[wroot].emplace_back(vlabel, wlabel);
-          inserted_edges.insert(update_id);
-          propagated_edges.insert(update_id);
+          edges_to_add_[wroot].emplace_back(vlabel);
+          edges_to_add_[wroot].emplace_back(wlabel);
+          inserted_edges_.insert(update_id);
+          propagated_edges_.insert(update_id);
           if (wroot == rank_) {
-            new_edges[rank_].emplace_back(wlabel, vlabel);
-            inserted_edges.insert(wlabel + num_global_vertices * vlabel);
-            propagated_edges.insert(wlabel + num_global_vertices * vlabel);
+            edges_to_add_[rank_].emplace_back(wlabel);
+            edges_to_add_[rank_].emplace_back(vlabel);
+            inserted_edges_.insert(wlabel + global_num_vertices_ * vlabel);
+            propagated_edges_.insert(wlabel + global_num_vertices_ * vlabel);
           }
         } else {
           if (g_.GetVertexLabel(g_.GetLocalID(link)) == vlabel) {
             VertexID parent = g_.GetParent(g_.GetLocalID(link));
             PEID pe = g_.GetPE(g_.GetLocalID(parent));
-            propagated_edges.insert(update_id);
-            PlaceInBuffer(pe, vlabel, wlabel, wroot, parent, send_buffers);
+            propagated_edges_.insert(update_id);
+            PlaceInBuffer(pe, vlabel, wlabel, wroot, parent);
             propagate = 1;
           } else {
             // Parent has to be connected to vlabel (N(N(v))
             VertexID local_vlabel = g_.GetLocalID(vlabel);
-            pe = g_.GetPE(local_vlabel);
+            PEID pe = g_.GetPE(local_vlabel);
             // Send edge
-            propagated_edges.insert(update_id);
-            PlaceInBuffer(pe, vlabel, wlabel, wroot, vlabel, send_buffers);
+            propagated_edges_.insert(update_id);
+            PlaceInBuffer(pe, vlabel, wlabel, wroot, vlabel);
             propagate = 1;
           }
         }
@@ -710,16 +473,11 @@ class DynamicContraction {
     return !propagate;
   }
 
-  void PlaceInBuffer(PEID pe,
-                     VertexID vlabel,
-                     VertexID wlabel,
-                     PEID wroot,
-                     VertexID parent,
-                     google::dense_hash_map<PEID, std::vector<VertexID>> *send_buffers) {
-    (*send_buffers)[pe].emplace_back(vlabel);
-    (*send_buffers)[pe].emplace_back(wlabel);
-    (*send_buffers)[pe].emplace_back(wroot);
-    (*send_buffers)[pe].emplace_back(parent);
+  inline void PlaceInBuffer(PEID pe, VertexID vlabel, VertexID wlabel, PEID wroot, VertexID parent) {
+    send_buffers_[pe].emplace_back(vlabel);
+    send_buffers_[pe].emplace_back(wlabel);
+    send_buffers_[pe].emplace_back(wroot);
+    send_buffers_[pe].emplace_back(parent);
   }
 
   void UpdateActiveVertices() {
@@ -728,12 +486,13 @@ class DynamicContraction {
     }
   }
 
-  void InsertEdges(google::dense_hash_map<PEID, std::vector<std::pair<VertexID, VertexID>>> &new_edges) {
-    for (const auto &kv: new_edges) {
+  void InsertAndClearEdges() {
+    for (auto &kv: edges_to_add_) {
       PEID pe = kv.first;
-      for (auto &e : new_edges[kv.first]) {
-        VertexID vlabel = e.first;
-        VertexID wlabel = e.second;
+      auto &buffer = kv.second;
+      for (VertexID i = 0; i < buffer.size(); i += 2) {
+        VertexID vlabel = buffer[i];
+        VertexID wlabel = buffer[i + 1];
         VertexID vlocal = g_.GetLocalID(vlabel);
         if (!g_.IsLocalFromGlobal(wlabel) && !g_.IsGhostFromGlobal(wlabel)) {
           g_.AddGhostVertex(wlabel, pe);
@@ -768,21 +527,6 @@ class DynamicContraction {
   void UpdateGraphVertices() {
     for (auto &kv : inactive_level_) {
       g_.SetActive(kv.first, kv.second == -1);
-    }
-  }
-
-  void SwapBuffers(google::dense_hash_map<PEID, std::vector<VertexID>> *buffers,
-                   google::dense_hash_map<PEID, std::vector<VertexID>> &a_buffers,
-                   google::dense_hash_map<PEID, std::vector<VertexID>> &b_buffers) {
-    // Switch buffers
-    if (buffers == &a_buffers) {
-      for (auto &kv : b_buffers) kv.second.clear();
-      b_buffers.clear();
-      buffers = &b_buffers;
-    } else {
-      for (auto &kv : a_buffers) kv.second.clear();
-      a_buffers.clear();
-      buffers = &a_buffers;
     }
   }
 
@@ -852,8 +596,8 @@ class DynamicContraction {
                     << "[time] " << contraction_timer_.Elapsed() << std::endl;
         }
 
-        contraction_timer_.Restart();
         // Check if all PEs are done
+        contraction_timer_.Restart();
         comm_timer_.Restart();
         MPI_Allreduce(&converged_locally,
                       &converged_globally,
@@ -902,14 +646,23 @@ class DynamicContraction {
 
   // Variables
   VertexID contraction_level_;
+  VertexID global_num_vertices_;
   std::stack<std::pair<VertexID, VertexID>> removed_edges_;
   google::dense_hash_map<VertexID, short> inactive_level_;
+
+  // Buffers
+  google::dense_hash_map<PEID, VertexBuffer> send_buffers_;
+  google::dense_hash_map<PEID, VertexBuffer> receive_buffers_;
+
+  // Unique sets
+  google::dense_hash_set<VertexID> inserted_edges_;
+  google::dense_hash_set<VertexID> propagated_edges_;
+  google::dense_hash_map<PEID, std::vector<VertexID>> edges_to_add_;
 
   // Statistics
   float comm_time_;
   Timer contraction_timer_;
   Timer comm_timer_;
-  VertexID edge_counter_;
 };
 
 #endif

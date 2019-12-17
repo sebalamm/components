@@ -26,10 +26,6 @@ void StaticGraphCommunicator::SendAndReceiveGhostVertices() {
   ghost_comm_->SendAndReceiveGhostVertices();
 }
 
-void StaticGraphCommunicator::ReceiveAndSendGhostVertices() {
-  ghost_comm_->ReceiveAndSendGhostVertices();
-}
-
 void StaticGraphCommunicator::SetVertexPayload(const VertexID v,
                                           VertexPayload &&msg,
                                           bool propagate) {
@@ -70,16 +66,6 @@ VertexID StaticGraphCommunicator::AddGhostVertex(VertexID v, PEID pe) {
                                      pe};
 
   return ghost_counter_++;
-}
-
-void StaticGraphCommunicator::SetAdjacentPE(const PEID pe, const bool is_adj) {
-  StaticGraph::SetAdjacentPE(pe, is_adj);
-  ghost_comm_->SetAdjacentPE(pe, is_adj);
-}
-
-void StaticGraphCommunicator::ResetAdjacentPEs() {
-  StaticGraph::ResetAdjacentPEs();
-  ghost_comm_->ResetAdjacentPEs();
 }
 
 void StaticGraphCommunicator::OutputLocal() {

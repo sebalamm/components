@@ -29,10 +29,10 @@
 #include "static_graph.h"
 #include "static_graph_comm.h"
 
-template <typename GraphInputType>
 class Utility {
  public:
-  static void BFS(GraphInputType &g,
+  template <typename GraphType>
+  static void BFS(GraphType &g,
                   const VertexID &start,
                   std::vector<bool> &marked,
                   std::vector<VertexID> &parent) {
@@ -53,6 +53,20 @@ class Utility {
       });
     }
   }
+
+  static long long GetFreePhysMem() {
+    struct sysinfo memInfo;
+    sysinfo (&memInfo);
+    long long totalPhysMem = memInfo.totalram;
+    long long freePhysMem = memInfo.freeram;
+
+    totalPhysMem *= memInfo.mem_unit;
+    freePhysMem *= memInfo.mem_unit;
+    totalPhysMem *= 1e-9;
+    freePhysMem *= 1e-9;
+
+    return freePhysMem;
+  } 
 };
 
 #endif

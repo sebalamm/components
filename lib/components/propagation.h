@@ -116,7 +116,7 @@ class Propagation {
 
     // Compute components
     g.ForallLocalVertices([&](const VertexID v) {
-      if (!marked[v]) Utility<StaticGraphCommunicator>::BFS(g, v, marked, parent);
+      if (!marked[v]) Utility::BFS<StaticGraphCommunicator>(g, v, marked, parent);
     });
 
     // Set vertex label for contraction

@@ -35,10 +35,6 @@ void SemidynamicGraphCommunicator::SendAndReceiveGhostVertices() {
   ghost_comm_->SendAndReceiveGhostVertices();
 }
 
-void SemidynamicGraphCommunicator::ReceiveAndSendGhostVertices() {
-  ghost_comm_->ReceiveAndSendGhostVertices();
-}
-
 void SemidynamicGraphCommunicator::SetVertexPayload(const VertexID v,
                                           VertexPayload &&msg,
                                           bool propagate) {
@@ -81,16 +77,6 @@ VertexID SemidynamicGraphCommunicator::AddGhostVertex(VertexID v, PEID pe) {
                                pe};
 
   return ghost_counter_++;
-}
-
-void SemidynamicGraphCommunicator::SetAdjacentPE(const PEID pe, const bool is_adj) {
-  SemidynamicGraph::SetAdjacentPE(pe, is_adj);
-  ghost_comm_->SetAdjacentPE(pe, is_adj);
-}
-
-void SemidynamicGraphCommunicator::ResetAdjacentPEs() {
-  SemidynamicGraph::ResetAdjacentPEs();
-  ghost_comm_->ResetAdjacentPEs();
 }
 
 void SemidynamicGraphCommunicator::OutputLocal() {

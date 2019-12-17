@@ -10,12 +10,12 @@ void VertexCommunicator<GraphType>::AddMessage(const VertexID v,
       PEID neighbor = g_->GetPE(u);
       if (!IsPackedPE(neighbor)) {
         // Unpack msg and add content (Sender, Deviate, Component, PE (of component))
-        (*current_send_buffers_)[neighbor].emplace_back(g_->GetGlobalID(v));
-        (*current_send_buffers_)[neighbor].emplace_back(msg.deviate_);
-        (*current_send_buffers_)[neighbor].emplace_back(msg.label_);
-        (*current_send_buffers_)[neighbor].emplace_back(msg.root_);
+        send_buffers_[neighbor].emplace_back(g_->GetGlobalID(v));
+        send_buffers_[neighbor].emplace_back(msg.deviate_);
+        send_buffers_[neighbor].emplace_back(msg.label_);
+        send_buffers_[neighbor].emplace_back(msg.root_);
 #ifdef TIEBREAK_DEGREE
-        (*current_send_buffers_)[neighbor].emplace_back(msg.degree_);
+        send_buffers_[neighbor].emplace_back(msg.degree_);
 #endif
         SetPackedPE(neighbor, true);
       }
@@ -28,42 +28,23 @@ void VertexCommunicator<GraphType>::AddMessage(const VertexID v,
 }
 
 template<typename GraphType>
-void VertexCommunicator<GraphType>::ReceiveMessages() {
-  PEID messages_recv = 0;
-  recv_tag_++;
-  while (messages_recv < GetNumberOfAdjacentPEs()) {
-    MPI_Status st{};
-    MPI_Probe(MPI_ANY_SOURCE, recv_tag_, communicator_, &st);
-
-    int message_length;
-    MPI_Get_count(&st, MPI_VERTEX, &message_length);
-
-    std::vector<VertexID> message(static_cast<unsigned long>(message_length));
-    MPI_Status rst{};
-    MPI_Recv(&message[0], message_length,
-             MPI_VERTEX, st.MPI_SOURCE,
-             recv_tag_, communicator_, &rst);
-    messages_recv++;
-
+void VertexCommunicator<GraphType>::UpdateGhostVertices() {
+  for (const auto &kv : receive_buffers_) {
+    const auto &buffer = kv.second;
 #ifdef TIEBREAK_DEGREE
-    if (message_length < 5) continue;
-    for (int i = 0; i < message_length; i += 5) {
+    for (VertexID i = 0; i < buffer.size(); i += 5) {
 #else 
-    if (message_length < 4) continue;
-    for (int i = 0; i < message_length; i += 4) {
+    for (VertexID i = 0; i < buffer.size(); i += 4) {
 #endif
-      VertexID global_id = message[i];
-      VertexID deviate = message[i + 1];
-      VertexID label = message[i + 2];
-      PEID root = static_cast<PEID>(message[i + 3]);
+      VertexID global_id = buffer[i];
+      VertexID deviate = buffer[i + 1];
+      VertexID label = buffer[i + 2];
+      PEID root = static_cast<PEID>(buffer[i + 3]);
 #ifdef TIEBREAK_DEGREE
-      VertexID degree = message[i + 4];
+      VertexID degree = buffer[i + 4];
 #endif
 
-      if (global_id == std::numeric_limits<VertexID>::max()) continue;
-      VertexID local_id = g_->GetLocalID(global_id);
-
-      g_->HandleGhostUpdate(local_id, 
+      g_->HandleGhostUpdate(g_->GetLocalID(global_id), 
                             label, 
                             deviate, 
 #ifdef TIEBREAK_DEGREE
@@ -72,11 +53,5 @@ void VertexCommunicator<GraphType>::ReceiveMessages() {
                             root);
     }
   }
-  for (unsigned int i = 0; i < isend_requests_.size(); ++i) {
-    if (isend_requests_[i] != MPI_REQUEST_NULL) {
-      MPI_Request_free(&isend_requests_[i]);
-    }
-  }
-  isend_requests_.clear();
 }
 

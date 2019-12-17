@@ -149,7 +149,7 @@ class AllReduce {
 
     // Compute components
     g.ForallLocalVertices([&](const VertexID v) {
-      if (!marked[v]) Utility<StaticGraph>::BFS(g, v, marked, parent);
+      if (!marked[v]) Utility::BFS<StaticGraph>(g, v, marked, parent);
     });
 
     // Set vertex label for contraction
@@ -252,20 +252,6 @@ class AllReduce {
                 << "c(min,max)=" << min_cut << "," << max_cut << std::endl;
     }
   }
-
-  static long long GetFreePhysMem() {
-    struct sysinfo memInfo;
-    sysinfo (&memInfo);
-    long long totalPhysMem = memInfo.totalram;
-    long long freePhysMem = memInfo.freeram;
-
-    totalPhysMem *= memInfo.mem_unit;
-    freePhysMem *= memInfo.mem_unit;
-    totalPhysMem *= 1e-9;
-    freePhysMem *= 1e-9;
-
-    return freePhysMem;
-  } 
 };
 
 #endif

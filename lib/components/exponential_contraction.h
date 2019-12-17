@@ -22,21 +22,18 @@
 #define _EXPONENTIAL_CONTRACTION_H_
 
 #include <iostream>
-#include <unordered_set>
-#include <random>
-#include <set>
 
 #include <sys/sysinfo.h>
 #include <experimental/random>
 
 #include "config.h"
 #include "definitions.h"
-#include "graph_io.h"
-#include "dynamic_graph_comm.h"
 #include "static_graph.h"
+#include "dynamic_graph_comm.h"
 #include "cag_builder.h"
 #include "dynamic_contraction.h"
 #include "utils.h"
+#include "comm_utils.h"
 #include "all_reduce.h"
 
 class ExponentialContraction {
@@ -198,7 +195,7 @@ class ExponentialContraction {
 
     // Compute components
     g.ForallLocalVertices([&](const VertexID v) {
-      if (!marked[v]) Utility<StaticGraph>::BFS(g, v, marked, parent);
+      if (!marked[v]) Utility::BFS<StaticGraph>(g, v, marked, parent);
     });
 
     // Set vertex label for contraction
@@ -326,7 +323,7 @@ class ExponentialContraction {
                   << "[TIME] " << round_timer.Elapsed() << std::endl;
     }
 
-    if (rank_ == ROOT) std::cout << "done propagating... mem " << GetFreePhysMem() << std::endl;
+    if (rank_ == ROOT) std::cout << "done propagating... mem " << Utility::GetFreePhysMem() << std::endl;
 
     contraction_timer_.Restart();
     // Determine remaining active vertices
@@ -336,7 +333,7 @@ class ExponentialContraction {
                 << "[TIME] " << contraction_timer_.Elapsed() << std::endl;
     }
 
-    if (rank_ == ROOT) std::cout << "done shortcutting... mem " << GetFreePhysMem() << std::endl;
+    if (rank_ == ROOT) std::cout << "done shortcutting... mem " << Utility::GetFreePhysMem() << std::endl;
 
     contraction_timer_.Restart();
     if (config_.direct_contraction) {
@@ -349,7 +346,7 @@ class ExponentialContraction {
                 << "[TIME] " << contraction_timer_.Elapsed() << std::endl;
     }
 
-    if (rank_ == ROOT) std::cout << "done contraction... mem " << GetFreePhysMem() << std::endl;
+    if (rank_ == ROOT) std::cout << "done contraction... mem " << Utility::GetFreePhysMem() << std::endl;
 
     OutputStats<DynamicGraphCommunicator>(g);
 
@@ -431,9 +428,9 @@ class ExponentialContraction {
 
     VertexID num_new_vertices = 0;
 
-    google::dense_hash_map<PEID, std::vector<VertexID>> send_buffers;
+    google::dense_hash_map<PEID, VertexBuffer> send_buffers;
     send_buffers.set_empty_key(-1);
-    google::dense_hash_map<PEID, std::vector<VertexID>> receive_buffers;
+    google::dense_hash_map<PEID, VertexBuffer> receive_buffers;
     receive_buffers.set_empty_key(-1);
 
     if (local_max_deg >= 4 * avg_max_deg) {
@@ -446,10 +443,20 @@ class ExponentialContraction {
       });
     }
 
-    ExchangeMessages(send_buffers, receive_buffers);
+    comm_timer_.Restart();
+    CommunicationUtility::SparseAllToAll(send_buffers, receive_buffers, rank_, size_, 993);
+    comm_time_ += comm_timer_.Elapsed();
+    CommunicationUtility::ClearBuffers(send_buffers);
     ProcessAdjLists(g, global_vertices, receive_buffers, send_buffers);
-    ExchangeMessages(send_buffers, receive_buffers);
+    CommunicationUtility::ClearBuffers(receive_buffers);
+
+    CommunicationUtility::SparseAllToAll(send_buffers, receive_buffers, rank_, size_, 993);
+    comm_timer_.Restart();
+    CommunicationUtility::ClearBuffers(send_buffers);
+    comm_time_ += comm_timer_.Elapsed();
     ProcessRouting(g, receive_buffers);
+    CommunicationUtility::ClearBuffers(receive_buffers);
+
     UpdateInterfaceVertices(g);
   }
 
@@ -459,7 +466,7 @@ class ExponentialContraction {
                                const VertexID &vertex_deg,
                                const VertexID &new_vertices_offset,
                                VertexID &new_vertices_counter,
-                               google::dense_hash_map<PEID, std::vector<VertexID>> &send_buffers) {
+                               google::dense_hash_map<PEID, VertexBuffer> &send_buffers) {
     // Ensure that its not just a single partition
     VertexID clamped_avg_max_deg = std::max<VertexID>(avg_max_deg, 2);
 
@@ -560,94 +567,10 @@ class ExponentialContraction {
     }
   }
 
-  void ExchangeMessages(google::dense_hash_map<PEID, std::vector<VertexID>> &send_buffers,
-                        google::dense_hash_map<PEID, std::vector<VertexID>> &receive_buffers) {
-    PEID num_requests = 0;
-    for (const auto &kv : send_buffers) {
-      PEID pe = kv.first;
-      if (send_buffers[pe].size() > 0) num_requests++; 
-    }
-    std::vector<MPI_Request> requests(num_requests);
-
-    int req = 0;
-    for (const auto &kv : send_buffers) {
-      PEID pe = kv.first;
-      if (send_buffers[pe].size() > 0) {
-        MPI_Issend(send_buffers[pe].data(), 
-                   static_cast<int>(send_buffers[pe].size()), 
-                   MPI_VERTEX, pe, 993 * size_ + pe, MPI_COMM_WORLD, &requests[req++]);
-        if (pe == rank_) {
-          std::cout << "R" << rank_ << " ERROR selfmessage" << std::endl;
-          exit(1);
-        }
-      } 
-    }
-
-    std::vector<MPI_Status> statuses(num_requests);
-    int isend_done = 0;
-    while (isend_done == 0) {
-      // Check for messages
-      int iprobe_success = 1;
-      while (iprobe_success > 0) {
-        iprobe_success = 0;
-        MPI_Status st{};
-        MPI_Iprobe(MPI_ANY_SOURCE, 993 * size_ + rank_, MPI_COMM_WORLD, &iprobe_success, &st);
-        if (iprobe_success > 0) {
-          int message_length;
-          MPI_Get_count(&st, MPI_VERTEX, &message_length);
-          std::vector<VertexID> message(message_length);
-          MPI_Status rst{};
-          MPI_Recv(message.data(), message_length, MPI_VERTEX, st.MPI_SOURCE,
-                   st.MPI_TAG, MPI_COMM_WORLD, &rst);
-
-          for (const VertexID &m : message) {
-            receive_buffers[st.MPI_SOURCE].emplace_back(m);
-          }
-        }
-      }
-      // Check if all ISend successful
-      isend_done = 0;
-      MPI_Testall(num_requests, requests.data(), &isend_done, statuses.data());
-    }
-
-    MPI_Request barrier_request;
-    MPI_Ibarrier(MPI_COMM_WORLD, &barrier_request);
-
-    int ibarrier_done = 0;
-    while (ibarrier_done == 0) {
-      int iprobe_success = 1;
-      while (iprobe_success > 0) {
-        iprobe_success = 0;
-        MPI_Status st{};
-        MPI_Iprobe(MPI_ANY_SOURCE, 993 * size_ + rank_, MPI_COMM_WORLD, &iprobe_success, &st);
-        if (iprobe_success > 0) {
-          int message_length;
-          MPI_Get_count(&st, MPI_VERTEX, &message_length);
-          std::vector<VertexID> message(message_length);
-          MPI_Status rst{};
-          MPI_Recv(message.data(), message_length, MPI_VERTEX, st.MPI_SOURCE,
-                   st.MPI_TAG, MPI_COMM_WORLD, &rst);
-
-          for (const VertexID &m : message) {
-            receive_buffers[st.MPI_SOURCE].emplace_back(m);
-          }
-        }
-      }
-        
-      // Check if all reached Ibarrier
-      MPI_Status tst{};
-      MPI_Test(&barrier_request, &ibarrier_done, &tst);
-      if (tst.MPI_ERROR != MPI_SUCCESS) {
-        std::cout << "R" << rank_ << " mpi_test (barrier) failed" << std::endl;
-        exit(1);
-      }
-    }
-  }
-
   void ProcessAdjLists(DynamicGraphCommunicator &g, 
                        const VertexID &offset,
-                       google::dense_hash_map<PEID, std::vector<VertexID>> &receive_buffer,
-                       google::dense_hash_map<PEID, std::vector<VertexID>> &send_buffer) {
+                       google::dense_hash_map<PEID, VertexBuffer> &receive_buffer,
+                       google::dense_hash_map<PEID, VertexBuffer> &send_buffer) {
     // Clear send buffers
     for (const auto &kv : send_buffer) {
       PEID pe = kv.first;
@@ -657,20 +580,21 @@ class ExponentialContraction {
     // Process incoming vertices/edges
     for (const auto &kv : receive_buffer) {
       PEID pe = kv.first;
-      if (receive_buffer[pe].size() > 0) {
+      auto& buffer = kv.second;
+      if (buffer.size() > 0) {
         VertexID source, copy_vertex;
-        for (VertexID i = 0; i < receive_buffer[pe].size(); i+=2) {
+        for (VertexID i = 0; i < buffer.size(); i+=2) {
           // New source
           // Note: This might not work if number of global vertices is smaller than number of PEs
-          if (receive_buffer[pe][i+1] >= offset) {
-            source = receive_buffer[pe][i];
-            copy_vertex = receive_buffer[pe][i+1];
+          if (buffer[i+1] >= offset) {
+            source = buffer[i];
+            copy_vertex = buffer[i+1];
             VertexID local_copy_id = g.AddVertex(copy_vertex);
             replicated_vertices_.emplace_back(local_copy_id);
             g.AddEdge(local_copy_id, source, pe);
           } else {
-            VertexID target = receive_buffer[pe][i];
-            VertexID target_pe = receive_buffer[pe][i+1];
+            VertexID target = buffer[i];
+            VertexID target_pe = buffer[i+1];
             // Neighbor is local vertex
             if (target_pe == rank_) {
               g.RelinkEdge(g.GetLocalID(target), source, copy_vertex, rank_);
@@ -685,22 +609,21 @@ class ExponentialContraction {
             g.AddEdge(g.GetLocalID(copy_vertex), target, target_pe);
           }
         }
-        // Clear receive buffers
-        receive_buffer[pe].clear();
       }
     }
   }
 
   void ProcessRouting(DynamicGraphCommunicator &g, 
-                      google::dense_hash_map<PEID, std::vector<VertexID>> &receive_buffer) {
+                      google::dense_hash_map<PEID, VertexBuffer> &receive_buffer) {
     // Process incoming vertices/edges
     for (const auto &kv : receive_buffer) {
       PEID pe = kv.first;
-      if (receive_buffer[pe].size() > 0) {
-        for (VertexID i = 0; i < receive_buffer[pe].size(); i+=3) {
-          VertexID source = receive_buffer[pe][i];
-          VertexID old_target = receive_buffer[pe][i+1];
-          VertexID new_target = receive_buffer[pe][i+2];
+      auto& buffer = kv.second;
+      if (buffer.size() > 0) {
+        for (VertexID i = 0; i < buffer.size(); i+=3) {
+          VertexID source = buffer[i];
+          VertexID old_target = buffer[i+1];
+          VertexID new_target = buffer[i+2];
 
           if (!g.IsGhostFromGlobal(new_target)) {
             g.AddGhostVertex(new_target, pe);
@@ -763,19 +686,6 @@ class ExponentialContraction {
     }
   }
 
-  static long long GetFreePhysMem() {
-    struct sysinfo memInfo;
-    sysinfo (&memInfo);
-    long long totalPhysMem = memInfo.totalram;
-    long long freePhysMem = memInfo.freeram;
-
-    totalPhysMem *= memInfo.mem_unit;
-    freePhysMem *= memInfo.mem_unit;
-    totalPhysMem *= 1e-9;
-    freePhysMem *= 1e-9;
-
-    return freePhysMem;
-  } 
 };
 
 #endif

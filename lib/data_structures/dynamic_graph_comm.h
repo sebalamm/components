@@ -192,8 +192,6 @@ class DynamicGraphCommunicator : public DynamicGraph {
   //////////////////////////////////////////////
   void SendAndReceiveGhostVertices();
 
-  void ReceiveAndSendGhostVertices();
-
   inline void HandleGhostUpdate(const VertexID v,
                                 const VertexID label,
                                 const VertexID deviate,
@@ -208,14 +206,6 @@ class DynamicGraphCommunicator : public DynamicGraph {
 #endif
                          root});
   }
-
-  //////////////////////////////////////////////
-  // Manage adjacent PEs
-  //////////////////////////////////////////////
-  void SetAdjacentPE(const PEID pe, const bool is_adj);
-
-  void ResetAdjacentPEs();
-
 
   //////////////////////////////////////////////
   // I/O
