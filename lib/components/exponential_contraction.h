@@ -165,7 +165,7 @@ class ExponentialContraction {
     if (global_vertices > 0) {
       iteration_timer_.Restart();
       iteration_++;
-      if (global_vertices < config_.sequential_limit) 
+      if (global_vertices <= config_.sequential_limit) 
         RunSequentialCC(g);
       else 
         RunContraction(g);
@@ -346,13 +346,19 @@ class ExponentialContraction {
 
     if (rank_ == ROOT) std::cout << "done contraction... mem " << Utility::GetFreePhysMem() << std::endl;
 
+    // if (iteration_ == 2) {
+    //   g.OutputLocal();
+    //   MPI_Barrier(MPI_COMM_WORLD);
+    //   exit(1);
+    // }
+
     OutputStats<DynamicGraphCommunicator>(g);
 
     // Count remaining number of vertices
     VertexID global_vertices = g.GatherNumberOfGlobalVertices();
     if (global_vertices > 0) {
       iteration_++;
-      if (global_vertices < config_.sequential_limit) 
+      if (global_vertices <= config_.sequential_limit) 
         RunSequentialCC(g);
       else 
         RunContraction(g);

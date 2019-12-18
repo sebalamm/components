@@ -522,7 +522,9 @@ class DynamicContraction {
                               pe
                             });
       }
+      buffer.clear();
     }
+    edges_to_add_.clear();
   }
 
   void UpdateGraphVertices() {

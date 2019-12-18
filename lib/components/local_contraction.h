@@ -149,7 +149,7 @@ class LocalContraction {
     if (global_vertices > 0) {
       iteration_timer_.Restart();
       iteration_++;
-      if (global_vertices < config_.sequential_limit) 
+      if (global_vertices <= config_.sequential_limit) 
         RunSequentialCC(g);
       else 
         RunContraction(g);
@@ -274,7 +274,7 @@ class LocalContraction {
     global_vertices = g.GatherNumberOfGlobalVertices();
     if (global_vertices > 0) {
       iteration_++;
-      if (global_vertices < config_.sequential_limit) 
+      if (global_vertices <= config_.sequential_limit) 
         RunSequentialCC(g);
       else 
         RunContraction(g);
