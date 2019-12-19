@@ -23,10 +23,9 @@
 
 #include "config.h"
 #include "benchmark.h"
-#include "io/graph_io.h"
+#include "io/io_utils.h"
 #include "parse_parameters.h"
 #include "timer.h"
-#include "kagen_interface.h"
 
 #include "components/local_contraction.h"
 
@@ -47,64 +46,8 @@ int main(int argn, char **argv) {
 
   {
     DynamicGraphCommunicator G(rank, size);
-    if (conf.input_type == "file") {
-      GraphIO::ReadDynamicFile<DynamicGraphCommunicator>(G, conf, rank, size, MPI_COMM_WORLD);
-    } else if (conf.input_type == "partition") {
-      GraphIO::ReadDynamicDistributedFile<DynamicGraphCommunicator>(G, conf, rank, size, MPI_COMM_WORLD);
-    } else if (conf.gen != "null") {
-      // Generator I/O
-      kagen::KaGen gen(rank, size);
-      kagen::EdgeList edge_list;
-      if (conf.gen == "gnm_undirected")
-          edge_list = gen.GenerateUndirectedGNM(conf.gen_n, conf.gen_m, conf.gen_k, initial_seed);
-      else if (conf.gen == "rdg_2d")
-          edge_list = gen.Generate2DRDG(conf.gen_n, conf.gen_k, initial_seed);
-      else if (conf.gen == "rdg_3d")
-          edge_list = gen.Generate3DRDG(conf.gen_n, conf.gen_k, initial_seed);
-      else if (conf.gen == "rgg_2d")
-          edge_list = gen.Generate2DRGG(conf.gen_n, conf.gen_r, conf.gen_k, initial_seed);
-      else if (conf.gen == "rgg_3d")
-          edge_list = gen.Generate3DRGG(conf.gen_n, conf.gen_r, conf.gen_k, initial_seed);
-      else if (conf.gen == "rhg")
-          edge_list = gen.GenerateRHG(conf.gen_n, conf.gen_gamma, conf.gen_d, conf.gen_k, initial_seed);
-      else if (conf.gen == "ba")
-          edge_list = gen.GenerateBA(conf.gen_n, conf.gen_d, conf.gen_k, initial_seed);
-      else if (conf.gen == "grid_2d")
-          edge_list = gen.Generate2DGrid(conf.gen_n, conf.gen_m, conf.gen_p, conf.gen_periodic, conf.gen_k, initial_seed);
-      else {
-        if (rank == ROOT) 
-          std::cout << "Generator not supported" << std::endl;
-        MPI_Finalize();
-        exit(1);
-      }
-      GraphIO::ReadDynamicDistributedEdgeList<DynamicGraphCommunicator>(G, conf, rank, size, MPI_COMM_WORLD, edge_list);
-      edge_list.clear();
-    } else {
-      if (rank == ROOT) 
-        std::cout << "I/O type not supported" << std::endl;
-      MPI_Finalize();
-      exit(1);
-    }
-
-    VertexID n = G.GatherNumberOfGlobalVertices();
-    EdgeID m = G.GatherNumberOfGlobalEdges();
-
-    // Determine min/maximum cut size
-    EdgeID m_cut = G.GetNumberOfCutEdges();
-    EdgeID min_cut, max_cut;
-    MPI_Reduce(&m_cut, &min_cut, 1, MPI_VERTEX, MPI_MIN, ROOT,
-               MPI_COMM_WORLD);
-    MPI_Reduce(&m_cut, &max_cut, 1, MPI_VERTEX, MPI_MAX, ROOT,
-               MPI_COMM_WORLD);
-
-    if (rank == ROOT) {
-      std::cout << "INPUT "
-                << "s=" << conf.seed << ", "
-                << "p=" << size  << ", "
-                << "n=" << n << ", "
-                << "m=" << m << ", "
-                << "c(min,max)=" << min_cut << "," << max_cut << std::endl;
-    }
+    IOUtility::LoadGraph(G, conf, rank, size);
+    IOUtility::PrintGraphParams(G, conf, rank, size);
 
     // Determine labels
     std::vector<VertexID> labels(G.GetNumberOfVertices(), 0);
@@ -121,79 +64,10 @@ int main(int argn, char **argv) {
   
   for (int i = 0; i < conf.iterations; ++i) {
     int round_seed = initial_seed + i + 1000;
-    DynamicGraphCommunicator G(rank, size);
-    if (conf.input_type == "file") {
-      GraphIO::ReadDynamicFile<DynamicGraphCommunicator>(G, conf, rank, size, MPI_COMM_WORLD);
-    } else if (conf.input_type == "partition") {
-      GraphIO::ReadDynamicDistributedFile<DynamicGraphCommunicator>(G, conf, rank, size, MPI_COMM_WORLD);
-    } else if (conf.gen != "null") {
-      // Generator I/O
-      kagen::KaGen gen(rank, size);
-      kagen::EdgeList edge_list;
-      if (conf.gen == "gnm_undirected")
-          edge_list = gen.GenerateUndirectedGNM(conf.gen_n, conf.gen_m, conf.gen_k, initial_seed);
-      else if (conf.gen == "rdg_2d")
-          edge_list = gen.Generate2DRDG(conf.gen_n, conf.gen_k, initial_seed);
-      else if (conf.gen == "rdg_3d")
-          edge_list = gen.Generate3DRDG(conf.gen_n, conf.gen_k, initial_seed);
-      else if (conf.gen == "rgg_2d")
-          edge_list = gen.Generate2DRGG(conf.gen_n, conf.gen_r, conf.gen_k, initial_seed);
-      else if (conf.gen == "rgg_3d")
-          edge_list = gen.Generate3DRGG(conf.gen_n, conf.gen_r, conf.gen_k, initial_seed);
-      else if (conf.gen == "rhg")
-          edge_list = gen.GenerateRHG(conf.gen_n, conf.gen_gamma, conf.gen_d, conf.gen_k, initial_seed);
-      else if (conf.gen == "ba")
-          edge_list = gen.GenerateBA(conf.gen_n, conf.gen_d, conf.gen_k, initial_seed);
-      else if (conf.gen == "grid_2d")
-          edge_list = gen.Generate2DGrid(conf.gen_n, conf.gen_m, conf.gen_p, conf.gen_periodic, conf.gen_k, initial_seed);
-      else {
-        if (rank == ROOT) 
-          std::cout << "Generator not supported" << std::endl;
-        MPI_Finalize();
-        exit(1);
-      }
-      if (rank == ROOT) std::cout << "Graph generated" << std::endl;
-
-      struct sysinfo memInfo;
-      sysinfo (&memInfo);
-      long long totalPhysMem = memInfo.totalram;
-      long long freePhysMem = memInfo.freeram;
-
-      totalPhysMem *= memInfo.mem_unit;
-      freePhysMem *= memInfo.mem_unit;
-      totalPhysMem *= 1e-9;
-      freePhysMem *= 1e-9;
-
-      if (rank == ROOT) std::cout << "done generating... mem " << freePhysMem << std::endl;
-      GraphIO::ReadDynamicDistributedEdgeList<DynamicGraphCommunicator>(G, conf, rank, size, MPI_COMM_WORLD, edge_list);
-      edge_list.clear();
-    } else {
-      if (rank == ROOT) 
-        std::cout << "I/O type not supported" << std::endl;
-      MPI_Finalize();
-      exit(1);
-    }
-
-    VertexID n = G.GatherNumberOfGlobalVertices();
-    EdgeID m = G.GatherNumberOfGlobalEdges();
-
-    // Determine min/maximum cut size
-    EdgeID m_cut = G.GetNumberOfCutEdges();
-    EdgeID min_cut, max_cut;
-    MPI_Reduce(&m_cut, &min_cut, 1, MPI_VERTEX, MPI_MIN, ROOT,
-               MPI_COMM_WORLD);
-    MPI_Reduce(&m_cut, &max_cut, 1, MPI_VERTEX, MPI_MAX, ROOT,
-               MPI_COMM_WORLD);
-
     conf.seed = round_seed;
-    if (rank == ROOT) {
-      std::cout << "INPUT "
-                << "s=" << conf.seed << ", "
-                << "p=" << size  << ", "
-                << "n=" << n << ", "
-                << "m=" << m << ", "
-                << "c(min,max)=" << min_cut << "," << max_cut << std::endl;
-    }
+    DynamicGraphCommunicator G(rank, size);
+    IOUtility::LoadGraph(G, conf, rank, size);
+    IOUtility::PrintGraphParams(G, conf, rank, size);
 
     Timer t;
     double local_time = 0.0;
