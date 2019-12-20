@@ -62,6 +62,7 @@ void ParseParameters(int argn, char **argv,
 
   // High-degree vertices
   conf.degree_limit = args.Get<unsigned int>("deg", 100);
+  conf.degree_threshold = args.Get<unsigned int>("hd-thres", 4);
 
   // Vertex replication
   conf.replicate_high_degree = args.IsSet("replicate");

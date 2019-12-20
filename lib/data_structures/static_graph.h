@@ -285,6 +285,7 @@ class StaticGraph {
   }
 
   inline VertexID AddGhostVertex(VertexID v, PEID pe) {
+    AddVertex();
     global_to_local_map_[v] = ghost_counter_;
 
     if (ghost_counter_ > local_vertices_data_.size()) {

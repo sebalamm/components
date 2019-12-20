@@ -54,6 +54,38 @@ class Utility {
     }
   }
 
+  template <typename GraphType>
+  static VertexID ComputeAverageMaxDegree(GraphType &g,
+                                          const PEID rank, const PEID size) {
+    // Determine local max degree
+    VertexID local_max_deg = 0;
+    g.ForallLocalVertices([&](const VertexID v) {
+        VertexID v_deg = g.GetVertexDegree(v);
+        if (v_deg > local_max_deg) {
+          local_max_deg = v_deg; 
+        }
+    });
+
+    // Get global average max degree
+    VertexID global_max_deg = 0;
+    MPI_Allreduce(&local_max_deg, &global_max_deg, 
+                  1, MPI_VERTEX, 
+                  MPI_SUM, MPI_COMM_WORLD);
+    return global_max_deg / size; 
+  }
+
+  template <typename GraphType>
+  static void SelectHighDegreeVertices(GraphType &g, 
+                                       VertexID degree_threshold,
+                                       std::vector<VertexID> &high_degree_vertices) {
+    g.ForallLocalVertices([&](const VertexID v) {
+      VertexID v_deg = g.GetVertexDegree(v);
+      if (v_deg >= degree_threshold) {
+        high_degree_vertices.emplace_back(v);
+      }
+    });
+  }
+
   static long long GetFreePhysMem() {
     struct sysinfo memInfo;
     sysinfo (&memInfo);

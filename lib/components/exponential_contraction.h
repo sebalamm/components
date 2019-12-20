@@ -25,6 +25,8 @@
 
 #include <sys/sysinfo.h>
 #include <experimental/random>
+#include <tlx/define.hpp>
+#include <tlx/math.hpp>
 
 #include "config.h"
 #include "definitions.h"
@@ -413,69 +415,91 @@ class ExponentialContraction {
   }
 
   void DistributeHighDegreeVertices(DynamicGraphCommunicator &g) {
-    // Offset for new vertex IDs
-    VertexID global_vertices = g.GatherNumberOfGlobalVertices();
-    VertexID vertex_offset = global_vertices * (rank_ + 1);
-    VertexID local_max_deg = 0;
-    g.ForallLocalVertices([&](const VertexID v) {
-        VertexID v_deg = g.GetVertexDegree(v);
-        if (v_deg > local_max_deg) {
-          local_max_deg = v_deg; 
-        }
-    });
-    VertexID global_max_deg = 0;
-    MPI_Allreduce(&local_max_deg, &global_max_deg, 
-                  1, MPI_VERTEX, 
-                  MPI_SUM, MPI_COMM_WORLD);
-    VertexID avg_max_deg = global_max_deg / size_; 
+    // Determine high degree vertices
+    std::vector<VertexID> high_degree_vertices;
+    VertexID avg_max_deg = Utility::ComputeAverageMaxDegree(g, rank_, size_);
+    Utility::SelectHighDegreeVertices(g, config_.degree_threshold * avg_max_deg, high_degree_vertices);
+    
+    // TODO Split high degree vertices into binomial trees
+    SplitHighDegreeVerticesIntoTrees(g, avg_max_deg, high_degree_vertices);
+    // Split vertices into stars if they have a high degree
+    // SplitHighDegreeVerticesIntoStars(g, avg_max_deg, high_degree_vertices);
+  }
 
-    VertexID num_new_vertices = 0;
+  void SplitHighDegreeVerticesIntoStars(DynamicGraphCommunicator &g,
+                                        const VertexID &avg_max_deg,
+                                        const std::vector<VertexID> &high_degree_vertices) {
+    // Compute offset for IDs for replicated vertices
+    VertexID num_global_vertices = g.GatherNumberOfGlobalVertices();
+    VertexID vertex_offset = num_global_vertices * (rank_ + 1);
+
     google::dense_hash_map<PEID, VertexBuffer> send_buffers;
     send_buffers.set_empty_key(-1);
     google::dense_hash_map<PEID, VertexBuffer> receive_buffers;
     receive_buffers.set_empty_key(-1);
 
-    if (local_max_deg >= 4 * avg_max_deg) {
-      g.ForallLocalVertices([&](const VertexID v) {
-        VertexID v_deg = g.GetVertexDegree(v);
-        if (v_deg >= 4 * avg_max_deg) {
-          // Split adjacency list for building the star
-          ComputeEdgePartitioning(g, avg_max_deg, v, v_deg, vertex_offset, num_new_vertices, send_buffers);
-        }
-      });
+    // Split adjacency list for high degree vertices
+    VertexID clamped_avg_max_deg = std::max<VertexID>(avg_max_deg, 2);
+    for (const VertexID &v : high_degree_vertices) {
+      VertexID v_deg = g.GetVertexDegree(v);
+      VertexID num_parts = static_cast<VertexID>(ceil(v_deg / clamped_avg_max_deg));
+      VertexID part_size = v_deg / num_parts;
+      ComputeEdgePartitioning(g, v, num_parts, part_size, vertex_offset, send_buffers);
     }
 
+    // Inform neighbors about replication 
     comm_timer_.Restart();
     CommunicationUtility::SparseAllToAll(send_buffers, receive_buffers, rank_, size_, 993);
     comm_time_ += comm_timer_.Elapsed();
     CommunicationUtility::ClearBuffers(send_buffers);
-    ProcessAdjLists(g, global_vertices, receive_buffers, send_buffers);
+
+    // Insert replicated vertices and local edges
+    ProcessAdjLists(g, num_global_vertices, receive_buffers, send_buffers);
     CommunicationUtility::ClearBuffers(receive_buffers);
 
-    CommunicationUtility::SparseAllToAll(send_buffers, receive_buffers, rank_, size_, 993);
+    // Inform neighbors about new vertices
     comm_timer_.Restart();
-    CommunicationUtility::ClearBuffers(send_buffers);
+    CommunicationUtility::SparseAllToAll(send_buffers, receive_buffers, rank_, size_, 993);
     comm_time_ += comm_timer_.Elapsed();
+    CommunicationUtility::ClearBuffers(send_buffers);
+
+    // Relink edges to new replicated vertices
     ProcessRelinking(g, receive_buffers);
     CommunicationUtility::ClearBuffers(receive_buffers);
 
+    // Update interface vertices and neihgboring PEs
     UpdateInterfaceVertices(g);
   }
 
-  void ComputeEdgePartitioning(DynamicGraphCommunicator &g,
-                               const VertexID &avg_max_deg,
-                               const VertexID &vertex_id,
-                               const VertexID &vertex_deg,
-                               const VertexID &new_vertices_offset,
-                               VertexID &new_vertices_counter,
-                               google::dense_hash_map<PEID, VertexBuffer> &send_buffers) {
-    // Ensure that its not just a single partition
+  void SplitHighDegreeVerticesIntoTrees(DynamicGraphCommunicator &g,
+                                        const VertexID &avg_max_deg,
+                                        const std::vector<VertexID> &high_degree_vertices) {
+    // Compute offset for IDs for replicated vertices
+    VertexID num_global_vertices = g.GatherNumberOfGlobalVertices();
+    VertexID vertex_offset = num_global_vertices * (rank_ + 1);
+
+    google::dense_hash_map<PEID, VertexBuffer> send_buffers;
+    send_buffers.set_empty_key(-1);
+    google::dense_hash_map<PEID, VertexBuffer> receive_buffers;
+    receive_buffers.set_empty_key(-1);
+
+    // Split adjacency list for high degree vertices
     VertexID clamped_avg_max_deg = std::max<VertexID>(avg_max_deg, 2);
+    for (const VertexID &v : high_degree_vertices) {
+      VertexID v_deg = g.GetVertexDegree(v);
+      VertexID num_parts = tlx::integer_log2_ceil(v_deg);
+      if (num_parts <= 1) continue;
+      std::cout << "R" << rank_ << " split " << g.GetGlobalID(v) << " with deg(v)=" << g.GetVertexDegree(v) << " in " << num_parts << " rounds " << std::endl;
+      // ComputeEdgePartitioning(g, v, num_parts, part_size, vertex_offset, send_buffers);
+    }
+  }
 
-    // Number of partitions to generate
-    VertexID num_parts = static_cast<VertexID>(ceil(vertex_deg / clamped_avg_max_deg));
-    VertexID part_size = vertex_deg / num_parts;
-
+  void ComputeEdgePartitioning(DynamicGraphCommunicator &g,
+                               const VertexID &vertex_id,
+                               const VertexID &num_parts,
+                               const VertexID &part_size,
+                               const VertexID &repl_vertices_id,
+                               google::dense_hash_map<PEID, VertexBuffer> &send_buffers) {
     // Temporary vector for storing new local edges 
     std::vector<VertexID> local_edges;
 
@@ -499,7 +523,7 @@ class ExponentialContraction {
         return lhs.second > rhs.second;
     });
 
-    VertexID remaining_edges = vertex_deg;
+    VertexID repl_vertices_counter = 0;
     VertexID remaining_parts = num_parts;
     // Check if we can send single large part to PE
     for (const auto &kv : num_edges_for_pe) {
@@ -507,10 +531,10 @@ class ExponentialContraction {
       VertexID num_edges = kv.second;
       if (num_edges >= part_size) {
         send_buffers[pe].emplace_back(g.GetGlobalID(vertex_id));
-        send_buffers[pe].emplace_back(new_vertices_offset + new_vertices_counter);
-        local_edges.emplace_back(new_vertices_offset + new_vertices_counter);
+        send_buffers[pe].emplace_back(repl_vertices_id + repl_vertices_counter);
+        local_edges.emplace_back(repl_vertices_id + repl_vertices_counter);
         local_edges.emplace_back(pe);
-        new_vertices_counter++;
+        repl_vertices_counter++;
         for (const auto &v : edges_for_pe[pe]) {
           send_buffers[pe].emplace_back(std::move(v));
           send_buffers[pe].emplace_back(pe);
@@ -533,10 +557,10 @@ class ExponentialContraction {
           if (current_target_pe >= size_) {
             current_target_pe = pe;
             send_buffers[current_target_pe].emplace_back(g.GetGlobalID(vertex_id));
-            send_buffers[current_target_pe].emplace_back(new_vertices_offset + new_vertices_counter);
-            local_edges.emplace_back(new_vertices_offset + new_vertices_counter);
+            send_buffers[current_target_pe].emplace_back(repl_vertices_id + repl_vertices_counter);
+            local_edges.emplace_back(repl_vertices_id + repl_vertices_counter);
             local_edges.emplace_back(current_target_pe);
-            new_vertices_counter++;
+            repl_vertices_counter++;
           }
           // Add edges in current block
           for (const auto &v : edges_for_pe[pe]) {

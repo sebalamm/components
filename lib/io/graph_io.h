@@ -47,10 +47,10 @@ class GraphIO {
   virtual ~GraphIO() = default;
 
   template<typename GraphType>
-  static void ReadDistributedEdgeList(GraphType &g,
-                                      Config &config, 
-                                      PEID rank, PEID size, const MPI_Comm &comm,
-                                      auto &edge_list) {
+  static void ReadMETISGenerator(GraphType &g,
+                                 Config &config, 
+                                 PEID rank, PEID size, const MPI_Comm &comm,
+                                 auto &edge_list) {
     // Gather local edge lists (transpose)
     VertexID from = edge_list[0].first, to = edge_list[0].second;
     VertexID number_of_local_vertices = to - from + 1;
@@ -104,9 +104,9 @@ class GraphIO {
   }
 
   template<typename GraphType>
-  static void ReadDistributedFile(GraphType &g, 
-                                  Config &config, 
-                                  PEID rank, PEID size, const MPI_Comm &comm) {
+  static void ReadPartitionedMETISFile(GraphType &g, 
+                                       Config &config, 
+                                       PEID rank, PEID size, const MPI_Comm &comm) {
     std::string line;
     std::string filename(config.input_file);
 
@@ -196,9 +196,9 @@ class GraphIO {
   }
 
   template<typename GraphType>
-  static void ReadFile(GraphType &g, 
-                       Config &config, 
-                       PEID rank, PEID size, const MPI_Comm &comm) {
+  static void ReadMETISFile(GraphType &g, 
+                            Config &config, 
+                            PEID rank, PEID size, const MPI_Comm &comm) {
     std::string line;
     std::string filename(config.input_file);
 

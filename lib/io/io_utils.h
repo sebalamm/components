@@ -35,15 +35,15 @@ class IOUtility {
                         PEID rank, PEID size) {
     // File I/O
     if (config.input_type == "file") {
-      GraphIO::ReadFile<GraphType>(g, config, rank, size, MPI_COMM_WORLD);
+      GraphIO::ReadMETISFile<GraphType>(g, config, rank, size, MPI_COMM_WORLD);
     } else if (config.input_type == "partition") {
-      GraphIO::ReadDistributedFile<GraphType>(g, config, rank, size, MPI_COMM_WORLD);
+      GraphIO::ReadPartitionedMETISFile<GraphType>(g, config, rank, size, MPI_COMM_WORLD);
     } else if (config.gen != "null") {
       // Generator I/O
       kagen::KaGen gen(rank, size);
       kagen::EdgeList edge_list;
       GenerateSyntheticGraph(gen, config, edge_list);
-      GraphIO::ReadDistributedEdgeList<GraphType>(g, config, rank, size, MPI_COMM_WORLD, edge_list);
+      GraphIO::ReadMETISGenerator<GraphType>(g, config, rank, size, MPI_COMM_WORLD, edge_list);
       edge_list.clear();
     } else {
       std::cout << "I/O type not supported" << std::endl;

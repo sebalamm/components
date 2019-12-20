@@ -60,6 +60,8 @@ struct Config {
   bool direct_contraction;
   // Number of heavy hitters for shortcutting
   VertexID number_of_hitters;
+  // Threshold for performing high degree splitting
+  VertexID degree_threshold;
   // Generator
   std::string gen;
   VertexID gen_n;
