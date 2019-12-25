@@ -49,20 +49,21 @@ class LocalContraction {
     local_contraction_ = nullptr;
   };
 
-  void FindComponents(DynamicGraphCommunicator &g, std::vector<VertexID> &g_labels) {
+  template <typename GraphType>
+  void FindComponents(GraphType &g, std::vector<VertexID> &g_labels) {
     rng_offset_ = size_ + config_.seed;
-    if (config_.use_contraction) {
+    if constexpr (std::is_same<GraphType, StaticGraph>::value) {
       FindLocalComponents(g, g_labels);
 
-      CAGBuilder<DynamicGraphCommunicator> 
+      CAGBuilder<StaticGraph> 
         first_contraction(g, g_labels, rank_, size_);
-      DynamicGraphCommunicator cag = first_contraction.BuildDynamicComponentAdjacencyGraph();
+      StaticGraph cag = first_contraction.BuildStaticComponentAdjacencyGraph();
+      OutputStats<StaticGraph>(cag);
 
       std::vector<VertexID> cag_labels(cag.GetNumberOfVertices(), 0);
       FindLocalComponents(cag, cag_labels);
-      OutputStats<DynamicGraphCommunicator>(cag);
 
-      CAGBuilder<DynamicGraphCommunicator>
+      CAGBuilder<StaticGraph>
         second_contraction(cag, cag_labels, rank_, size_);
       DynamicGraphCommunicator ccag = second_contraction.BuildDynamicComponentAdjacencyGraph();
       OutputStats<DynamicGraphCommunicator>(ccag);
@@ -74,7 +75,7 @@ class LocalContraction {
 
       ApplyToLocalComponents(ccag, cag, cag_labels);
       ApplyToLocalComponents(cag, cag_labels, g, g_labels);
-    } else {
+    } else if constexpr (std::is_same<GraphType, DynamicGraphCommunicator>::value) {
       local_contraction_ = new DynamicContraction(g, rank_, size_);
 
       PerformDecomposition(g);
@@ -106,26 +107,27 @@ class LocalContraction {
   // Contraction
   DynamicContraction *local_contraction_;
 
-  void FindLocalComponents(DynamicGraphCommunicator &g, std::vector<VertexID> &label) {
-    std::vector<bool> marked(g.GetNumberOfVertices(), false);
-    std::vector<VertexID> parent(g.GetNumberOfVertices(), 0);
+  void PerformDecomposition(DynamicGraphCommunicator &g) {
+    VertexID global_vertices = g.GatherNumberOfGlobalVertices();
+    if (global_vertices > 0) {
+      iteration_timer_.Restart();
+      iteration_++;
+      if (global_vertices <= config_.sequential_limit) 
+        RunSequentialCC(g);
+      else 
+        RunContraction(g);
+    }
+    if (rank_ == ROOT) {
+      std::cout << "[STATUS] |- Running contraction done" << std::endl;
+    }
 
-    g.ForallVertices([&](const VertexID v) {
-      label[v] = g.GetGlobalID(v);
-    });
-
-    // Compute components
-    g.ForallLocalVertices([&](const VertexID v) {
-      if (!marked[v]) Utility::BFS<DynamicGraphCommunicator>(g, v, marked, parent);
-    });
-
-    // Set vertex label for contraction
-    g.ForallLocalVertices([&](const VertexID v) {
-      label[v] = label[parent[v]];
-    });
+    local_contraction_->UndoContraction();
+    if (rank_ == ROOT) {
+      std::cout << "[STATUS] |- Undoing contraction done" << std::endl;
+    }
   }
 
-  void FindLocalComponentsStatic(StaticGraph &g, std::vector<VertexID> &label) {
+  void FindLocalComponents(StaticGraph &g, std::vector<VertexID> &label) {
     std::vector<bool> marked(g.GetNumberOfVertices(), false);
     std::vector<VertexID> parent(g.GetNumberOfVertices(), 0);
 
@@ -142,19 +144,6 @@ class LocalContraction {
     g.ForallLocalVertices([&](const VertexID v) {
       label[v] = label[parent[v]];
     });
-  }
-
-  void PerformDecomposition(DynamicGraphCommunicator &g) {
-    VertexID global_vertices = g.GatherNumberOfGlobalVertices();
-    if (global_vertices > 0) {
-      iteration_timer_.Restart();
-      iteration_++;
-      if (global_vertices <= config_.sequential_limit) 
-        RunSequentialCC(g);
-      else 
-        RunContraction(g);
-    }
-    local_contraction_->UndoContraction();
   }
 
   void RunContraction(DynamicGraphCommunicator &g) {
@@ -192,11 +181,16 @@ class LocalContraction {
 #endif
     });
     g.SendAndReceiveGhostVertices();
+    if (rank_ == ROOT) {
+      std::cout << "[STATUS] |-- Computing and exchanging deviates done" << std::endl;
+    }
 
     // Perform update for local vertices
     // Find smallest label in N(v)
     std::vector<VertexPayload> n_smallest_neighbor(g.GetNumberOfLocalVertices());
     std::vector<VertexPayload> n_smallest_update(g.GetNumberOfLocalVertices());
+    google::dense_hash_map<VertexID, VertexID> initial_parents;
+    initial_parents.set_empty_key(-1);
     g.ForallLocalVertices([&](VertexID v) {
       n_smallest_neighbor[v] = g.GetVertexMessage(v);
       n_smallest_update[v] = g.GetVertexMessage(v);
@@ -223,6 +217,7 @@ class LocalContraction {
     });
 
     g.ForallLocalVertices([&](VertexID v) {
+      initial_parents[v] = g.GetParent(v);
       g.SetVertexPayload(v, std::move(n_smallest_update[v]));
     });
 
@@ -265,8 +260,14 @@ class LocalContraction {
     // Receive variates
     g.SendAndReceiveGhostVertices();
 
+    if (rank_ == ROOT) std::cout << "done propagating... mem " << Utility::GetFreePhysMem() << std::endl;
+
     // Determine remaining active vertices
-    local_contraction_->LocalContraction();
+    local_contraction_->LocalContraction(initial_parents);
+
+    if (rank_ == ROOT) {
+      std::cout << "[STATUS] |-- Local contraction done" << std::endl;
+    }
 
     OutputStats<DynamicGraphCommunicator>(g);
 
@@ -279,20 +280,19 @@ class LocalContraction {
       else 
         RunContraction(g);
     }
-    local_contraction_->UndoContraction();
   }
 
   void ApplyToLocalComponents(DynamicGraphCommunicator &cag, 
-                              DynamicGraphCommunicator &g, std::vector<VertexID> &g_label) {
+                              StaticGraph &g, std::vector<VertexID> &g_label) {
     g.ForallLocalVertices([&](const VertexID v) {
       VertexID cv = cag.GetLocalID(g.GetContractionVertex(v));
       g_label[v] = cag.GetVertexLabel(cv);
     });
   }
 
-  void ApplyToLocalComponents(DynamicGraphCommunicator &cag, 
+  void ApplyToLocalComponents(StaticGraph &cag, 
                               std::vector<VertexID> &cag_label, 
-                              DynamicGraphCommunicator &g, 
+                              StaticGraph &g, 
                               std::vector<VertexID> &g_label) {
     g.ForallLocalVertices([&](const VertexID v) {
       VertexID cv = cag.GetLocalID(g.GetContractionVertex(v));

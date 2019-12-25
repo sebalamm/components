@@ -353,6 +353,7 @@ class DynamicGraph {
       }
       if (delete_pos != ghost_offset_) {
         local_adjacent_edges_[from].erase(local_adjacent_edges_[from].begin() + delete_pos);
+        if (IsGhost(to)) number_of_cut_edges_--;
       } else {
         std::cout << "This shouldn't happen" << std::endl;
         exit(1);
@@ -397,6 +398,9 @@ class DynamicGraph {
   }
 
   void RemoveAllEdges(VertexID from) {
+    ForallNeighbors(from, [&](const VertexID w) {
+      if (IsGhost(w)) number_of_cut_edges_--;
+    });
     if (IsLocal(from)) local_adjacent_edges_[from].clear();
     else ghost_adjacent_edges_[from - ghost_offset_].clear();
   }

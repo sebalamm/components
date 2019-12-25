@@ -33,10 +33,10 @@
 #include "static_graph.h"
 #include "edge_hash.h"
 
-template <typename GraphInputType>
+template <typename GraphType>
 class CAGBuilder {
  public:
-  CAGBuilder(GraphInputType &g, std::vector<VertexID> &vertex_labels, const PEID rank, const PEID size)
+  CAGBuilder(GraphType &g, std::vector<VertexID> &vertex_labels, const PEID rank, const PEID size)
       : g_(g), vertex_labels_(vertex_labels), rank_(rank), size_(size),
         num_smaller_components_(0),
         num_local_components_(0),
@@ -65,7 +65,7 @@ class CAGBuilder {
 
  private:
   // Original graph instance
-  GraphInputType &g_;
+  GraphType &g_;
   std::vector<VertexID> &vertex_labels_;
 
   // Network information

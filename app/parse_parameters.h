@@ -56,6 +56,7 @@ void ParseParameters(int argn, char **argv,
   // Contraction
   conf.use_contraction = args.IsSet("contraction");
   conf.direct_contraction = args.IsSet("direct");
+  conf.single_level_contraction = args.IsSet("single");
 
   // Sequential computation
   conf.sequential_limit = args.Get<unsigned int>("seq", 1000);

@@ -330,6 +330,9 @@ class SemidynamicGraph {
   }
 
   void RemoveAllEdges(VertexID from) {
+    ForallNeighbors(from, [&](const VertexID w) {
+      if (IsGhost(w)) number_of_cut_edges_--;
+    });
     adjacent_edges_[from].clear();
   }
 

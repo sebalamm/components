@@ -135,9 +135,6 @@ class DynamicContraction {
       inactive_level_[v] = -1;
     });
 
-    google::dense_hash_set<VertexID> send_ids; 
-    send_ids.set_empty_key(-1);
-
     contraction_timer_.Restart();
     FindDirectConflictingEdges();
     
@@ -173,7 +170,7 @@ class DynamicContraction {
     UpdateGraphVertices();
   }
 
-  void LocalContraction() {
+  void LocalContraction(google::dense_hash_map<VertexID, VertexID> &initial_parents) {
     // Statistics
     Timer propagation_timer;
     propagation_timer.Restart();
@@ -183,9 +180,6 @@ class DynamicContraction {
     g_.ForallVertices([&](VertexID v) {
       inactive_level_[v] = -1;
     });
-
-    google::dense_hash_set<VertexID> send_ids;
-    send_ids.set_empty_key(-1);
 
     FindLocalConflictingEdges();
 
@@ -198,7 +192,7 @@ class DynamicContraction {
       comm_time_ += comm_timer_.Elapsed();
       CommunicationUtility::ClearBuffers(send_buffers_);
 
-      int converged_locally = ProcessLocalMessages();
+      int converged_locally = ProcessLocalMessages(initial_parents);
       CommunicationUtility::ClearBuffers(receive_buffers_);
 
 
@@ -265,7 +259,9 @@ class DynamicContraction {
             PEID pe = g_.GetPE(g_.GetLocalID(parent));
             // Send edge
             propagated_edges_.insert(update_id);
-            PlaceInBuffer(pe, vlabel, wlabel, wroot, parent);
+            send_buffers_[pe].emplace_back(vlabel);
+            send_buffers_[pe].emplace_back(wlabel);
+            send_buffers_[pe].emplace_back(wroot);
           }
         }
         removed_edges_.emplace(v, g_.GetGlobalID(w));
@@ -273,6 +269,8 @@ class DynamicContraction {
     });
     // Sentinel
     removed_edges_.emplace(std::numeric_limits<VertexID>::max() - 1, std::numeric_limits<VertexID>::max() - 1);
+    receive_buffers_[rank_].swap(send_buffers_[rank_]);
+    send_buffers_[rank_].clear();
   }
 
   void FindDirectConflictingEdges() {
@@ -311,6 +309,8 @@ class DynamicContraction {
     });
     // Sentinel
     removed_edges_.emplace(std::numeric_limits<VertexID>::max() - 1, std::numeric_limits<VertexID>::max() - 1);
+    receive_buffers_[rank_].swap(send_buffers_[rank_]);
+    send_buffers_[rank_].clear();
   }
 
   void FindLocalConflictingEdges() {
@@ -347,6 +347,8 @@ class DynamicContraction {
       });
     });
     removed_edges_.emplace(std::numeric_limits<VertexID>::max() - 1, std::numeric_limits<VertexID>::max() - 1);
+    receive_buffers_[rank_].swap(send_buffers_[rank_]);
+    send_buffers_[rank_].clear();
   }
 
   int ProcessExponentialMessages() {
@@ -354,11 +356,10 @@ class DynamicContraction {
     // Receive edges and apply updates
     for (auto &kv : receive_buffers_) {
       auto &buffer = kv.second;
-      for (int i = 0; i < buffer.size(); i += 4) {
+      for (int i = 0; i < buffer.size(); i += 3) {
         VertexID vlabel = buffer[i];
         VertexID wlabel = buffer[i + 1];
         VertexID wroot = buffer[i + 2];
-        VertexID link = buffer[i + 3];
 
         // Continue if already inserted
         VertexID update_id = vlabel + global_num_vertices_ * wlabel;
@@ -383,7 +384,9 @@ class DynamicContraction {
           PEID pe = g_.GetPE(g_.GetLocalID(parent));
           // Send edge
           propagated_edges_.insert(update_id);
-          PlaceInBuffer(pe, vlabel, wlabel, wroot, parent);
+          send_buffers_[pe].emplace_back(vlabel);
+          send_buffers_[pe].emplace_back(wlabel);
+          send_buffers_[pe].emplace_back(wroot);
           propagate = 1;
         }
       }
@@ -422,7 +425,7 @@ class DynamicContraction {
     }
   }
 
-  int ProcessLocalMessages() {
+  int ProcessLocalMessages(google::dense_hash_map<VertexID, VertexID> &initial_parents) {
     int propagate = 0;
     // Receive edges and apply updates
     for (auto &kv : receive_buffers_) {
@@ -439,8 +442,6 @@ class DynamicContraction {
         if (propagated_edges_.find(update_id) != end(propagated_edges_)) continue;
 
         // Get link information
-        // TODO: We use this parent as link 
-        //       This is wrong if the current (link) vertex points to a different partition
         if (g_.IsLocalFromGlobal(vlabel)) {
           edges_to_add_[wroot].emplace_back(vlabel);
           edges_to_add_[wroot].emplace_back(wlabel);
@@ -461,11 +462,11 @@ class DynamicContraction {
             propagate = 1;
           } else {
             // Parent has to be connected to vlabel (N(N(v))
-            VertexID local_vlabel = g_.GetLocalID(vlabel);
-            PEID pe = g_.GetPE(local_vlabel);
+            VertexID initial_parent = initial_parents[g_.GetLocalID(vlabel)];
+            PEID pe = g_.GetPE(initial_parent);
             // Send edge
             propagated_edges_.insert(update_id);
-            PlaceInBuffer(pe, vlabel, wlabel, wroot, vlabel);
+            PlaceInBuffer(pe, vlabel, wlabel, wroot, initial_parent);
             propagate = 1;
           }
         }
@@ -534,7 +535,6 @@ class DynamicContraction {
   }
 
   void UndoContraction() {
-    // TODO: Does not work if graph is completely empty
     // Remove last sentinel
     removed_edges_.pop();
     while (contraction_level_ > 0) {

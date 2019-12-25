@@ -45,17 +45,31 @@ int main(int argn, char **argv) {
   if (rank == ROOT) std::cout << "WARMUP RUN" << std::endl;
 
   {
-    StaticGraph G(rank, size);
-    IOUtility::LoadGraph(G, conf, rank, size);
-    IOUtility::PrintGraphParams(G, conf, rank, size);
-
-    // Determine labels
-    std::vector<VertexID> labels(G.GetNumberOfVertices(), 0);
-    G.ForallLocalVertices([&](const VertexID v) {
-      labels[v] = G.GetGlobalID(v);
-    });
+    // Use static graph for contraction
     ExponentialContraction comp(conf, rank, size);
-    comp.FindComponents(G, labels);
+    if (conf.use_contraction) {
+      StaticGraph G(rank, size);
+      IOUtility::LoadGraph(G, conf, rank, size);
+      IOUtility::PrintGraphParams(G, conf, rank, size);
+
+      // Determine labels
+      std::vector<VertexID> labels(G.GetNumberOfVertices(), 0);
+      G.ForallLocalVertices([&](const VertexID v) {
+        labels[v] = G.GetGlobalID(v);
+      });
+      comp.FindComponents(G, labels);
+    } else {
+      DynamicGraphCommunicator G(rank, size);
+      IOUtility::LoadGraph(G, conf, rank, size);
+      IOUtility::PrintGraphParams(G, conf, rank, size);
+
+      // Determine labels
+      std::vector<VertexID> labels(G.GetNumberOfVertices(), 0);
+      G.ForallLocalVertices([&](const VertexID v) {
+        labels[v] = G.GetGlobalID(v);
+      });
+      comp.FindComponents(G, labels);
+    }
   }
 
   // ACTUAL RUN
@@ -66,26 +80,48 @@ int main(int argn, char **argv) {
   for (int i = 0; i < conf.iterations; ++i) {
     int round_seed = initial_seed + i + 1000;
     conf.seed = round_seed;
-    StaticGraph G(rank, size);
-    IOUtility::LoadGraph(G, conf, rank, size);
-    IOUtility::PrintGraphParams(G, conf, rank, size);
 
     Timer t;
     float local_time = 0.0;
     float total_time = 0.0;
 
-    std::vector<VertexID> labels(G.GetNumberOfVertices(), 0);
-    G.ForallLocalVertices([&](const VertexID v) {
-      labels[v] = G.GetGlobalID(v);
-    });
-    t.Restart();
-
-    // Determine labels
     ExponentialContraction comp(conf, rank, size);
-    comp.FindComponents(G, labels);
+    if (conf.use_contraction) {
+      StaticGraph G(rank, size);
+      IOUtility::LoadGraph(G, conf, rank, size);
+      IOUtility::PrintGraphParams(G, conf, rank, size);
+
+      std::vector<VertexID> labels(G.GetNumberOfVertices(), 0);
+      G.ForallLocalVertices([&](const VertexID v) {
+        labels[v] = G.GetGlobalID(v);
+      });
+
+      // Determine labels
+      t.Restart();
+      comp.FindComponents(G, labels);
+      local_time = t.Elapsed();
+
+      // Print labels
+      G.OutputComponents(labels);
+    } else {
+      DynamicGraphCommunicator G(rank, size);
+      IOUtility::LoadGraph(G, conf, rank, size);
+      IOUtility::PrintGraphParams(G, conf, rank, size);
+
+      // Determine labels
+      std::vector<VertexID> labels(G.GetNumberOfVertices(), 0);
+      G.ForallLocalVertices([&](const VertexID v) {
+        labels[v] = G.GetGlobalID(v);
+      });
+      t.Restart();
+      comp.FindComponents(G, labels);
+      local_time = t.Elapsed();
+
+      // Print labels
+      G.OutputComponents(labels);
+    }
 
     // Gather total time
-    local_time = t.Elapsed();
     MPI_Reduce(&local_time, &total_time, 1, MPI_FLOAT, MPI_MAX, ROOT,
                MPI_COMM_WORLD);
     if (rank == ROOT) stats.Push(total_time);
@@ -96,9 +132,6 @@ int main(int argn, char **argv) {
     MPI_Reduce(&comm_time, &total_comm_time, 1, MPI_FLOAT, MPI_MAX, ROOT,
                MPI_COMM_WORLD);
     if (rank == ROOT) comm_stats.Push(total_comm_time);
-    
-    // Print labels
-    G.OutputComponents(labels);
   }
 
   if (rank == ROOT) {

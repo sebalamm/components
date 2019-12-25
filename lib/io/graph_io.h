@@ -63,12 +63,42 @@ class GraphIO {
     VertexID number_of_ghost_vertices = DetermineGhostVertices(edge_list, from, to, ghost_vertices);
     if (rank == ROOT) std::cout << "done finding ghosts... mem " << Utility::GetFreePhysMem() << std::endl;
 
+    // Gather number of global vertices
+    VertexID number_of_global_vertices = 0;
+    MPI_Allreduce(&number_of_local_vertices,
+                  &number_of_global_vertices,
+                  1,
+                  MPI_VERTEX,
+                  MPI_SUM,
+                  MPI_COMM_WORLD);
+
     // Build graph
-    g.StartConstruct(number_of_local_vertices, 
-                     number_of_ghost_vertices, 
-                     number_of_edges,
-                     from);
+    // Static graphs also take the number of edges
+    if constexpr (std::is_same<GraphType, StaticGraphCommunicator>::value
+                  || std::is_same<GraphType, StaticGraph>::value) {
+      g.StartConstruct(number_of_local_vertices, 
+                       number_of_ghost_vertices, 
+                       number_of_edges,
+                       from);
+    } else if constexpr (std::is_same<GraphType, DynamicGraphCommunicator>::value
+                  || std::is_same<GraphType, DynamicGraph>::value) {
+      g.StartConstruct(number_of_local_vertices, 
+                       number_of_ghost_vertices, 
+                       number_of_global_vertices);
+    } else {
+      g.StartConstruct(number_of_local_vertices, 
+                       number_of_ghost_vertices, 
+                       from);
+    }
     if (rank == ROOT) std::cout << "done start construct... mem " << Utility::GetFreePhysMem() << std::endl;
+
+    // Add vertices for dynamic graphs
+    if constexpr (std::is_same<GraphType, DynamicGraphCommunicator>::value
+                  || std::is_same<GraphType, DynamicGraph>::value) {
+      for (VertexID v = 0; v < number_of_local_vertices; v++) {
+          g.AddVertex(from + v);
+      }
+    }
 
     // Initialize payloads for graphs with communicator 
     if constexpr (std::is_same<GraphType, StaticGraphCommunicator>::value
@@ -159,10 +189,22 @@ class GraphIO {
 
     ParseFilestream(in, from, to, ghost_vertices, edge_list);
 
-    g.StartConstruct(number_of_local_vertices, 
-                     ghost_vertices.size(), 
-                     edge_list.size(),
-                     from); 
+    if constexpr (std::is_same<GraphType, StaticGraphCommunicator>::value
+                  || std::is_same<GraphType, StaticGraph>::value) {
+      g.StartConstruct(number_of_local_vertices, 
+                       ghost_vertices.size(), 
+                       edge_list.size(),
+                       from); 
+    } else if constexpr (std::is_same<GraphType, DynamicGraphCommunicator>::value
+                  || std::is_same<GraphType, DynamicGraph>::value) {
+      g.StartConstruct(number_of_local_vertices, 
+                       ghost_vertices.size(), 
+                       number_of_global_vertices);
+    } else {
+      g.StartConstruct(number_of_local_vertices, 
+                       ghost_vertices.size(), 
+                       from); 
+    }
 
     std::vector<std::pair<VertexID, VertexID>> vertex_dist(size);
     GatherPERanges(from, to, comm, vertex_dist);
@@ -170,6 +212,14 @@ class GraphIO {
     // Initialize ghost vertices
     for (auto &v : ghost_vertices) {
       g.AddGhostVertex(v, GetPEFromOffset(v, vertex_dist, rank));
+    }
+
+    // Add vertices for dynamic graphs
+    if constexpr (std::is_same<GraphType, DynamicGraphCommunicator>::value
+                  || std::is_same<GraphType, DynamicGraph>::value) {
+      for (VertexID v = 0; v < number_of_local_vertices; v++) {
+          g.AddVertex(from + v);
+      }
     }
 
     // Initialize payloads for graphs with communicator 
@@ -236,17 +286,29 @@ class GraphIO {
 
     ParseFilestream(in, from, to, ghost_vertices, edge_list);
 
-    g.StartConstruct(number_of_local_vertices, 
-                     ghost_vertices.size(), 
-                     edge_list.size(),
-                     from); 
+    if constexpr (std::is_same<GraphType, StaticGraphCommunicator>::value
+                  || std::is_same<GraphType, StaticGraph>::value) {
+      g.StartConstruct(number_of_local_vertices, 
+                       ghost_vertices.size(), 
+                       edge_list.size(),
+                       from); 
+    } else if constexpr (std::is_same<GraphType, DynamicGraphCommunicator>::value
+                  || std::is_same<GraphType, DynamicGraph>::value) {
+      g.StartConstruct(number_of_local_vertices, 
+                       ghost_vertices.size(), 
+                       number_of_global_vertices);
+    } else {
+      g.StartConstruct(number_of_local_vertices, 
+                       ghost_vertices.size(), 
+                       from); 
+    }
 
-    std::vector<std::pair<VertexID, VertexID>> vertex_dist(size);
-    GatherPERanges(from, to, comm, vertex_dist);
-
-    // Initialize ghost vertices
-    for (auto &v : ghost_vertices) {
-      g.AddGhostVertex(v, GetPEFromOffset(v, vertex_dist, rank));
+    // Add vertices for dynamic graphs
+    if constexpr (std::is_same<GraphType, DynamicGraphCommunicator>::value
+                  || std::is_same<GraphType, DynamicGraph>::value) {
+      for (VertexID v = 0; v < number_of_local_vertices; v++) {
+          g.AddVertex(from + v);
+      }
     }
 
     // Initialize payloads for graphs with communicator 
@@ -258,6 +320,15 @@ class GraphIO {
           g.SetVertexRoot(v, rank);
       }
     }
+
+    std::vector<std::pair<VertexID, VertexID>> vertex_dist(size);
+    GatherPERanges(from, to, comm, vertex_dist);
+
+    // Initialize ghost vertices
+    for (auto &v : ghost_vertices) {
+      g.AddGhostVertex(v, GetPEFromOffset(v, vertex_dist, rank));
+    }
+
 
     // Sort edges for static graphs
     if constexpr (std::is_same<GraphType, StaticGraphCommunicator>::value

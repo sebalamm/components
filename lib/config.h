@@ -58,6 +58,7 @@ struct Config {
   // Contraction
   bool use_contraction;
   bool direct_contraction;
+  bool single_level_contraction;
   // Number of heavy hitters for shortcutting
   VertexID number_of_hitters;
   // Threshold for performing high degree splitting
