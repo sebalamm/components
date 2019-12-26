@@ -42,8 +42,6 @@ int main(int argn, char **argv) {
   int initial_seed = conf.seed;
 
   // WARMUP RUN
-  // WARMUP RUN
-  // WARMUP RUN
   if (rank == ROOT) std::cout << "WARMUP RUN" << std::endl;
 
   {
@@ -61,8 +59,6 @@ int main(int argn, char **argv) {
   }
   MPI_Barrier(MPI_COMM_WORLD);
 
-  // ACTUAL RUN
-  // ACTUAL RUN
   // ACTUAL RUN
   if (rank == ROOT) std::cout << "BENCH RUN" << std::endl;
   Statistics stats;

@@ -48,29 +48,30 @@ class ShortcutPropagation {
 
   virtual ~ShortcutPropagation() = default;
 
-  void FindComponents(StaticGraphCommunicator &g, std::vector<VertexID> &g_labels) {
-    if (config_.use_contraction) {
-      // FindLocalComponents(g, g_labels);
+  template <typename GraphType>
+  void FindComponents(GraphType &g, std::vector<VertexID> &g_labels) {
+    if constexpr (std::is_same<GraphType, StaticGraph>::value) {
+      FindLocalComponents(g, g_labels);
 
-      // CAGBuilder<StaticGraphCommunicator> 
-      //   first_contraction(g, g_labels, rank_, size_);
-      // StaticGraphCommunicator cag = first_contraction.BuildDynamicComponentAdjacencyGraph();
-      // OutputStats<StaticGraphCommunicator>(cag);
+      CAGBuilder<StaticGraph> 
+        first_contraction(g, g_labels, rank_, size_);
+      auto cag = first_contraction.BuildComponentAdjacencyGraph<StaticGraph>();
+      OutputStats<StaticGraph>(cag);
 
-      // // Keep contraction labeling for later
-      // std::vector<VertexID> cag_labels(cag.GetNumberOfVertices(), 0);
-      // FindLocalComponents(cag, cag_labels);
+      // Keep contraction labeling for later
+      std::vector<VertexID> cag_labels(cag.GetNumberOfVertices(), 0);
+      FindLocalComponents(cag, cag_labels);
 
-      // CAGBuilder<StaticGraphCommunicator> 
-      //   second_contraction(cag, cag_labels, rank_, size_);
-      // StaticGraphCommunicator ccag = second_contraction.BuildDynamicComponentAdjacencyGraph();
-      // OutputStats<StaticGraphCommunicator>(ccag);
+      CAGBuilder<StaticGraph> 
+        second_contraction(cag, cag_labels, rank_, size_);
+      auto ccag = second_contraction.BuildComponentAdjacencyGraph<StaticGraphCommunicator>();
+      OutputStats<StaticGraphCommunicator>(ccag);
 
-      // PerformShortcutting(ccag);
+      PerformShortcutting(ccag);
 
-      // ApplyToLocalComponents(ccag, cag, cag_labels);
-      // ApplyToLocalComponents(cag, cag_labels, g, g_labels);
-    } else {
+      ApplyToLocalComponents(ccag, cag, cag_labels);
+      ApplyToLocalComponents(cag, cag_labels, g, g_labels);
+    } else if constexpr (std::is_same<GraphType, StaticGraphCommunicator>::value) {
       PerformShortcutting(g);
       g.ForallLocalVertices([&](const VertexID v) {
         g_labels[v] = g.GetVertexLabel(v);
@@ -129,7 +130,7 @@ class ShortcutPropagation {
     } while (!CheckConvergence(g));
   }
 
-  void FindLocalComponents(StaticGraphCommunicator &g, std::vector<VertexID> &label) {
+  void FindLocalComponents(StaticGraph &g, std::vector<VertexID> &label) {
     std::vector<bool> marked(g.GetNumberOfVertices(), false);
     std::vector<VertexID> parent(g.GetNumberOfVertices(), 0);
 
@@ -139,7 +140,7 @@ class ShortcutPropagation {
 
     // Compute components
     g.ForallLocalVertices([&](const VertexID v) {
-      if (!marked[v]) Utility::BFS<StaticGraphCommunicator>(g, v, marked, parent);
+      if (!marked[v]) Utility::BFS<StaticGraph>(g, v, marked, parent);
     });
 
     // Set vertex label for contraction
@@ -495,16 +496,16 @@ class ShortcutPropagation {
   }
 
   void ApplyToLocalComponents(StaticGraphCommunicator &cag, 
-                              StaticGraphCommunicator &g, std::vector<VertexID> &g_label) {
+                              StaticGraph &g, std::vector<VertexID> &g_label) {
     g.ForallLocalVertices([&](const VertexID v) {
       VertexID cv = cag.GetLocalID(g.GetContractionVertex(v));
       g_label[v] = cag.GetVertexLabel(cv);
     });
   }
 
-  void ApplyToLocalComponents(StaticGraphCommunicator &cag, 
+  void ApplyToLocalComponents(StaticGraph &cag, 
                               std::vector<VertexID> &cag_label, 
-                              StaticGraphCommunicator &g, 
+                              StaticGraph &g, 
                               std::vector<VertexID> &g_label) {
     g.ForallLocalVertices([&](const VertexID v) {
       VertexID cv = cag.GetLocalID(g.GetContractionVertex(v));

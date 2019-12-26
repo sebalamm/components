@@ -57,7 +57,7 @@ class LocalContraction {
 
       CAGBuilder<StaticGraph> 
         first_contraction(g, g_labels, rank_, size_);
-      StaticGraph cag = first_contraction.BuildStaticComponentAdjacencyGraph();
+      auto cag = first_contraction.BuildComponentAdjacencyGraph<StaticGraph>();
       OutputStats<StaticGraph>(cag);
 
       std::vector<VertexID> cag_labels(cag.GetNumberOfVertices(), 0);
@@ -65,7 +65,7 @@ class LocalContraction {
 
       CAGBuilder<StaticGraph>
         second_contraction(cag, cag_labels, rank_, size_);
-      DynamicGraphCommunicator ccag = second_contraction.BuildDynamicComponentAdjacencyGraph();
+      auto ccag = second_contraction.BuildComponentAdjacencyGraph<DynamicGraphCommunicator>();
       OutputStats<DynamicGraphCommunicator>(ccag);
 
       // Keep contraction labeling for later

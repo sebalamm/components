@@ -49,14 +49,10 @@ class CAGBuilder {
   }
   virtual ~CAGBuilder() = default;
 
-  DynamicGraphCommunicator BuildDynamicComponentAdjacencyGraph() {
+  template <typename GraphOutputType>
+  GraphOutputType BuildComponentAdjacencyGraph() {
     PerformContraction();
-    return BuildDynamicContractionGraph();
-  }
-
-  StaticGraph BuildStaticComponentAdjacencyGraph() {
-    PerformContraction();
-    return BuildStaticContractionGraph();
+    return BuildContractionGraph<GraphOutputType>();
   }
 
   float GetCommTime() {
@@ -355,14 +351,14 @@ class CAGBuilder {
     });
   }
 
-  DynamicGraphCommunicator BuildDynamicContractionGraph() {
+  template <typename GraphOutputType>
+  GraphOutputType BuildContractionGraph() {
     VertexID from = num_smaller_components_;
     VertexID to = num_smaller_components_ + num_local_components_ - 1;
 
+    // Identify ghost vertices
     google::dense_hash_map<VertexID, PEID> ghost_pe; 
     ghost_pe.set_empty_key(-1);
-
-    // Identify ghost vertices
     for (auto &e : edges_) {
       VertexID target = std::get<1>(e);
       PEID pe = std::get<2>(e);
@@ -376,21 +372,55 @@ class CAGBuilder {
     VertexID number_of_ghost_vertices = ghost_pe.size();
     VertexID number_of_edges = edges_.size();
 
-    DynamicGraphCommunicator cg(rank_, size_);
-    cg.StartConstruct(num_local_components_,
-                      number_of_ghost_vertices,
-                      num_global_components_);
+    GraphOutputType cg(rank_, size_);
 
-    // Initialize local vertices
-    for (VertexID v = 0; v < num_local_components_; v++) {
-        cg.AddVertex(from + v);
-        cg.SetVertexLabel(v, from + v);
-        cg.SetVertexRoot(v, rank_);
+    // Build graph
+    // Static graphs also take the number of edges
+    if constexpr (std::is_same<GraphOutputType, StaticGraphCommunicator>::value
+                  || std::is_same<GraphOutputType, StaticGraph>::value) {
+      cg.StartConstruct(num_local_components_, 
+                        number_of_ghost_vertices, 
+                        number_of_edges,
+                        from);
+    } else if constexpr (std::is_same<GraphOutputType, DynamicGraphCommunicator>::value
+                  || std::is_same<GraphOutputType, DynamicGraph>::value) {
+      cg.StartConstruct(num_local_components_, 
+                        number_of_ghost_vertices, 
+                        num_global_components_);
+    } else {
+      cg.StartConstruct(num_local_components_, 
+                        number_of_ghost_vertices, 
+                        from);
+    }
+
+    // Add vertices for dynamic graphs
+    if constexpr (std::is_same<GraphOutputType, DynamicGraphCommunicator>::value
+                  || std::is_same<GraphOutputType, DynamicGraph>::value) {
+      for (VertexID v = 0; v < num_local_components_; v++) {
+          cg.AddVertex(from + v);
+      }
+    }
+  
+
+    // Initialize payloads for graphs with communicator 
+    if constexpr (std::is_same<GraphOutputType, StaticGraphCommunicator>::value
+                  || std::is_same<GraphOutputType, DynamicGraphCommunicator>::value
+                  || std::is_same<GraphOutputType, SemidynamicGraphCommunicator>::value) {
+      for (VertexID v = 0; v < num_local_components_; v++) {
+          cg.SetVertexLabel(v, from + v);
+          cg.SetVertexRoot(v, rank_);
+      }
     }
 
     // Initialize ghost vertices
     for (const auto &kv : ghost_pe) {
       cg.AddGhostVertex(kv.first, kv.second);
+    }
+
+    // Sort edges for static graphs
+    if constexpr (std::is_same<GraphOutputType, StaticGraphCommunicator>::value
+                  || std::is_same<GraphOutputType, StaticGraph>::value) {
+      SortEdges<GraphOutputType>(cg, edges_);
     }
 
     for (auto &edge : edges_) {
@@ -401,63 +431,16 @@ class CAGBuilder {
     return cg;
   }
 
-  StaticGraph BuildStaticContractionGraph() {
-    VertexID from = num_smaller_components_;
-    VertexID to = num_smaller_components_ + num_local_components_ - 1;
-
-    google::dense_hash_map<VertexID, PEID> ghost_pe; 
-    ghost_pe.set_empty_key(-1);
-
-    // Identify ghost vertices
-    for (auto &e : edges_) {
-      VertexID target = std::get<1>(e);
-      PEID pe = std::get<2>(e);
-      if (std::get<2>(e) != rank_) {
-        if (ghost_pe.find(target) == ghost_pe.end()) {
-            ghost_pe[target] = pe;
-        } 
-      }
-    }
-
-    VertexID number_of_ghost_vertices = ghost_pe.size();
-    VertexID number_of_edges = edges_.size();
-
-    StaticGraph cg(rank_, size_);
-    cg.StartConstruct(num_local_components_,
-                      number_of_ghost_vertices,
-                      edges_.size(),
-                      from);
-
-    // Initialize ghost vertices
-    for (const auto &kv : ghost_pe) {
-      cg.AddGhostVertex(kv.first, kv.second);
-    }
-
-    std::sort(edges_.begin(), edges_.end(), [&](const auto &left, const auto &right) {
-        VertexID lhs_source = cg.GetLocalID(std::get<0>(left));
-        VertexID lhs_target = cg.GetLocalID(std::get<1>(left));
-        VertexID rhs_source = cg.GetLocalID(std::get<0>(right));
-        VertexID rhs_target = cg.GetLocalID(std::get<1>(right));
+  template <typename GraphOutputType>
+  static void SortEdges(const GraphOutputType &g, auto &edge_list) {
+    std::sort(edge_list.begin(), edge_list.end(), [&](auto &left, auto &right) {
+        VertexID lhs_source = g.GetLocalID(std::get<0>(left));
+        VertexID lhs_target = g.GetLocalID(std::get<1>(left));
+        VertexID rhs_source = g.GetLocalID(std::get<0>(right));
+        VertexID rhs_target = g.GetLocalID(std::get<1>(right));
         return (lhs_source < rhs_source
                   || (lhs_source == rhs_source && lhs_target < rhs_target));
     });
-
-    for (auto &edge : edges_) {
-      cg.AddEdge(cg.GetLocalID(std::get<0>(edge)), std::get<1>(edge), std::get<2>(edge));
-    }
-
-    cg.FinishConstruct();
-    return cg;
-  }
-
-  PEID GetPEFromOffset(const VertexID v, 
-                       std::vector<std::pair<VertexID, VertexID>> offset_array) const {
-    for (PEID i = 0; i < offset_array.size(); ++i) {
-      if (v >= offset_array[i].first && v < offset_array[i].second) {
-        return i;
-      }
-    }
-    return rank_;
   }
 };
 

@@ -67,8 +67,8 @@ class ExponentialContraction {
         contraction_timer_.Restart();
         CAGBuilder<StaticGraph> 
           contraction(g, g_labels, rank_, size_);
-        DynamicGraphCommunicator cag 
-          = contraction.BuildDynamicComponentAdjacencyGraph();
+        auto cag 
+          = contraction.BuildComponentAdjacencyGraph<DynamicGraphCommunicator>();
         OutputStats<DynamicGraphCommunicator>(cag);
         if (rank_ == ROOT) {
           std::cout << "[STATUS] |- Building cag took " 
@@ -104,8 +104,8 @@ class ExponentialContraction {
         contraction_timer_.Restart();
         CAGBuilder<StaticGraph> 
           first_contraction(g, g_labels, rank_, size_);
-        StaticGraph cag 
-          = first_contraction.BuildStaticComponentAdjacencyGraph();
+        auto cag 
+          = first_contraction.BuildComponentAdjacencyGraph<StaticGraph>();
         OutputStats<StaticGraph>(cag);
         if (rank_ == ROOT) {
           std::cout << "[STATUS] |- Building first cag took " 
@@ -125,8 +125,8 @@ class ExponentialContraction {
         contraction_timer_.Restart();
         CAGBuilder<StaticGraph> 
           second_contraction(cag, cag_labels, rank_, size_);
-        DynamicGraphCommunicator ccag 
-          = second_contraction.BuildDynamicComponentAdjacencyGraph();
+        auto ccag 
+          = second_contraction.BuildComponentAdjacencyGraph<DynamicGraphCommunicator>();
         OutputStats<DynamicGraphCommunicator>(ccag);
         if (rank_ == ROOT) {
           std::cout << "[STATUS] |- Building second cag took " 

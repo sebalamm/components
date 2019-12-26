@@ -31,7 +31,6 @@
 #include "config.h"
 #include "definitions.h"
 #include "graph_io.h"
-#include "cag_builder.h"
 #include "utils.h"
 
 template <typename GraphType>
