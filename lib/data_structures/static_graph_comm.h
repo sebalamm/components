@@ -65,6 +65,8 @@ class StaticGraphCommunicator : public StaticGraph {
   //////////////////////////////////////////////
   VertexID AddGhostVertex(VertexID v, PEID pe);
 
+  void SampleVertexNeighborhood(const VertexID &v, const float sampling_factor);
+
   void SetVertexPayload(VertexID v, VertexPayload &&msg, bool propagate = true);
 
   void ForceVertexPayload(VertexID v, VertexPayload &&msg);

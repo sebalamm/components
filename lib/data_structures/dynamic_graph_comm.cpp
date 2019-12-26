@@ -7,7 +7,7 @@
 DynamicGraphCommunicator::DynamicGraphCommunicator(const PEID rank, const PEID size) 
     : DynamicGraph(rank, size), 
       ghost_comm_(nullptr) {
-  ghost_comm_ = new VertexCommunicator<DynamicGraphCommunicator>(rank_, size_, MPI_COMM_WORLD);
+  ghost_comm_ = new VertexCommunicator<DynamicGraphCommunicator>(rank_, size_);
   ghost_comm_->SetGraph(this);
 }
 
@@ -18,12 +18,16 @@ DynamicGraphCommunicator::~DynamicGraphCommunicator() {
 
 void DynamicGraphCommunicator::ResetCommunicator() {
   delete ghost_comm_;
-  ghost_comm_ = new VertexCommunicator<DynamicGraphCommunicator>(rank_, size_, MPI_COMM_WORLD);
+  ghost_comm_ = new VertexCommunicator<DynamicGraphCommunicator>(rank_, size_);
   ghost_comm_->SetGraph(this);
 }
 
 void DynamicGraphCommunicator::SendAndReceiveGhostVertices() {
   ghost_comm_->SendAndReceiveGhostVertices();
+}
+
+void DynamicGraphCommunicator::SampleVertexNeighborhood(const VertexID &v, const float sampling_factor) {
+  ghost_comm_->SampleVertexNeighborhood(v, sampling_factor);
 }
 
 // NOTE: v should always be local

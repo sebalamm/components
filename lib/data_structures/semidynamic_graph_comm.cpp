@@ -9,7 +9,7 @@ SemidynamicGraphCommunicator::SemidynamicGraphCommunicator(const PEID rank, cons
       max_degree_(0),
       max_degree_computed_(false),
       ghost_comm_(nullptr) {
-  ghost_comm_ = new VertexCommunicator<SemidynamicGraphCommunicator>(rank_, size_, MPI_COMM_WORLD);
+  ghost_comm_ = new VertexCommunicator<SemidynamicGraphCommunicator>(rank_, size_);
   ghost_comm_->SetGraph(this);
 }
 
@@ -20,7 +20,7 @@ SemidynamicGraphCommunicator::~SemidynamicGraphCommunicator() {
 
 void SemidynamicGraphCommunicator::ResetCommunicator() {
   delete ghost_comm_;
-  ghost_comm_ = new VertexCommunicator<SemidynamicGraphCommunicator>(rank_, size_, MPI_COMM_WORLD);
+  ghost_comm_ = new VertexCommunicator<SemidynamicGraphCommunicator>(rank_, size_);
   ghost_comm_->SetGraph(this);
 }
 
@@ -33,6 +33,10 @@ void SemidynamicGraphCommunicator::StartConstruct(const VertexID local_n,
 
 void SemidynamicGraphCommunicator::SendAndReceiveGhostVertices() {
   ghost_comm_->SendAndReceiveGhostVertices();
+}
+
+void SemidynamicGraphCommunicator::SampleVertexNeighborhood(const VertexID &v, const float sampling_factor) {
+  ghost_comm_->SampleVertexNeighborhood(v, sampling_factor);
 }
 
 void SemidynamicGraphCommunicator::SetVertexPayload(const VertexID v,

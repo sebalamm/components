@@ -107,6 +107,8 @@ class DynamicGraphCommunicator : public DynamicGraph {
   //////////////////////////////////////////////
   // Manage local vertices/edges
   //////////////////////////////////////////////
+  void SampleVertexNeighborhood(const VertexID &v, const float sampling_factor);
+
   void SetVertexPayload(VertexID v, VertexPayload &&msg, bool propagate = true);
 
   void ForceVertexPayload(VertexID v, VertexPayload &&msg);

@@ -450,6 +450,16 @@ class ExponentialContraction {
     });
   }
 
+  void SampleHighDegreeNeighborhoods(DynamicGraphCommunicator &g) {
+    std::vector<VertexID> high_degree_vertices;
+    VertexID avg_max_deg = Utility::ComputeAverageMaxDegree(g, rank_, size_);
+    Utility::SelectHighDegreeVertices(g, config_.degree_threshold * avg_max_deg, high_degree_vertices);
+
+    for (const VertexID &v : high_degree_vertices) {
+      g.SampleVertexNeighborhood(v, config_.neighborhood_sampling_factor);
+    }
+  }
+
   void DistributeHighDegreeVertices(DynamicGraphCommunicator &g) {
     // Determine high degree vertices
     std::vector<VertexID> high_degree_vertices;

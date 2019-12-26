@@ -7,7 +7,7 @@
 StaticGraphCommunicator::StaticGraphCommunicator(const PEID rank, const PEID size) 
     : StaticGraph(rank, size),
       ghost_comm_(nullptr) {
-  ghost_comm_ = new VertexCommunicator<StaticGraphCommunicator>(rank_, size_, MPI_COMM_WORLD);
+  ghost_comm_ = new VertexCommunicator<StaticGraphCommunicator>(rank_, size_);
   ghost_comm_->SetGraph(this);
 }
 
@@ -18,12 +18,16 @@ StaticGraphCommunicator::~StaticGraphCommunicator() {
 
 void StaticGraphCommunicator::ResetCommunicator() {
   delete ghost_comm_;
-  ghost_comm_ = new VertexCommunicator<StaticGraphCommunicator>(rank_, size_, MPI_COMM_WORLD);
+  ghost_comm_ = new VertexCommunicator<StaticGraphCommunicator>(rank_, size_);
   ghost_comm_->SetGraph(this);
 }
 
 void StaticGraphCommunicator::SendAndReceiveGhostVertices() {
   ghost_comm_->SendAndReceiveGhostVertices();
+}
+
+void StaticGraphCommunicator::SampleVertexNeighborhood(const VertexID &v, const float sampling_factor) {
+  ghost_comm_->SampleVertexNeighborhood(v, sampling_factor);
 }
 
 void StaticGraphCommunicator::SetVertexPayload(const VertexID v,

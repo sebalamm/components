@@ -35,16 +35,16 @@ template<typename GraphType>
 class VertexCommunicator {
  public:
   VertexCommunicator(const PEID rank,
-                   const PEID size,
-                   MPI_Comm communicator)
-      : communicator_(communicator),
-        g_(nullptr),
+                     const PEID size)
+      : g_(nullptr),
+        use_sampling_(false),
         rank_(rank),
         size_(size),
         comm_time_(0.0) {
     packed_pes_.set_empty_key(-1);
     send_buffers_.set_empty_key(-1);
     receive_buffers_.set_empty_key(-1);
+    neighborhood_sample_.set_empty_key(-1);
     message_tag_ = static_cast<unsigned int>(100 * size_);
   }
   virtual ~VertexCommunicator() {};
@@ -73,6 +73,8 @@ class VertexCommunicator {
 
   void AddMessage(VertexID v, const VertexPayload &msg);
 
+  void SampleVertexNeighborhood(const VertexID &v, const float sampling_factor);
+
   void UpdateGhostVertices();
 
   void SendAndReceiveGhostVertices() {
@@ -91,7 +93,6 @@ class VertexCommunicator {
 
 
  private:
-  MPI_Comm communicator_;
   GraphType *g_;
 
   PEID rank_, size_;
@@ -100,10 +101,18 @@ class VertexCommunicator {
   google::dense_hash_map<PEID, VertexBuffer> send_buffers_;
   google::dense_hash_map<PEID, VertexBuffer> receive_buffers_;
 
+  // Neighborhood sampling
+  bool use_sampling_;
+  google::dense_hash_map<VertexID, google::sparse_hash_set<VertexID>> neighborhood_sample_;
+
   VertexID message_tag_;
 
   float comm_time_;
   Timer comm_timer_;
+
+  void PlaceInBuffer(const PEID &pe,
+                     const VertexID &v,
+                     const VertexPayload &msg);
 };
 
 template class VertexCommunicator<DynamicGraphCommunicator>;

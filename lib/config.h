@@ -63,6 +63,8 @@ struct Config {
   VertexID number_of_hitters;
   // Threshold for performing high degree splitting
   VertexID degree_threshold;
+  // Threshold for neihgborhood sampling
+  float neighborhood_sampling_factor;
   // Generator
   std::string gen;
   VertexID gen_n;
