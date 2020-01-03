@@ -45,7 +45,9 @@ class ExponentialContraction {
         size_(size),
         config_(conf),
         iteration_(0),
-        comm_time_(0.0) { }
+        comm_time_(0.0) { 
+    replicated_vertices_.set_empty_key(-1);
+  }
 
   virtual ~ExponentialContraction() {
     delete exp_contraction_;
@@ -208,7 +210,7 @@ class ExponentialContraction {
   DynamicContraction *exp_contraction_;
 
   // Node replication
-  std::vector<VertexID> replicated_vertices_;
+  google::dense_hash_map<VertexID, VertexID> replicated_vertices_;
 
   void PerformDecomposition(DynamicGraphCommunicator &g) {
     contraction_timer_.Restart(); 
@@ -534,10 +536,16 @@ class ExponentialContraction {
     std::vector<VertexID> local_edges;
 
     // Split adjacency list for high degree vertices
-    VertexID clamped_avg_max_deg = std::max<VertexID>(avg_max_deg, 2);
     VertexID repl_vertices_id = vertex_offset;
     VertexID repl_vertices_counter = 0;
     VertexID edge_quotient = 2;
+
+    google::dense_hash_map<VertexID, std::vector<VertexID>> vertex_messages;
+    vertex_messages.set_empty_key(-1);
+    google::dense_hash_map<VertexID, VertexID> message_progress;
+    message_progress.set_empty_key(-1);
+      
+    // Distribute high degree vertices
     for (const VertexID &v : high_degree_vertices) {
       VertexID v_deg = g.GetVertexDegree(v);
       VertexID num_parts = tlx::integer_log2_ceil(v_deg);
@@ -547,44 +555,166 @@ class ExponentialContraction {
       VertexID message_size = ceil(v_deg / edge_quotient);
       VertexID edge_counter = 0;
       PEID current_target_pe = size_;
+      // Gather all non-local neighbors
       g.ForallNeighbors(v, [&](const VertexID w) {
-        // TODO: Using no contraction might lead to less than 1/2 edges being distributed
-        //       but avoids local edges being send around
-        if (!g.IsLocal(w) && edge_counter < message_size) {
-          if (current_target_pe >= size_) {
-            current_target_pe = g.GetPE(w);
-            // Add replicated vertex to start of message
-            send_buffers[current_target_pe].emplace_back(g.GetGlobalID(v));
-            send_buffers[current_target_pe].emplace_back(repl_vertices_id + repl_vertices_counter);
-            // Queue local edge to be added to replicated vertex
-            local_edges.emplace_back(repl_vertices_id + repl_vertices_counter);
-            local_edges.emplace_back(current_target_pe);
-            repl_vertices_counter++;
-          }
-          // Emplace edge targets for replicated vertex
-          send_buffers[current_target_pe].emplace_back(w);
-          send_buffers[current_target_pe].emplace_back(g.GetPE(w));
+        if (!g.IsLocal(w)) { 
+          vertex_messages[g.GetGlobalID(v)].emplace_back(g.GetGlobalID(w));
+          vertex_messages[g.GetGlobalID(v)].emplace_back(g.GetPE(w));
         }
-        edge_counter++;
       });
     }
 
-    // TODO: Propagate receive buffers
-    if (receive_buffers.size() > 0) {
-      for (auto &kv : receive_buffers) {
-        PEID pe = kv.first;
-        auto &buffer = kv.second;
+    // Main loop: Reroute message until convergence
+    int converged_globally = 0;
+    int converged_locally = 0;
+    while (converged_globally == 0) {
+      for (auto &kv : vertex_messages) {
+        VertexID source = kv.first;
+        auto &edges = kv.second;
+        // Push half of the messages in the corresponding send buffer
+        if (edges.size() > edge_threshold) {
+          VertexID message_size = ceil(edges.size() / edge_quotient);
+          PEID current_target_pe = size_;
+          for (VertexID i = 0; i < message_size; i += 2) {
+            VertexID target = edges[i];
+            PEID target_pe = edges[i + 1];
+
+            // Pick first pe as receiver
+            if (current_target_pe >= size_) {
+              current_target_pe = target_pe;
+            }
+
+            // Message (source, target, pe(target))
+            send_buffers[current_target_pe].emplace_back(source);
+            send_buffers[current_target_pe].emplace_back(target);
+            send_buffers[current_target_pe].emplace_back(target_pe);
+            converged_locally = 0;
+          }
+          // Remove propagated edges from buffer
+          global_neighbors.erase(global_neighbors.begin(), global_neighbors.begin() + message_size);
+        } 
+        // TODO: Directly insert edges locally
+        else {
+        }
       }
+
+      comm_timer_.Restart();
+      CommunicationUtility::SparseAllToAll(send_buffers, receive_buffers, rank_, size_, 993);
+      comm_time_ += comm_timer_.Elapsed();
+      CommunicationUtility::ClearBuffers(send_buffers);
+
+      // Process received messages
+      for (auto &kv : receive_buffers) {
+        PEID sender_pe = kv.first;
+        auto &edges = kv.second;
+
+        // Sort messages into receive buffers
+        for (VertexID i = 0; i < edges.size(); i += 3) {
+          VertexID source = edges[i];
+          VertexID target = edges[i + 1];
+          PEID target_pe = edges[i + 2];
+
+          // Add replicate
+          if (replicated_vertices_.find(source) == end(replicated_vertices_)) {
+            replicated_vertices_[source] = g.AddVertex(repl_vertices_id + repl_vertices_counter++);
+            // TODO: Queue message to sender with replicated id
+          }
+
+          // Add messages to propagation buffer
+          vertex_messages[source].emplace_back(target);
+          vertex_messages[source].emplace_back(target_pe);
+        }
+      }
+      CommunicationUtility::ClearBuffers(receive_buffers);
+
+      comm_timer_.Restart();
+      MPI_Allreduce(&converged_locally,
+                    &converged_globally,
+                    1,
+                    MPI_INT,
+                    MPI_MIN,
+                    MPI_COMM_WORLD);
+      comm_time_ += comm_timer_.Elapsed();
     }
 
-    comm_timer_.Restart();
-    CommunicationUtility::SparseAllToAll(send_buffers, receive_buffers, rank_, size_, 993);
-    comm_time_ += comm_timer_.Elapsed();
-    CommunicationUtility::ClearBuffers(send_buffers);
-    // TODO: Sender insert local edges
-    // TODO: Neighbors insert replicas and local edges (but only half of them, the rest is propagated
-    // TODO: Neighbor send relink messages to their new neighbors
-    // TODO: Repeat for 1/4, 1/8, ... of adjacency list
+    //   g.ForallNeighbors(v, [&](const VertexID w) {
+    //     if (!g.IsLocal(w) && edge_counter < message_size) {
+    //       if (current_target_pe >= size_) {
+    //         current_target_pe = g.GetPE(w);
+    //         // Add replicated vertex to start of message
+    //         send_buffers[current_target_pe].emplace_back(g.GetGlobalID(v));
+    //         send_buffers[current_target_pe].emplace_back(g.GetGlobalID(v));
+    //         send_buffers[current_target_pe].emplace_back(repl_vertices_id + repl_vertices_counter);
+    //         // Queue local edge to be added to replicated vertex
+    //         local_edges.emplace_back(repl_vertices_id + repl_vertices_counter);
+    //         local_edges.emplace_back(current_target_pe);
+    //         repl_vertices_counter++;
+    //       }
+    //       // Emplace edge targets for replicated vertex
+    //       send_buffers[current_target_pe].emplace_back(g.GetGlobalID(v));
+    //       send_buffers[current_target_pe].emplace_back(g.GetGlobalID(w));
+    //       send_buffers[current_target_pe].emplace_back(g.GetPE(w));
+    //     }
+    //     edge_counter++;
+    //   });
+    // }
+
+    // TODO: Propagate receive buffers
+    // for (auto &kv : receive_buffers) {
+    //   PEID pe = kv.first;
+    //   auto &buffer = kv.second;
+    //   if (buffer.size() > 0) {
+    //     VertexID message_size = ceil(buffer.size() / edge_quotient);
+    //     VertexID edge_counter = 0;
+    //     VertexID source, prev_source_replicate, new_source_replicate;
+    //     PEID current_target_pe = size_;
+    //     for (VertexID i = 0; i < buffer.size() && edge_counter < message_size; i+=3) {
+    //       // New source
+    //       // Note: This might not work if number of global vertices is smaller than number of PEs
+    //       if (buffer[i+2] >= offset) {
+    //         source = buffer[i];
+    //         prev_source_replicate = buffer[i+1];
+    //         new_source_replicate = buffer[i+2];
+    //         if (replicated_vertices_.find(source) == end(replicated_vertices_)) {
+    //           replicated_vertices_[source] = g.AddVertex(new_source_replicate);
+    //         }
+    //         // Add edge from new replicated vertex to original one
+    //         g.AddEdge(replicated_vertices_[source], prev_source_replicate, pe);
+    //       } else {
+    //         VertexID source = buffer[i];
+    //         VertexID target = buffer[i+1];
+    //         VertexID target_pe = buffer[i+2];
+    //         // Neighbor is local vertex
+    //         if (target_pe == rank_) {
+    //           // In this case relink the local edge from the _source_ vertex to the newly created one
+    //           g.RelinkEdge(g.GetLocalID(target), source, new_source_replicate, rank_);
+    //         // Neighbor is remote vertex
+    //         } else {
+    //           // TODO: This might recreate an already existing ghost vertex
+    //           g.AddGhostVertex(target, target_pe);
+    //           // Propagte 
+    //           if (current_target_pe >= size_) {
+    //             current_target_pe = target_pe;
+    //             // Add replicated vertex to start of message
+    //             send_buffers[current_target_pe].emplace_back(source);
+    //             send_buffers[current_target_pe].emplace_back(new_source_replicate);
+    //             send_buffers[current_target_pe].emplace_back(repl_vertices_id + repl_vertices_counter);
+    //             // Queue local edge to be added to replicated vertex
+    //             local_edges.emplace_back(repl_vertices_id + repl_vertices_counter);
+    //             local_edges.emplace_back(current_target_pe);
+    //             repl_vertices_counter++;
+    //           }
+    //           // Emplace edge targets for replicated vertex
+    //           send_buffers[current_target_pe].emplace_back(source);
+    //           send_buffers[current_target_pe].emplace_back(target);
+    //           send_buffers[current_target_pe].emplace_back(target_pe);
+    //         }
+    //         g.AddEdge(g.GetLocalID(copy_vertex), target, target_pe);
+    //       }
+    //       edge_counter++;
+    //     }
+    //   }
+    // }
   }
 
   void ComputeEdgePartitioning(DynamicGraphCommunicator &g,
@@ -707,7 +837,7 @@ class ExponentialContraction {
             source = buffer[i];
             copy_vertex = buffer[i+1];
             VertexID local_copy_id = g.AddVertex(copy_vertex);
-            replicated_vertices_.emplace_back(local_copy_id);
+            replicated_vertices_[source] = local_copy_id;
             g.AddEdge(local_copy_id, source, pe);
           } else {
             VertexID target = buffer[i];

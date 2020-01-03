@@ -67,11 +67,10 @@ set(SOURCES
           lib/tools
 )
 
-# add_executable(isend ${SOURCES} "isend_example.cpp")
 add_executable(exponential ${SOURCES} "app/exp_contraction.cpp")
 add_executable(allreduce ${SOURCES} "app/all_reduce.cpp")
-# add_executable(local ${SOURCES} "app/local_contraction.cpp")
-# add_executable(shortcuts ${SOURCES} "app/shortcuts.cpp")
+add_executable(local ${SOURCES} "app/local_contraction.cpp")
+add_executable(shortcuts ${SOURCES} "app/shortcuts.cpp")
 # add_executable(labels ${SOURCES} "app/labels.cpp")
 
 set(LIBS
@@ -81,9 +80,8 @@ set(LIBS
         asan
         )
 
-      # target_link_libraries(isend LINK_PUBLIC ${LIBS})
 target_link_libraries(exponential LINK_PUBLIC ${LIBS})
 target_link_libraries(allreduce LINK_PUBLIC ${LIBS})
-# target_link_libraries(local LINK_PUBLIC ${LIBS})
-# target_link_libraries(shortcuts LINK_PUBLIC ${LIBS})
+target_link_libraries(local LINK_PUBLIC ${LIBS})
+target_link_libraries(shortcuts LINK_PUBLIC ${LIBS})
 # target_link_libraries(labels LINK_PUBLIC ${LIBS})
