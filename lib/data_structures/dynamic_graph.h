@@ -364,11 +364,10 @@ class DynamicGraph {
     }
   }
 
-  EdgeID RelinkEdge(VertexID from, VertexID old_to, VertexID new_to, PEID rank) {
+  bool RelinkEdge(VertexID from, VertexID old_to, VertexID new_to, PEID rank) {
     VertexID old_to_local = GetLocalID(old_to);
     VertexID new_to_local = GetLocalID(new_to);
 
-    // NOTE: Unsure if the ghost offset works with distributing high degree vertices
     if (IsLocal(new_to_local)) {
       if (IsGhost(old_to_local)) number_of_cut_edges_--;
     }
@@ -383,13 +382,15 @@ class DynamicGraph {
 
     // Actual relink
     // NOTE: from should always be local
+    bool success = false;
     for (VertexID i = 0; i < local_adjacent_edges_[from].size(); i++) {
       if (local_adjacent_edges_[from][i].target_ == old_to_local) {
         local_adjacent_edges_[from][i].target_ = new_to_local;
+        success = true;
       }
     }
 
-    return edge_counter_;
+    return success;
   }
 
   void ReserveEdgesForVertex(VertexID v, VertexID num_edges) {

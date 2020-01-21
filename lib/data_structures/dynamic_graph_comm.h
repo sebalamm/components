@@ -130,7 +130,8 @@ class DynamicGraphCommunicator : public DynamicGraph {
 
   inline std::string GetVertexString(const VertexID v) {
     std::stringstream out;
-    out << "(" << GetVertexDeviate(v) << ","
+    std::string deviate = GetVertexDeviate(v) == std::numeric_limits<VertexID>::max() - 1 ? "-" : std::to_string(GetVertexDeviate(v));
+    out << "(" << deviate << ","
         << GetVertexLabel(v) << ","
         << GetVertexRoot(v) << ")";
     return out.str();
@@ -181,6 +182,14 @@ class DynamicGraphCommunicator : public DynamicGraph {
 
     // Set active
     local_active_[local_id] = true;
+
+    // Set payload
+    local_payload_[local_id] = {std::numeric_limits<VertexID>::max() - 1, 
+                                v, 
+#ifdef TIEBREAK_DEGREE
+                                0,
+#endif
+                                rank_};
 
     number_of_vertices_++;
     number_of_local_vertices_++;

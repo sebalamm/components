@@ -125,7 +125,8 @@ class SemidynamicGraphCommunicator : public SemidynamicGraph {
 
   inline std::string GetVertexString(const VertexID v) {
     std::stringstream out;
-    out << "(" << GetVertexDeviate(v) << ","
+    std::string deviate = GetVertexDeviate(v) == std::numeric_limits<VertexID>::max() - 1 ? "-" : std::to_string(GetVertexDeviate(v));
+    out << "(" << deviate << ","
         << GetVertexLabel(v) << ","
         << GetVertexRoot(v) << ")";
     return out.str();

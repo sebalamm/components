@@ -208,8 +208,8 @@ class DynamicContraction {
       comm_time_ += comm_timer_.Elapsed();
       local_iterations++;
       if (rank_ == ROOT) {
-        std::cout << "[status] |--- Convergence test took " 
-                  << "[time] " << contraction_timer_.Elapsed() << std::endl;
+        std::cout << "[STATUS] |--- Convergence test took " 
+                  << "[TIME] " << contraction_timer_.Elapsed() << std::endl;
       }
     }
     if (rank_ == ROOT) 
@@ -569,8 +569,8 @@ class DynamicContraction {
                                rank_});
       });
       if (rank_ == ROOT) {
-        std::cout << "[status] |-- Updating payloads took " 
-                  << "[time] " << contraction_timer_.Elapsed() << std::endl;
+        std::cout << "[STATUS] |-- Updating payloads took " 
+                  << "[TIME] " << contraction_timer_.Elapsed() << std::endl;
       }
 
       // Propagate labels
@@ -595,8 +595,8 @@ class DynamicContraction {
           }
         });
         if (rank_ == ROOT) {
-          std::cout << "[status] |--- Message exchange took " 
-                    << "[time] " << contraction_timer_.Elapsed() << std::endl;
+          std::cout << "[STATUS] |--- Message exchange took " 
+                    << "[TIME] " << contraction_timer_.Elapsed() << std::endl;
         }
 
         // Check if all PEs are done
@@ -610,8 +610,8 @@ class DynamicContraction {
                       MPI_COMM_WORLD);
         comm_time_ += comm_timer_.Elapsed();
         if (rank_ == ROOT) {
-          std::cout << "[status] |--- Convergence test took " 
-                    << "[time] " << contraction_timer_.Elapsed() << std::endl;
+          std::cout << "[STATUS] |--- Convergence test took " 
+                    << "[TIME] " << contraction_timer_.Elapsed() << std::endl;
         }
       }
       // Vertices at current level are roots at previous one
