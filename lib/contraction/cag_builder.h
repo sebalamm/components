@@ -43,8 +43,11 @@ class CAGBuilder {
         num_global_components_(0),
         comm_time_(0.0) {
     local_components_.set_empty_key(-1);
+    local_components_.set_deleted_key(-1);
     send_buffers_.set_empty_key(-1);
+    send_buffers_.set_deleted_key(-1);
     receive_buffers_.set_empty_key(-1);
+    receive_buffers_.set_deleted_key(-1);
     offset_ = g_.GatherNumberOfGlobalVertices();
   }
   virtual ~CAGBuilder() = default;
@@ -161,6 +164,7 @@ class CAGBuilder {
     // Map local components to contraction vertices O(n/P)
     google::dense_hash_map<VertexID, VertexID> label_map; 
     label_map.set_empty_key(-1);
+    label_map.set_deleted_key(-1);
     VertexID current_component = num_smaller_components_;
     for (const VertexID c : local_components_) {
       label_map[c] = current_component++;
@@ -181,7 +185,9 @@ class CAGBuilder {
     google::dense_hash_map<PEID, VertexID> largest_component; 
     google::dense_hash_map<VertexID, VertexID> vertex_message; 
     largest_component.set_empty_key(-1); 
+    largest_component.set_deleted_key(-1); 
     vertex_message.set_empty_key(-1);
+    vertex_message.set_deleted_key(-1);
 
     // Send ghost vertex updates O(cut size) (communication)
     comm_timer_.Restart();
@@ -198,6 +204,7 @@ class CAGBuilder {
     // Compute sizes of components for interface vertices
     google::dense_hash_map<VertexID, VertexID> interface_component_size;
     interface_component_size.set_empty_key(-1);
+    interface_component_size.set_deleted_key(-1);
 
     g_.ForallLocalVertices([&](const VertexID v) {
       if (g_.IsInterface(v)) {
@@ -210,6 +217,7 @@ class CAGBuilder {
 
     google::dense_hash_map<PEID, std::pair<VertexID, VertexID>> largest_component;
     largest_component.set_empty_key(-1);
+    largest_component.set_deleted_key(-1);
 
     // Identify largest component for each adjacent PE
     g_.ForallLocalVertices([&](const VertexID v) {
@@ -244,11 +252,13 @@ class CAGBuilder {
     // TODO: Can we use something else than a hashmap of hashmaps?
     google::dense_hash_map<PEID, google::sparse_hash_set<VertexID>> unique_neighbors;
     unique_neighbors.set_empty_key(-1);
+    unique_neighbors.set_deleted_key(-1);
     VertexID buffer_size = 0;
     g_.ForallLocalVertices([&](const VertexID v) {
       if (g_.IsInterface(v)) {
         google::dense_hash_set<PEID> receiving_pes;
         receiving_pes.set_empty_key(-1);
+        receiving_pes.set_deleted_key(-1);
         g_.ForallNeighbors(v, [&](const VertexID w) {
           if (!g_.IsLocal(w)) {
             PEID target_pe = g_.GetPE(w);
@@ -304,6 +314,7 @@ class CAGBuilder {
     g_.ForallLocalVertices([&](const VertexID v) {
       google::dense_hash_map<PEID, VertexID> component_id;
       component_id.set_empty_key(-1);
+      component_id.set_deleted_key(-1);
       if (g_.IsInterface(v)) {
         // Store largest component for each PE
         for (auto &kv : largest_component) {
@@ -359,6 +370,7 @@ class CAGBuilder {
     // Identify ghost vertices
     google::dense_hash_map<VertexID, PEID> ghost_pe; 
     ghost_pe.set_empty_key(-1);
+    ghost_pe.set_deleted_key(-1);
     for (auto &e : edges_) {
       VertexID target = std::get<1>(e);
       PEID pe = std::get<2>(e);

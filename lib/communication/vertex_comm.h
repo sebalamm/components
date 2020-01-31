@@ -42,9 +42,13 @@ class VertexCommunicator {
         size_(size),
         comm_time_(0.0) {
     packed_pes_.set_empty_key(-1);
+    packed_pes_.set_deleted_key(-1);
     send_buffers_.set_empty_key(-1);
+    send_buffers_.set_deleted_key(-1);
     receive_buffers_.set_empty_key(-1);
+    receive_buffers_.set_deleted_key(-1);
     neighborhood_sample_.set_empty_key(-1);
+    neighborhood_sample_.set_deleted_key(-1);
     message_tag_ = static_cast<unsigned int>(100 * size_);
   }
   virtual ~VertexCommunicator() {};

@@ -47,6 +47,7 @@ class ExponentialContraction {
         iteration_(0),
         comm_time_(0.0) { 
     replicated_vertices_.set_empty_key(-1);
+    replicated_vertices_.set_deleted_key(-1);
   }
 
   virtual ~ExponentialContraction() {
@@ -87,9 +88,6 @@ class ExponentialContraction {
             std::cout << "[STATUS] |- Distributing high degree vertices took " 
                       << "[TIME] " << contraction_timer_.Elapsed() << std::endl;
           }
-          // MPI_Barrier(MPI_COMM_WORLD);
-          // cag.OutputLocal();
-          // exit(1);
         }
 
         // Keep contraction labeling for later
@@ -447,6 +445,7 @@ class ExponentialContraction {
     // Build vertex mapping 
     google::dense_hash_map<VertexID, int> vertex_map; 
     vertex_map.set_empty_key(-1);
+    vertex_map.set_deleted_key(-1);
     std::vector<VertexID> reverse_vertex_map(g.GetNumberOfLocalVertices());
     int current_vertex = 0;
     g.ForallLocalVertices([&](const VertexID v) {
@@ -483,6 +482,9 @@ class ExponentialContraction {
   }
 
   void DistributeHighDegreeVertices(DynamicGraphCommunicator &g) {
+    // if (rank_ == 0) {
+    //   g.OutputLocal();
+    // }
     // Determine high degree vertices
     std::vector<VertexID> high_degree_vertices;
     VertexID avg_max_deg = Utility::ComputeAverageMaxDegree(g, rank_, size_);
@@ -552,14 +554,18 @@ class ExponentialContraction {
     // Default buffers for message exchange
     google::dense_hash_map<PEID, VertexBuffer> send_buffers;
     send_buffers.set_empty_key(-1);
+    send_buffers.set_deleted_key(-1);
     google::dense_hash_map<PEID, VertexBuffer> receive_buffers;
     receive_buffers.set_empty_key(-1);
+    receive_buffers.set_deleted_key(-1);
     
     // New edges to replicated vertices
     google::dense_hash_map<VertexID, std::vector<VertexID>> local_edges;
     local_edges.set_empty_key(-1);
+    local_edges.set_deleted_key(-1);
     google::dense_hash_map<VertexID, std::vector<VertexID>> parent_edges;
     parent_edges.set_empty_key(-1);
+    parent_edges.set_deleted_key(-1);
 
     // Split adjacency list for high degree vertices
     VertexID repl_vertices_id = vertex_offset;
@@ -571,18 +577,22 @@ class ExponentialContraction {
     // Hashmap for grouping edges before building send buffers
     google::dense_hash_map<VertexID, std::vector<VertexID>> vertex_messages;
     vertex_messages.set_empty_key(-1);
+    vertex_messages.set_deleted_key(-1);
 
     // Hashmap for storing parents of vertices
     google::dense_hash_map<VertexID, PEID> parent;
     parent.set_empty_key(-1);
+    parent.set_deleted_key(-1);
     
     google::dense_hash_map<VertexID, 
                            google::sparse_hash_map<VertexID, 
                                                    std::pair<VertexID, PEID>>> high_degree_edge_distribution;
     high_degree_edge_distribution.set_empty_key(-1);
+    high_degree_edge_distribution.set_deleted_key(-1);
 
     google::dense_hash_set<VertexID> tree_leaf_set;
     tree_leaf_set.set_empty_key(-1);
+    tree_leaf_set.set_deleted_key(-1);
 
     ComputeInitialBinomialPartitioning(g, high_degree_vertices, parent, vertex_messages);
 
@@ -796,6 +806,7 @@ class ExponentialContraction {
       VertexID v_deg = g.GetVertexDegree(v);
       VertexID num_parts = tlx::integer_log2_ceil(v_deg);
       if (num_parts <= 1) continue;
+      if (rank_ != 0 && rank_ != 1)
       std::cout << "R" << rank_ << " split v " << g.GetGlobalID(v) << " deg(v)=" << v_deg << " in " << num_parts << " parts" << std::endl;
 
       // Gather all non-local neighbors
@@ -862,7 +873,7 @@ class ExponentialContraction {
               if (current_target_pe >= size_) {
                 std::cout << "R" << rank_ << " This shouldn't happen: Invalid target (down propagation) PE R" << current_target_pe << std::endl;
               }
-              // if (rank_ == 6 || rank_ == 10) {
+              // if (rank_ == 0 || rank_ == 2 || rank_ == 1) {
               //   std::cout << "R" << rank_ << " propagate (" << replicate << " (repl of " << source << ")," << target << ") target(pe)=" << target_pe << " to R" << current_target_pe << std::endl;
               // }
               leaves.erase(source);
@@ -870,8 +881,8 @@ class ExponentialContraction {
               local_edges[source].emplace_back(replicate);
               local_edges[source].emplace_back(target);
               local_edges[source].emplace_back(target_pe);
-              // if (rank_ == 6 || rank_ == 10) {
-              //   std::cout << "R" << rank_ << " add (" << replicate << "," << target << ") target(pe)=" << target_pe << " to local edges (during propagation)" << std::endl;
+              // if (rank_ == 0 || rank_ == 2 || rank_ == 1) {
+              //   std::cout << "R" << rank_ << " add (" << replicate << " (repl of " << source << ")," << target << ") target(pe)=" << target_pe << " to local edges (during propagation)" << std::endl;
               // }
             }
           }
@@ -888,8 +899,8 @@ class ExponentialContraction {
             local_edges[source].emplace_back(replicate);
             local_edges[source].emplace_back(edges[i]);
             local_edges[source].emplace_back(edges[i + 1]);
-            // if (rank_ == 6 || rank_ == 10) {
-            //   std::cout << "R" << rank_ << " add (" << replicate << "," << edges[i] << ") target(pe)=" << edges[i+1] << " to local edges (remaining local edge)" << std::endl;
+            // if (rank_ == 0 || rank_ == 2 || rank_ == 1) {
+            //   std::cout << "R" << rank_ << " add (" << replicate << " (repl of " << source << ")," << edges[i] << ") target(pe)=" << edges[i+1] << " to local edges (remaining local edge)" << std::endl;
             // }
           }
           edges.clear();
@@ -971,7 +982,7 @@ class ExponentialContraction {
     // Initial grouping of leaf vertices
     if (leaves.size() > 0) {
       for (const VertexID &v: leaves) {
-        // if (rank_ == 6 || rank_ == 10) {
+        // if (rank_ == 0 || rank_ == 1 || rank_ == 2) {
         //   std::cout << "R" << rank_ << " is tree leaf for v " << v << std::endl;
         // }
         for (VertexID i = 0; i < local_edges[v].size(); i+= 3) {
@@ -1012,6 +1023,7 @@ class ExponentialContraction {
     int converged_locally = 0;
     google::dense_hash_set<VertexID> added_local;
     added_local.set_empty_key(-1);
+    added_local.set_deleted_key(-1);
     while (converged_globally == 0) {
       converged_locally = 1;
       for (auto &kv : propagation_buffers) {
@@ -1039,7 +1051,7 @@ class ExponentialContraction {
           if (parent_pe >= size_) {
             std::cout << "R" << rank_ << " This shouldn't happen: Invalid target (up propagation) PE R" << parent_pe << std::endl;
           }
-          // if (rank_ == 6 || rank_ == 10) {
+          // if (rank_ == 0 || rank_ == 2 || rank_ == 1) {
           //   std::cout << "R" << rank_ << " (up-)propagate (" << edges[i] << " (repl of " << source << ")," << edges[i + 1] << ") pe(source)=" << edges[i + 2] << " back to R" << parent_pe << " via local repl " << replicate << std::endl;
           // }
         }
@@ -1191,7 +1203,7 @@ class ExponentialContraction {
             // }
             bool relink_success = g.RelinkEdge(g.GetLocalID(target), source, replicate, rank_);
             if (!relink_success) {
-              std::cout << "R" << rank_ << " This shouldn't happen: Invalid (first round) relink (" << target << "," << source << ") -> (" << target << "," << replicate << ") from R" << rank_ << std::endl;
+              std::cout << "R" << rank_ << " This shouldn't happen: Invalid (first round) relink (" << target << "," << source << ") -> (" << target << "," << replicate << ") from R" << rank_ << " isLocal(target)=" << g.IsLocalFromGlobal(target) << " isLocal(source)=" << g.IsLocalFromGlobal(source) << " isLocal(replicate)=" << g.IsLocalFromGlobal(replicate) << std::endl;
             }
           } else {
             send_buffers[rank_].emplace_back(target);
@@ -1330,6 +1342,7 @@ class ExponentialContraction {
     // Check if PEs are still connected
     google::dense_hash_set<PEID> neighboring_pes;
     neighboring_pes.set_empty_key(-1);
+    neighboring_pes.set_deleted_key(-1);
     g.ForallLocalVertices([&](const VertexID v) {
       bool ghost_neighbor = false;
       g.ForallNeighbors(v, [&](const VertexID w) {

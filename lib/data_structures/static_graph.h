@@ -60,12 +60,18 @@ class StaticGraph {
       local_offset_(0),
       ghost_offset_(0),
       vertex_counter_(0),
+      original_duplicate_id_(std::numeric_limits<VertexID>::max()),
+      local_duplicate_id_(std::numeric_limits<VertexID>::max()),
+      global_duplicate_id_(std::numeric_limits<VertexID>::max()),
       edge_counter_(0),
       ghost_counter_(0),
       last_source_(0),
       comm_time_(0.0) {
     global_to_local_map_.set_empty_key(-1);
+    global_to_local_map_.set_deleted_key(-1);
+    // duplicates_.set_empty_key(-1);
     adjacent_pes_.set_empty_key(-1);
+    adjacent_pes_.set_deleted_key(-1);
   }
 
   virtual ~StaticGraph() {};
@@ -101,6 +107,7 @@ class StaticGraph {
     vertices_.resize(vertex_counter_ + 1);
     edges_.resize(edge_counter_ + 1);
 
+    number_of_vertices_ = vertex_counter_;
     for (VertexID v = 1; v <= vertex_counter_; v++) {
       if (vertices_[v].first_edge_ == std::numeric_limits<EdgeID>::max()) {
         vertices_[v].first_edge_ = vertices_[v - 1].first_edge_;
@@ -177,7 +184,8 @@ class StaticGraph {
   }
 
   inline bool IsLocalFromGlobal(VertexID v) const {
-    return local_offset_ <= v && v < local_offset_ + number_of_local_vertices_;
+    return v == global_duplicate_id_ 
+            || (v != original_duplicate_id_ && local_offset_ <= v && v < local_offset_ + number_of_local_vertices_);
   }
 
   inline bool IsGhost(VertexID v) const {
@@ -199,19 +207,39 @@ class StaticGraph {
   }
 
   inline VertexID GetLocalID(VertexID v) const {
-    return IsLocalFromGlobal(v) ? v - local_offset_
-                                : global_to_local_map_.find(v)->second;
+    if (IsLocalFromGlobal(v)) {
+      if (global_duplicate_id_ < std::numeric_limits<VertexID>::max() 
+          && global_duplicate_id_ == v) {
+        return local_duplicate_id_;
+      } else {
+        return v - local_offset_;
+      }
+    } else {
+      return global_to_local_map_.find(v)->second;
+    }
   }
 
   inline VertexID GetGlobalID(VertexID v) const {
-    return IsLocal(v) ? v + local_offset_
-                      : ghost_vertices_data_[v - ghost_offset_].global_id_;
+    // TODO This says 0 is local (even tough its 63)
+    if (IsLocal(v)) {
+      if (local_duplicate_id_ < std::numeric_limits<VertexID>::max()
+          && local_duplicate_id_ == v) {
+        return global_duplicate_id_;
+      } else {
+        return v + local_offset_;
+      }
+    } else {
+      return ghost_vertices_data_[v - ghost_offset_].global_id_;
+    }
   }
 
   inline PEID GetPE(VertexID v) const {
     return IsLocal(v) ? rank_
                       : ghost_vertices_data_[v - ghost_offset_].rank_;
+  }
 
+  inline std::pair<VertexID, VertexID> GetDuplicate() {
+    return std::make_pair(global_duplicate_id_, local_duplicate_id_);
   }
 
   //////////////////////////////////////////////
@@ -285,20 +313,29 @@ class StaticGraph {
   }
 
   inline VertexID AddGhostVertex(VertexID v, PEID pe) {
-    AddVertex();
     global_to_local_map_[v] = ghost_counter_;
 
-    if (ghost_counter_ > local_vertices_data_.size()) {
-      local_vertices_data_.resize(ghost_counter_ + 1);
+    if (vertex_counter_ >= local_vertices_data_.size()) {
+      local_vertices_data_.resize(vertex_counter_ + 1);
+    }
+    if (ghost_counter_ >= ghost_vertices_data_.size()) {
       ghost_vertices_data_.resize(ghost_counter_ + 1);
     }
 
     // Update data
-    local_vertices_data_[ghost_counter_].is_interface_vertex_ = false;
+    local_vertices_data_[vertex_counter_].is_interface_vertex_ = false;
     ghost_vertices_data_[ghost_counter_ - ghost_offset_].rank_ = pe;
     ghost_vertices_data_[ghost_counter_ - ghost_offset_].global_id_ = v;
 
+    vertex_counter_++;
     return ghost_counter_++;
+  }
+
+  inline void AddDuplicateVertex(VertexID original_id, VertexID global_id) {
+    // "Remap" duplicate
+    original_duplicate_id_ = original_id;
+    local_duplicate_id_ = original_id - local_offset_;
+    global_duplicate_id_ = global_id;
   }
 
   EdgeID AddEdge(VertexID from, VertexID to, PEID rank) {
@@ -324,8 +361,15 @@ class StaticGraph {
   }
 
   void AddLocalEdge(VertexID from, VertexID to) {
+    if (edge_counter_ >= edges_.size()) {
+      edges_.resize(edge_counter_ + 1);
+    }
     edges_[edge_counter_].target_ = GetLocalID(to);
     edge_counter_++;
+    if (from + 1 >= vertices_.size()) {
+      vertices_.resize(from + 2);
+    }
+    // std::cout << "R" << rank_ << " add edge (" << GetGlobalID(from) << "," << to << ") local (" << from << "," << GetLocalID(to) << ")" << std::endl;
     vertices_[from + 1].first_edge_ = edge_counter_;
   }
 
@@ -403,6 +447,7 @@ class StaticGraph {
     // Gather component sizes
     google::dense_hash_map<VertexID, VertexID> local_component_sizes; 
     local_component_sizes.set_empty_key(-1);
+    local_component_sizes.set_deleted_key(-1);
     ForallLocalVertices([&](const VertexID v) {
       VertexID c = labels[v];
       if (local_component_sizes.find(c) == end(local_component_sizes))
@@ -442,7 +487,9 @@ class StaticGraph {
                 ROOT, MPI_COMM_WORLD);
 
     if (rank_ == ROOT) {
-      google::dense_hash_map<VertexID, VertexID> global_component_sizes; global_component_sizes.set_empty_key(-1);
+      google::dense_hash_map<VertexID, VertexID> global_component_sizes; 
+      global_component_sizes.set_empty_key(-1);
+      global_component_sizes.set_deleted_key(-1);
       for (auto &comp : global_components) {
         VertexID c = comp.first;
         VertexID size = comp.second;
@@ -453,6 +500,7 @@ class StaticGraph {
 
       google::dense_hash_map<VertexID, VertexID> condensed_component_sizes; 
       condensed_component_sizes.set_empty_key(-1);
+      condensed_component_sizes.set_deleted_key(-1);
       for (auto &cs : global_component_sizes) {
         VertexID c = cs.first;
         VertexID size = cs.second;
@@ -543,6 +591,12 @@ class StaticGraph {
 
   // Contraction
   std::vector<VertexID> contraction_vertices_;
+
+  // Duplicates
+  // google::dense_hash_set<VertexID> duplicates_;
+  VertexID original_duplicate_id_;
+  VertexID local_duplicate_id_;
+  VertexID global_duplicate_id_;
 
   // Adjacent PEs
   google::dense_hash_set<PEID> adjacent_pes_;

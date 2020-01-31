@@ -44,6 +44,7 @@ class ShortcutPropagation {
       iteration_(0),
       number_of_hitters_(conf.number_of_hitters) { 
     heavy_hitters_.set_empty_key(-1);
+    heavy_hitters_.set_deleted_key(-1);
   }
 
   virtual ~ShortcutPropagation() = default;
@@ -181,6 +182,7 @@ class ShortcutPropagation {
   void FindHeavyHitters(StaticGraphCommunicator &g) {
     google::dense_hash_map<VertexID, VertexID> number_hits;
     number_hits.set_empty_key(-1);
+    number_hits.set_deleted_key(-1);
     g.ForallLocalVertices([&](const VertexID v) {
       const VertexID target = labels_[v];
       if (number_hits.find(target) == end(number_hits))
@@ -195,14 +197,18 @@ class ShortcutPropagation {
   void Shortcut(StaticGraphCommunicator &g) {
     google::dense_hash_map<PEID, VertexBuffer> update_buffers;
     update_buffers.set_empty_key(-1);
+    update_buffers.set_deleted_key(-1);
     google::dense_hash_map<PEID, VertexBuffer> request_buffers;
     request_buffers.set_empty_key(-1);
+    request_buffers.set_deleted_key(-1);
 
     google::dense_hash_map<VertexID, std::vector<VertexID>> update_lists;
     update_lists.set_empty_key(-1);
+    update_lists.set_deleted_key(-1);
 
     google::dense_hash_set<VertexID> request_set;
     request_set.set_empty_key(-1);
+    request_set.set_deleted_key(-1);
 
     shortcut_timer_.Restart();
     g.ForallLocalVertices([&](const VertexID v) {

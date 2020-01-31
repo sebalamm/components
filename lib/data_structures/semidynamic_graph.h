@@ -59,11 +59,17 @@ class SemidynamicGraph {
       ghost_offset_(0),
       vertex_counter_(0),
       edge_counter_(0),
+      local_duplicate_id_(0),
+      global_duplicate_id_(0),
       ghost_counter_(0),
       comm_time_(0.0) {
     label_shortcut_.set_empty_key(-1);
+    label_shortcut_.set_deleted_key(-1);
     global_to_local_map_.set_empty_key(-1);
+    global_to_local_map_.set_deleted_key(-1);
+    // duplicates_.set_empty_key(-1);
     adjacent_pes_.set_empty_key(-1);
+    adjacent_pes_.set_deleted_key(-1);
   }
 
   virtual ~SemidynamicGraph() {};
@@ -166,7 +172,8 @@ class SemidynamicGraph {
   }
 
   inline bool IsLocalFromGlobal(VertexID v) const {
-    return local_offset_ <= v && v < local_offset_ + number_of_local_vertices_;
+    return v == global_duplicate_id_ 
+            || (local_offset_ <= v && v < local_offset_ + number_of_local_vertices_);
   }
 
   inline bool IsGhost(VertexID v) const {
@@ -188,13 +195,27 @@ class SemidynamicGraph {
   }
 
   inline VertexID GetLocalID(VertexID v) const {
-    return IsLocalFromGlobal(v) ? v - local_offset_
-                                : global_to_local_map_.find(v)->second;
+    if (IsLocalFromGlobal(v)) {
+      if (global_duplicate_id_ == v) {
+        return local_duplicate_id_;
+      } else {
+        return v - local_offset_;
+      }
+    } else {
+      return global_to_local_map_.find(v)->second;
+    }
   }
 
   inline VertexID GetGlobalID(VertexID v) const {
-    return IsLocal(v) ? v + local_offset_
-                      : ghost_vertices_data_[v - ghost_offset_].global_id_;
+    if (IsLocal(v)) {
+      if (local_duplicate_id_ == v) {
+        return global_duplicate_id_;
+      } else {
+        return v + local_offset_;
+      }
+    } else {
+      return ghost_vertices_data_[v - ghost_offset_].global_id_;
+    }
   }
 
   inline PEID GetPE(VertexID v) const {
@@ -277,21 +298,27 @@ class SemidynamicGraph {
     global_to_local_map_[v] = ghost_counter_;
 
     // Fix overflows
-    if (ghost_counter_ > local_vertices_data_.size()) {
-      local_vertices_data_.resize(ghost_counter_ + 1);
+    if (vertex_counter_ >= local_vertices_data_.size()) {
+      local_vertices_data_.resize(vertex_counter_ + 1);
+      is_active_.resize(vertex_counter_ + 1);
+    }
+    if (ghost_counter_ >= ghost_vertices_data_.size()) {
       ghost_vertices_data_.resize(ghost_counter_ + 1);
-      is_active_.resize(ghost_counter_ + 1);
     }
 
     // Update data
-    local_vertices_data_[ghost_counter_].is_interface_vertex_ = false;
+    local_vertices_data_[vertex_counter_].is_interface_vertex_ = false;
     ghost_vertices_data_[ghost_counter_ - ghost_offset_].rank_ = pe;
     ghost_vertices_data_[ghost_counter_ - ghost_offset_].global_id_ = v;
+    is_active_[vertex_counter_] = true;
 
-    // Set active
-    is_active_[ghost_counter_] = true;
-
+    vertex_counter_++;
     return ghost_counter_++;
+  }
+
+  inline void AddDuplicateVertex(VertexID global_id) {
+    local_duplicate_id_ = AddVertex();
+    global_duplicate_id_ = global_id;
   }
 
   EdgeID AddEdge(VertexID from, VertexID to, PEID rank) {
@@ -317,10 +344,16 @@ class SemidynamicGraph {
   }
 
   void AddLocalEdge(VertexID from, VertexID to) {
+    if (from >= adjacent_edges_.size()) {
+      adjacent_edges_.resize(from + 1);
+    }
     adjacent_edges_[from].emplace_back(to - local_offset_);
   }
 
   void AddGhostEdge(VertexID from, VertexID to) {
+    if (from >= adjacent_edges_.size()) {
+      adjacent_edges_.resize(from + 1);
+    }
     adjacent_edges_[from].emplace_back(global_to_local_map_[to]);
   }
 
@@ -437,6 +470,7 @@ class SemidynamicGraph {
     // Gather component sizes
     google::dense_hash_map<VertexID, VertexID> local_component_sizes; 
     local_component_sizes.set_empty_key(-1);
+    local_component_sizes.set_deleted_key(-1);
     ForallLocalVertices([&](const VertexID v) {
       VertexID c = labels[v];
       if (local_component_sizes.find(c) == end(local_component_sizes))
@@ -477,7 +511,9 @@ class SemidynamicGraph {
                 ROOT, MPI_COMM_WORLD);
 
     if (rank_ == ROOT) {
-      google::dense_hash_map<VertexID, VertexID> global_component_sizes; global_component_sizes.set_empty_key(-1);
+      google::dense_hash_map<VertexID, VertexID> global_component_sizes; 
+      global_component_sizes.set_empty_key(-1);
+      global_component_sizes.set_deleted_key(-1);
       for (auto &comp : global_components) {
         VertexID c = comp.first;
         VertexID size = comp.second;
@@ -486,7 +522,9 @@ class SemidynamicGraph {
         global_component_sizes[c] += size;
       }
 
-      google::dense_hash_map<VertexID, VertexID> condensed_component_sizes; condensed_component_sizes.set_empty_key(-1);
+      google::dense_hash_map<VertexID, VertexID> condensed_component_sizes; 
+      condensed_component_sizes.set_empty_key(-1);
+      condensed_component_sizes.set_deleted_key(-1);
       for (auto &cs : global_component_sizes) {
         VertexID c = cs.first;
         VertexID size = cs.second;
@@ -581,6 +619,11 @@ class SemidynamicGraph {
   // Contraction
   std::vector<VertexID> contraction_vertices_;
   std::vector<bool> is_active_;
+
+  // Duplicates
+  // google::dense_hash_set<VertexID> duplicates_;
+  VertexID local_duplicate_id_;
+  VertexID global_duplicate_id_;
 
   // Adjacent PEs
   google::dense_hash_set<PEID> adjacent_pes_;

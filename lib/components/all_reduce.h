@@ -110,6 +110,7 @@ class AllReduce {
       // Build vertex mapping 
       google::dense_hash_map<VertexID, int> vertex_map; 
       vertex_map.set_empty_key(-1);
+      vertex_map.set_deleted_key(-1);
       std::vector<VertexID> reverse_vertex_map(global_vertices_.size());
       int current_vertex = 0;
       for (const VertexID &v : global_vertices_) {

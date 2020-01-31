@@ -41,11 +41,17 @@ class DynamicContraction {
         contraction_level_(0),
         comm_time_(0.0) { 
     inactive_level_.set_empty_key(-1);
+    inactive_level_.set_deleted_key(-1);
     send_buffers_.set_empty_key(-1);
+    send_buffers_.set_deleted_key(-1);
     receive_buffers_.set_empty_key(-1);
+    receive_buffers_.set_deleted_key(-1);
     inserted_edges_.set_empty_key(-1);
+    inserted_edges_.set_deleted_key(-1);
     propagated_edges_.set_empty_key(-1);
+    propagated_edges_.set_deleted_key(-1);
     edges_to_add_.set_empty_key(-1);
+    edges_to_add_.set_deleted_key(-1);
   }
 
   virtual ~DynamicContraction() = default;
@@ -542,6 +548,7 @@ class DynamicContraction {
       // Remove current edges from current level
       google::dense_hash_map<VertexID, VertexID> current_components; 
       current_components.set_empty_key(-1);
+      current_components.set_deleted_key(-1);
       g_.ForallLocalVertices([&](VertexID v) {
         g_.RemoveAllEdges(v);
       });

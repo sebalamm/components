@@ -67,6 +67,7 @@ class DynamicGraphCommunicator : public DynamicGraph {
     // Gather labels
     google::dense_hash_set<VertexID> labels; 
     labels.set_empty_key(-1);
+    labels.set_deleted_key(-1);
     ForallLocalVertices([&](const VertexID v) {
         labels.insert(GetVertexLabel(v));
     });
@@ -74,6 +75,7 @@ class DynamicGraphCommunicator : public DynamicGraph {
     // Init shortcuts
     google::dense_hash_map<VertexID, std::pair<VertexID, VertexID>> smallest_deviate; 
     smallest_deviate.set_empty_key(-1);
+    smallest_deviate.set_deleted_key(-1);
     FindSmallestDeviates(labels, smallest_deviate);
 
     // Set actual shortcuts

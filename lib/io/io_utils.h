@@ -36,6 +36,8 @@ class IOUtility {
     // File I/O
     if (config.input_type == "file") {
       GraphIO::ReadMETISFile<GraphType>(g, config, rank, size, MPI_COMM_WORLD);
+    } else if (config.input_type == "edgefile") {
+      GraphIO::ReadSortedEdgeFile<GraphType>(g, config, rank, size, MPI_COMM_WORLD);
     } else if (config.input_type == "partition") {
       GraphIO::ReadPartitionedMETISFile<GraphType>(g, config, rank, size, MPI_COMM_WORLD);
     } else if (config.gen != "null") {

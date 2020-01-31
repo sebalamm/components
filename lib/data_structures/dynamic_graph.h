@@ -61,8 +61,11 @@ class DynamicGraph {
       ghost_offset_(0),
       comm_time_(0.0) {
     label_shortcut_.set_empty_key(-1);
+    label_shortcut_.set_deleted_key(-1);
     global_to_local_map_.set_empty_key(-1);
+    global_to_local_map_.set_deleted_key(-1);
     adjacent_pes_.set_empty_key(-1);
+    adjacent_pes_.set_deleted_key(-1);
   }
 
   virtual ~DynamicGraph() {};
@@ -271,43 +274,45 @@ class DynamicGraph {
   }
 
   inline VertexID AddVertex(VertexID v) {
-    VertexID local_id = vertex_counter_++;
-    global_to_local_map_[v] = local_id;
+    global_to_local_map_[v] = vertex_counter_;
 
     // Update data
-    local_vertices_data_.resize(local_vertices_data_.size() + 1);
-    local_adjacent_edges_.resize(local_adjacent_edges_.size() + 1);
-    local_parent_.resize(local_parent_.size() + 1);
-    local_active_.resize(local_active_.size() + 1);
-    local_vertices_data_[local_id].is_interface_vertex_ = false;
-    local_vertices_data_[local_id].global_id_ = v;
+    if (vertex_counter_ >= local_vertices_data_.size()) {
+      local_vertices_data_.resize(vertex_counter_ + 1);
+      local_adjacent_edges_.resize(vertex_counter_ + 1);
+      local_parent_.resize(vertex_counter_ + 1);
+      local_active_.resize(vertex_counter_ + 1);
+    }
 
-    // Set active
-    local_active_[local_id] = true;
+    // Update data
+    local_vertices_data_[vertex_counter_].is_interface_vertex_ = false;
+    local_vertices_data_[vertex_counter_].global_id_ = v;
+    local_active_[vertex_counter_] = true;
 
     number_of_vertices_++;
     number_of_local_vertices_++;
-    return local_id;
+    return vertex_counter_++;
   }
 
   VertexID AddGhostVertex(VertexID v, PEID pe) {
     VertexID local_id = ghost_vertex_counter_ + ghost_offset_;
     global_to_local_map_[v] = local_id;
-    ghost_vertex_counter_++;
 
     // Update data
-    ghost_vertices_data_.resize(ghost_vertices_data_.size() + 1);
-    ghost_adjacent_edges_.resize(ghost_adjacent_edges_.size() + 1);
-    ghost_parent_.resize(ghost_parent_.size() + 1);
-    ghost_active_.resize(ghost_active_.size() + 1);
+    if (ghost_vertex_counter_ >= ghost_vertices_data_.size()) {
+      ghost_vertices_data_.resize(ghost_vertex_counter_ + 1);
+      ghost_adjacent_edges_.resize(ghost_vertex_counter_ + 1);
+      ghost_parent_.resize(ghost_vertex_counter_ + 1);
+      ghost_active_.resize(ghost_vertex_counter_ + 1);
+    }
+
+    // Update data
     ghost_vertices_data_[local_id - ghost_offset_].global_id_ = v;
     ghost_vertices_data_[local_id - ghost_offset_].rank_ = pe;
-
-    // Set active
     ghost_active_[local_id - ghost_offset_] = true;
 
     number_of_vertices_++;
-    return local_id;
+    return ghost_vertex_counter_++;
   }
 
   EdgeID AddEdge(VertexID from, VertexID to, PEID rank) {
@@ -334,8 +339,18 @@ class DynamicGraph {
   }
 
   void AddLocalEdge(VertexID from, VertexID to) {
-    if (IsLocal(from)) local_adjacent_edges_[from].emplace_back(global_to_local_map_[to]);
-    else ghost_adjacent_edges_[from - ghost_offset_].emplace_back(global_to_local_map_[to]);
+    if (IsLocal(from)) {
+      if (from >= local_adjacent_edges_.size()) {
+        local_adjacent_edges_.resize(from + 1);
+      }
+      local_adjacent_edges_[from].emplace_back(global_to_local_map_[to]);
+    }
+    else {
+      if (from - ghost_offset_ >= ghost_adjacent_edges_.size()) {
+        ghost_adjacent_edges_.resize(from - ghost_offset_ + 1);
+      }
+      ghost_adjacent_edges_[from - ghost_offset_].emplace_back(global_to_local_map_[to]);
+    }
   }
 
   void AddGhostEdge(VertexID from, VertexID to) {
@@ -508,6 +523,7 @@ class DynamicGraph {
     // Gather component sizes
     google::dense_hash_map<VertexID, VertexID> local_component_sizes; 
     local_component_sizes.set_empty_key(-1);
+    local_component_sizes.set_deleted_key(-1);
     ForallLocalVertices([&](const VertexID v) {
       VertexID c = labels[v];
       if (local_component_sizes.find(c) == end(local_component_sizes))
@@ -548,7 +564,9 @@ class DynamicGraph {
                 ROOT, MPI_COMM_WORLD);
 
     if (rank_ == ROOT) {
-      google::dense_hash_map<VertexID, VertexID> global_component_sizes; global_component_sizes.set_empty_key(-1);
+      google::dense_hash_map<VertexID, VertexID> global_component_sizes; 
+      global_component_sizes.set_empty_key(-1);
+      global_component_sizes.set_deleted_key(-1);
       for (auto &comp : global_components) {
         VertexID c = comp.first;
         VertexID size = comp.second;
@@ -557,7 +575,9 @@ class DynamicGraph {
         global_component_sizes[c] += size;
       }
 
-      google::dense_hash_map<VertexID, VertexID> condensed_component_sizes; condensed_component_sizes.set_empty_key(-1);
+      google::dense_hash_map<VertexID, VertexID> condensed_component_sizes; 
+      condensed_component_sizes.set_empty_key(-1);
+      condensed_component_sizes.set_deleted_key(-1);
       for (auto &cs : global_component_sizes) {
         VertexID c = cs.first;
         VertexID size = cs.second;
