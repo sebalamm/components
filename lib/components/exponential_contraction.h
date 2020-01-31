@@ -850,11 +850,10 @@ class ExponentialContraction {
         // Push half of the messages in the corresponding send buffer
         // if (rank_ == 6 || rank_ == 10) {
         //   std::cout << "R" << rank_ << " has " << edges.size() / 2 << " remaining edges (size=" << edges.size() << ") for v " << source << std::endl;
-        // }
         if ((edges.size() / 2) > minimal_message_size) {
           VertexID message_size = ceil((edges.size() / 2) / message_size_fraction) * 2;
           PEID current_target_pe = size_;
-          for (VertexID i = 0; i < message_size; i += 2) {
+          for (VertexID i = 0; i < edges.size(); i += 2) {
             VertexID target = edges[i];
             PEID target_pe = edges[i + 1];
 
@@ -864,7 +863,6 @@ class ExponentialContraction {
               current_target_pe = target_pe;
             }
 
-            // Message (source, replicate, target, pe(target))
             if (target_pe != rank_) {
               send_buffers[current_target_pe].emplace_back(source);
               send_buffers[current_target_pe].emplace_back(replicate);
@@ -877,6 +875,8 @@ class ExponentialContraction {
               //   std::cout << "R" << rank_ << " propagate (" << replicate << " (repl of " << source << ")," << target << ") target(pe)=" << target_pe << " to R" << current_target_pe << std::endl;
               // }
               leaves.erase(source);
+              // TODO: -- or -= 2?
+              message_size -= 2;
             } else {
               local_edges[source].emplace_back(replicate);
               local_edges[source].emplace_back(target);
@@ -885,9 +885,35 @@ class ExponentialContraction {
               //   std::cout << "R" << rank_ << " add (" << replicate << " (repl of " << source << ")," << target << ") target(pe)=" << target_pe << " to local edges (during propagation)" << std::endl;
               // }
             }
+            // Mark elements for deletion
+            edges[i] = std::numeric_limits<PEID>::max() - 1;
+            edges[i + 1] = std::numeric_limits<PEID>::max() - 1;
           }
           // Remove processed edges from buffer
-          edges.erase(edges.begin(), edges.begin() + message_size);
+          edges.erase(std::remove(edges.begin(), edges.end(), std::numeric_limits<PEID>::max() - 1), edges.end());
+
+          message_size = std::min(message_size, static_cast<VertexID>(edges.size()));
+          if (message_size > 0) {
+            for (VertexID i = 0; i < message_size; i += 2) {
+              VertexID target = edges[i];
+              PEID target_pe = edges[i + 1];
+
+              // Message (source, replicate, target, pe(target))
+              send_buffers[current_target_pe].emplace_back(source);
+              send_buffers[current_target_pe].emplace_back(replicate);
+              send_buffers[current_target_pe].emplace_back(target);
+              send_buffers[current_target_pe].emplace_back(target_pe);
+              if (current_target_pe >= size_) {
+                std::cout << "R" << rank_ << " This shouldn't happen: Invalid target (down propagation) PE R" << current_target_pe << std::endl;
+              }
+              // if (rank_ == 0 || rank_ == 2 || rank_ == 1) {
+              //   std::cout << "R" << rank_ << " propagate (" << replicate << " (repl of " << source << ")," << target << ") target(pe)=" << target_pe << " to R" << current_target_pe << std::endl;
+              // }
+              leaves.erase(source);
+            }
+            // Remove processed edges from buffer
+            edges.erase(edges.begin(), edges.begin() + message_size);
+          }
         } 
         // Insert remaining edges locally
         else {
