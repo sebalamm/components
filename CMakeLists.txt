@@ -3,8 +3,8 @@ project(components)
 
 find_package(MPI REQUIRED)
 
-# set(OMPI_CC mpicc.mpich)
-# set(OMPI_CXX mpicxx.mpich)
+set(OMPI_CC gcc-9)
+set(OMPI_CXX g++-9)
 set(CMAKE_EXPORT_COMPILE_COMMANDS ON)
 
 if (NOT CMAKE_BUILD_TYPE)
@@ -13,9 +13,13 @@ endif (NOT CMAKE_BUILD_TYPE)
 
 set(KACOMP_DEFINITIONS "")
 option(KACOMP_TIEBREAK_DEGREE "Tiebreak based on degree instead of ID." OFF)
+option(KACOMP_MEMINFO "Show memory consumed." OFF)
 
 if(KACOMP_TIEBREAK_DEGREE)
   set(KACOMP_DEFINITIONS "${KACOMP_DEFINITIONS} -DTIEBREAK_DEGREE")
+endif()
+if(KACOMP_MEMINFO)
+  set(KACOMP_DEFINITIONS "${KACOMP_DEFINITIONS} -DMEMINFO")
 endif()
 set(CMAKE_CXX_FLAGS "${CMAKE_CXX_FLAGS} ${KACOMP_DEFINITIONS}")
 

@@ -30,8 +30,6 @@
 #include <sstream>
 #include <vector>
 
-#include <sys/sysinfo.h>
-
 #include "config.h"
 #include "utils.h"
 #include "comm_utils.h"

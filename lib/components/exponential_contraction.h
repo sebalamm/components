@@ -23,7 +23,6 @@
 
 #include <iostream>
 
-#include <sys/sysinfo.h>
 #include <experimental/random>
 #include <tlx/define.hpp>
 #include <tlx/math.hpp>
