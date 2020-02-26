@@ -79,6 +79,7 @@ class GraphIO {
     // Count ghost vertices
     google::dense_hash_set<VertexID> ghost_vertices; 
     ghost_vertices.set_empty_key(-1);
+    ghost_vertices.set_deleted_key(-1);
     VertexID number_of_ghost_vertices 
       = DetermineGhostVertices(edge_list, from, to, ghost_vertices);
     if (rank == ROOT) std::cout << "done finding ghosts... mem " << Utility::GetFreePhysMem() << std::endl;
@@ -206,6 +207,7 @@ class GraphIO {
     std::vector<std::pair<VertexID, VertexID>> edge_list;
     google::dense_hash_set<VertexID> ghost_vertices; 
     ghost_vertices.set_empty_key(-1);
+    ghost_vertices.set_deleted_key(-1);
 
     ParseVertexFilestream(in, from, to, ghost_vertices, edge_list);
 
@@ -303,6 +305,7 @@ class GraphIO {
     std::vector<std::pair<VertexID, VertexID>> edge_list;
     google::dense_hash_set<VertexID> ghost_vertices; 
     ghost_vertices.set_empty_key(-1);
+    ghost_vertices.set_deleted_key(-1);
 
     ParseVertexFilestream(in, from, to, ghost_vertices, edge_list);
 
@@ -408,12 +411,12 @@ class GraphIO {
     std::pair<VertexID, VertexID> first_vertex_range 
       = {std::numeric_limits<VertexID>::max(), std::numeric_limits<VertexID>::max()};
     ParseEdgeFilestream(in, from, to, first_vertex, last_vertex, first_vertex_range, edge_list);
-    // std::cout << "R" << rank << " (vertex) from " << first_vertex << " to " << last_vertex << std::endl;
 
     // Determine local and ghost vertices
     google::dense_hash_set<VertexID> ghost_vertices; 
     ghost_vertices.set_empty_key(-1);
     ghost_vertices.set_deleted_key(-1);
+
     VertexID number_of_ghost_vertices 
       = DetermineGhostVertices(edge_list, first_vertex, last_vertex, ghost_vertices);
 
