@@ -112,10 +112,10 @@ class CAGBuilder {
 
     contraction_timer_.Restart();
     ExchangeGhostContractionMapping();
-    if (rank_ == ROOT) {
-      std::cout << "[STATUS] |-- Exchanging ghost contraction mapping took " 
-                << "[TIME] " << contraction_timer_.Elapsed() << std::endl;
-    }
+    // if (rank_ == ROOT) {
+    std::cout << "[STATUS] |-- Exchanging ghost contraction mapping took " 
+              << "[TIME] " << contraction_timer_.Elapsed() << std::endl;
+    // }
     
     contraction_timer_.Restart();
     GenerateLocalContractionEdges();
@@ -179,9 +179,15 @@ class CAGBuilder {
   }
 
   void ExchangeGhostContractionMapping() {
+    Timer exchange_timer;
+    exchange_timer.Restart();
     IdentifyLargestInterfaceComponents();
     AddComponentMessages();
 
+    std::cout << "[STATUS] |--- Filling buffers took " 
+              << "[TIME] " << exchange_timer.Elapsed() << std::endl;
+
+    exchange_timer.Restart();
     google::dense_hash_map<PEID, VertexID> largest_component; 
     google::dense_hash_map<VertexID, VertexID> vertex_message; 
     largest_component.set_empty_key(-1); 
@@ -190,14 +196,23 @@ class CAGBuilder {
     vertex_message.set_deleted_key(-1);
 
     // Send ghost vertex updates O(cut size) (communication)
+    exchange_timer.Restart();
     comm_timer_.Restart();
     CommunicationUtility::SparseAllToAll(send_buffers_, receive_buffers_, rank_, size_, 42);
     comm_time_ += comm_timer_.Elapsed();
     CommunicationUtility::ClearBuffers(send_buffers_);
+
+    std::cout << "[STATUS] |--- Sparse exchange took " 
+              << "[TIME] " << exchange_timer.Elapsed() << std::endl;
+
+    exchange_timer.Restart();
     HandleMessages(largest_component, vertex_message);
     CommunicationUtility::ClearBuffers(receive_buffers_);
 
     ApplyUpdatesToGhostVertices(largest_component, vertex_message);
+
+    std::cout << "[STATUS] |--- Local updates took " 
+              << "[TIME] " << exchange_timer.Elapsed() << std::endl;
   }
 
   void IdentifyLargestInterfaceComponents() {

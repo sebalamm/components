@@ -26,8 +26,6 @@
 #include <random>
 #include <set>
 
-#include <sys/sysinfo.h>
-
 #include "config.h"
 #include "definitions.h"
 #include "graph_io.h"

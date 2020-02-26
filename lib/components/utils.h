@@ -23,6 +23,9 @@
 #define _UTILITY_H_
 
 #include <queue>
+#ifdef MEMINFO
+#include <sys/sysinfo.h>
+#endif
 
 #include "dynamic_graph_comm.h"
 #include "semidynamic_graph.h"
@@ -87,6 +90,7 @@ class Utility {
   }
 
   static long long GetFreePhysMem() {
+#ifdef MEMINFO
     struct sysinfo memInfo;
     sysinfo (&memInfo);
     long long totalPhysMem = memInfo.totalram;
@@ -98,6 +102,9 @@ class Utility {
     freePhysMem *= 1e-9;
 
     return freePhysMem;
+#else
+    return 0;
+#endif
   } 
 };
 
