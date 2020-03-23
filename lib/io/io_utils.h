@@ -39,7 +39,7 @@ class IOUtility {
     } else if (config.input_type == "edgefile") {
       GraphIO::ReadSortedEdgeFile<GraphType>(g, config, rank, size, MPI_COMM_WORLD);
     } else if (config.input_type == "partition") {
-      GraphIO::ReadPartitionedMETISFile<GraphType>(g, config, rank, size, MPI_COMM_WORLD);
+      GraphIO::ReadPartitionedSortedEdgeFile<GraphType>(g, config, rank, size, MPI_COMM_WORLD);
     } else if (config.gen != "null") {
       // Generator I/O
       kagen::KaGen gen(rank, size);
