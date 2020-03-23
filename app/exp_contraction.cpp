@@ -41,6 +41,20 @@ int main(int argn, char **argv) {
   ParseParameters(argn, argv, conf);
   int initial_seed = conf.seed;
 
+  Timer io_t;
+  io_t.Restart();
+
+  StaticGraph SG(rank, size);
+  DynamicGraphCommunicator DG(rank, size);
+  if (conf.use_contraction) {
+      IOUtility::LoadGraph(SG, conf, rank, size);
+      IOUtility::PrintGraphParams(SG, conf, rank, size);
+  } else {
+      IOUtility::LoadGraph(DG, conf, rank, size);
+      IOUtility::PrintGraphParams(DG, conf, rank, size);
+  }
+  if (rank == ROOT) std::cout << "[INFO] I/O took time=" << io_t.Elapsed() << std::endl;
+
   // WARMUP RUN
   if (rank == ROOT) std::cout << "WARMUP RUN" << std::endl;
 
@@ -76,7 +90,7 @@ int main(int argn, char **argv) {
   if (rank == ROOT) std::cout << "BENCH RUN" << std::endl;
   Statistics stats;
   Statistics comm_stats;
-  
+
   for (int i = 0; i < conf.iterations; ++i) {
     int round_seed = initial_seed + i + 1000;
     conf.seed = round_seed;
@@ -87,38 +101,37 @@ int main(int argn, char **argv) {
 
     ExponentialContraction comp(conf, rank, size);
     if (conf.use_contraction) {
-      StaticGraph G(rank, size);
-      IOUtility::LoadGraph(G, conf, rank, size);
-      IOUtility::PrintGraphParams(G, conf, rank, size);
-
-      std::vector<VertexID> labels(G.GetNumberOfVertices(), 0);
-      G.ForallLocalVertices([&](const VertexID v) {
-        labels[v] = G.GetGlobalID(v);
-      });
+      io_t.Restart();
+      StaticGraph CG = SG;
+      if (rank == ROOT) std::cout << "[INFO] copy took time=" << io_t.Elapsed() << std::endl;
 
       // Determine labels
+      std::vector<VertexID> labels(CG.GetNumberOfVertices(), 0);
+      CG.ForallLocalVertices([&](const VertexID v) {
+        labels[v] = CG.GetGlobalID(v);
+      });
       t.Restart();
-      comp.FindComponents(G, labels);
+      comp.FindComponents(CG, labels);
       local_time = t.Elapsed();
 
       // Print labels
-      G.OutputComponents(labels);
+      CG.OutputComponents(labels);
     } else {
-      DynamicGraphCommunicator G(rank, size);
-      IOUtility::LoadGraph(G, conf, rank, size);
-      IOUtility::PrintGraphParams(G, conf, rank, size);
+      io_t.Restart();
+      DynamicGraphCommunicator CG = DG;
+      if (rank == ROOT) std::cout << "[INFO] copy took time=" << io_t.Elapsed() << std::endl;
 
       // Determine labels
-      std::vector<VertexID> labels(G.GetNumberOfVertices(), 0);
-      G.ForallLocalVertices([&](const VertexID v) {
-        labels[v] = G.GetGlobalID(v);
+      std::vector<VertexID> labels(CG.GetNumberOfVertices(), 0);
+      CG.ForallLocalVertices([&](const VertexID v) {
+        labels[v] = CG.GetGlobalID(v);
       });
       t.Restart();
-      comp.FindComponents(G, labels);
+      comp.FindComponents(CG, labels);
       local_time = t.Elapsed();
 
       // Print labels
-      G.OutputComponents(labels);
+      CG.OutputComponents(labels);
     }
 
     // Gather total time
