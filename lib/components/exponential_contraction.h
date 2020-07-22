@@ -238,7 +238,8 @@ class ExponentialContraction {
       if (global_vertices <= config_.sequential_limit) 
         RunSequentialCC(g);
       else 
-        RunContraction(g);
+        if (config_.use_bfs) RunContractionBFS(g);
+        else RunContractionLP(g);
     }
     if (rank_ == ROOT) {
       std::cout << "[STATUS] |- Running contraction took " 
@@ -272,7 +273,7 @@ class ExponentialContraction {
     });
   }
 
-  void RunContraction(DynamicGraphCommunicator &g) {
+  void RunContractionLP(DynamicGraphCommunicator &g) {
     contraction_timer_.Restart();
     if (rank_ == ROOT) {
       if (iteration_ == 1)
@@ -418,7 +419,172 @@ class ExponentialContraction {
       if (global_vertices <= config_.sequential_limit) 
         RunSequentialCC(g);
       else 
-        RunContraction(g);
+        RunContractionLP(g);
+    }
+  }
+
+  void RunContractionBFS(DynamicGraphCommunicator &g) {
+    contraction_timer_.Restart();
+    if (rank_ == ROOT) {
+      if (iteration_ == 1)
+        std::cout << "[STATUS] |-- Iteration " << iteration_ 
+                  << " [TIME] " << "-" << std::endl;
+      else
+        std::cout << "[STATUS] |-- Iteration " << iteration_ 
+                  << " [TIME] " << iteration_timer_.Elapsed() << std::endl;
+    }
+    iteration_timer_.Restart();
+    
+    // Compute starting times
+    // Set initial parent and payload
+    int active_round = 0;
+    int max_round = 0;
+    std::vector<bool> is_active(g.GetNumberOfLocalVertices(), false);
+    std::exponential_distribution<LPFloat> distribution(config_.beta);
+    std::mt19937
+        generator(static_cast<unsigned int>(rank_ + config_.seed + iteration_ * rng_offset_));
+    g.ForallLocalVertices([&](const VertexID v) {
+      // Set preliminary deviate
+      g.SetParent(v, g.GetGlobalID(v));
+      LPFloat weight = 
+#ifdef TIEBREAK_DEGREE
+        // static_cast<LPFloat>(g.GetVertexDegree(v) / g.GetMaxDegree());
+        // static_cast<LPFloat>(log2(g.GetNumberOfVertices()) / g.GetVertexDegree(v));
+        1.0;
+#else
+        1.0;
+#endif
+      VertexID vertex_round = static_cast<VertexID>(weight * distribution(generator));
+      if (vertex_round > max_round) max_round = vertex_round;
+      // Don't propagate payloads at the beginning
+      // We only want to send payloads if its a vertex turn to do so
+      g.SetVertexPayload(v, {vertex_round,
+                             g.GetVertexLabel(v), 
+#ifdef TIEBREAK_DEGREE
+                             g.GetVertexDegree(v),
+#endif
+                             g.GetVertexRoot(v)}, 
+                         vertex_round == active_round);
+#ifndef NDEBUG
+      std::cout << "[R" << rank_ << ":" << iteration_ << "] update deviate "
+                << g.GetGlobalID(v) << " -> " << g.GetVertexDeviate(v)
+                << std::endl;
+#endif
+    });
+    g.SendAndReceiveGhostVertices();
+    if (rank_ == ROOT) {
+      std::cout << "[STATUS] |-- Computing deviates and starting BFS took " 
+                << "[TIME] " << contraction_timer_.Elapsed() << std::endl;
+    }
+
+    if (rank_ == ROOT)
+      std::cout << "[STATUS] |-- Pick deviates " 
+                << "[TIME] " << iteration_timer_.Elapsed() << std::endl;
+
+    VertexID exchange_rounds = 0;
+    int converged_globally = 0;
+    int local_iterations = 0;
+    Timer round_timer;
+    while (converged_globally == 0) {
+      round_timer.Restart();
+      contraction_timer_.Restart();
+      int converged_locally = 1;
+      // Increase active round to simulate time step
+      active_round++;
+      if (max_round > active_round) converged_locally = 0;
+
+      // Perform update for local vertices
+      // i.e. check if their neighbors started a BFS
+      g.ForallLocalVertices([&](VertexID v) {
+        auto vertex_payload = g.GetVertexMessage(v);
+        VertexID vertex_round = g.GetVertexDeviate(v);
+        bool is_active = vertex_round == active_round;
+        g.ForallNeighbors(v, [&](VertexID w) {
+            VertexID neighbor_round = g.GetVertexDeviate(w);
+            if (neighbor_round + 1 < vertex_round ||
+                (neighbor_round + 1 == vertex_round &&
+                 g.GetVertexLabel(w) < vertex_payload.label_) {
+              g.SetParent(v, g.GetGlobalID(w));
+              smallest_payload = {g.GetVertexDeviate(w) + 1, 
+                                  g.GetVertexLabel(w),
+#ifdef TIEBREADEGREE
+                                  g.GetVertexDegree(w),
+#endif
+                                  g.GetVertexRoot(w)};
+              converged_locally = 0;
+              is_active = true;
+            }
+        });
+        // Vertex will propagate: 
+        // (1) if its active round started 
+        // (2) its neighbor propagated a payload in the previous round
+        g.SetVertexPayload(v, std::move(vertex_payload), is_active);
+      });
+      if (rank_ == ROOT) {
+        std::cout << "[STATUS] |--- Updating payloads took " 
+                  << "[TIME] " << contraction_timer_.Elapsed() << std::endl;
+      }
+
+      contraction_timer_.Restart();
+      MPI_Allreduce(&converged_locally,
+                    &converged_globally,
+                    1,
+                    MPI_INT,
+                    MPI_MIN,
+                    MPI_COMM_WORLD);
+      exchange_rounds++;
+      if (rank_ == ROOT) {
+        std::cout << "[STATUS] |--- Convergence test took " 
+                  << "[TIME] " << contraction_timer_.Elapsed() << std::endl;
+      }
+
+      contraction_timer_.Restart();
+      // Receive variates
+      g.SendAndReceiveGhostVertices();
+      if (rank_ == ROOT) {
+        std::cout << "[STATUS] |--- Exchanging payloads took " 
+                  << "[TIME] " << contraction_timer_.Elapsed() << std::endl;
+      }
+
+      if (rank_ == ROOT) 
+        std::cout << "[STATUS] |--- Round finished " 
+                  << "[TIME] " << round_timer.Elapsed() << std::endl;
+    }
+
+    if (rank_ == ROOT) std::cout << "done propagating... mem " << Utility::GetFreePhysMem() << std::endl;
+
+    contraction_timer_.Restart();
+    // Determine remaining active vertices
+    g.BuildLabelShortcuts();
+    if (rank_ == ROOT) {
+      std::cout << "[STATUS] |-- Building shortcuts took " 
+                << "[TIME] " << contraction_timer_.Elapsed() << std::endl;
+    }
+
+    if (rank_ == ROOT) std::cout << "done shortcutting... mem " << Utility::GetFreePhysMem() << std::endl;
+
+    contraction_timer_.Restart();
+    if (config_.direct_contraction) {
+      exp_contraction_->DirectContraction();
+    } else {
+      exp_contraction_->ExponentialContraction();
+    }
+    if (rank_ == ROOT) {
+      std::cout << "[STATUS] |-- Exponential contraction took " 
+                << "[TIME] " << contraction_timer_.Elapsed() << std::endl;
+    }
+
+    if (rank_ == ROOT) std::cout << "done contraction... mem " << Utility::GetFreePhysMem() << std::endl;
+    OutputStats<DynamicGraphCommunicator>(g);
+
+    // Count remaining number of vertices
+    VertexID global_vertices = g.GatherNumberOfGlobalVertices();
+    if (global_vertices > 0) {
+      iteration_++;
+      if (global_vertices <= config_.sequential_limit) 
+        RunSequentialCC(g);
+      else 
+        RunContractionBFS(g);
     }
   }
 
@@ -481,9 +647,6 @@ class ExponentialContraction {
   }
 
   void DistributeHighDegreeVertices(DynamicGraphCommunicator &g) {
-    // if (rank_ == 0) {
-    //   g.OutputLocal();
-    // }
     // Determine high degree vertices
     std::vector<VertexID> high_degree_vertices;
     VertexID avg_max_deg = Utility::ComputeAverageMaxDegree(g, rank_, size_);
@@ -496,52 +659,6 @@ class ExponentialContraction {
     // Split vertices into stars if they have a high degree
     // SplitHighDegreeVerticesIntoStars(g, avg_max_deg, high_degree_vertices);
   }
-
-  // void SplitHighDegreeVerticesIntoStars(DynamicGraphCommunicator &g,
-  //                                       const VertexID &avg_max_deg,
-  //                                       const std::vector<VertexID> &high_degree_vertices) {
-  //   // Compute offset for IDs for replicated vertices
-  //   VertexID num_global_vertices = g.GatherNumberOfGlobalVertices();
-  //   VertexID vertex_offset = num_global_vertices * (rank_ + size_);
-
-  //   google::dense_hash_map<PEID, VertexBuffer> send_buffers;
-  //   send_buffers.set_empty_key(-1);
-  //   google::dense_hash_map<PEID, VertexBuffer> receive_buffers;
-  //   receive_buffers.set_empty_key(-1);
-
-  //   // Split adjacency list for high degree vertices
-  //   VertexID clamped_avg_max_deg = std::max<VertexID>(avg_max_deg, 2);
-  //   for (const VertexID &v : high_degree_vertices) {
-  //     VertexID v_deg = g.GetVertexDegree(v);
-  //     VertexID num_parts = static_cast<VertexID>(ceil(v_deg / clamped_avg_max_deg));
-  //     std::cout << "R" << rank_ << " split v " << g.GetGlobalID(v) << " deg(v)=" << v_deg << " in " << num_parts << " rounds" << std::endl;
-  //     VertexID part_size = v_deg / num_parts;
-  //     ComputeEdgePartitioning(g, v, num_parts, part_size, vertex_offset, send_buffers);
-  //   }
-
-  //   // Inform neighbors about replication 
-  //   comm_timer_.Restart();
-  //   CommunicationUtility::SparseAllToAll(send_buffers, receive_buffers, rank_, size_, 993);
-  //   comm_time_ += comm_timer_.Elapsed();
-  //   CommunicationUtility::ClearBuffers(send_buffers);
-
-  //   // Insert replicated vertices and local edges
-  //   ProcessAdjLists(g, num_global_vertices, receive_buffers, send_buffers);
-  //   CommunicationUtility::ClearBuffers(receive_buffers);
-
-  //   // Inform neighbors about new vertices
-  //   comm_timer_.Restart();
-  //   CommunicationUtility::SparseAllToAll(send_buffers, receive_buffers, rank_, size_, 993);
-  //   comm_time_ += comm_timer_.Elapsed();
-  //   CommunicationUtility::ClearBuffers(send_buffers);
-
-  //   // Relink edges to new replicated vertices
-  //   ProcessRelinking(g, receive_buffers);
-  //   CommunicationUtility::ClearBuffers(receive_buffers);
-
-  //   // Update interface vertices and neihgboring PEs
-  //   UpdateInterfaceVertices(g);
-  // }
 
   void SplitHighDegreeVerticesIntoTrees(DynamicGraphCommunicator &g,
                                         const VertexID &avg_max_deg,
@@ -623,179 +740,6 @@ class ExponentialContraction {
     ApplyRelinks(g, receive_buffers);
   }
 
-  // void ComputeEdgePartitioning(DynamicGraphCommunicator &g,
-  //                              const VertexID &vertex_id,
-  //                              const VertexID &num_parts,
-  //                              const VertexID &part_size,
-  //                              const VertexID &repl_vertices_id,
-  //                              google::dense_hash_map<PEID, VertexBuffer> &send_buffers) {
-  //   // Temporary vector for storing new local edges 
-  //   std::vector<VertexID> local_edges;
-
-  //   google::dense_hash_map<PEID, std::vector<VertexID>> edges_for_pe;
-  //   edges_for_pe.set_empty_key(-1);
-  //   g.ForallNeighbors(vertex_id, [&](const VertexID w) {
-  //       if (!g.IsLocal(w)) {
-  //         edges_for_pe[g.GetPE(w)].emplace_back(g.GetGlobalID(w));
-  //       }
-  //   });
-  //   
-  //   // Copy hash map to vector
-  //   std::vector<std::pair<PEID, VertexID>> num_edges_for_pe;
-  //   for (const auto &kv : edges_for_pe) {
-  //     PEID pe = kv.first;
-  //     VertexID num_edges = kv.second.size();
-  //     num_edges_for_pe.emplace_back(pe, num_edges);
-  //   }
-
-  //   PEID num_neighboring_pes = edges_for_pe.size();
-  //   std::random_shuffle(num_edges_for_pe.begin(), num_edges_for_pe.end());
-  //   std::sort(num_edges_for_pe.begin(), num_edges_for_pe.end(), [](const auto& lhs, const auto& rhs) {
-  //       return lhs.second > rhs.second;
-  //   });
-
-  //   VertexID repl_vertices_counter = 0;
-  //   VertexID remaining_parts = num_parts;
-  //   // Check if we can send single large part to PE
-  //   for (const auto &kv : num_edges_for_pe) {
-  //     PEID pe = kv.first;
-  //     if (pe >= size_) {
-  //       std::cout << "R" << rank_ << " This shouldn't happen: Invalid target (initial partition) PE R" << pe << std::endl;
-  //     }
-  //     VertexID num_edges = kv.second;
-  //     if (num_edges >= part_size) {
-  //       send_buffers[pe].emplace_back(g.GetGlobalID(vertex_id));
-  //       send_buffers[pe].emplace_back(repl_vertices_id + repl_vertices_counter);
-  //       local_edges.emplace_back(repl_vertices_id + repl_vertices_counter);
-  //       local_edges.emplace_back(pe);
-  //       repl_vertices_counter++;
-  //       for (const auto &v : edges_for_pe[pe]) {
-  //         send_buffers[pe].emplace_back(std::move(v));
-  //         send_buffers[pe].emplace_back(pe);
-  //       }
-  //       remaining_parts -= floor(num_edges / part_size);
-  //       edges_for_pe[pe].clear();
-  //     }
-  //   }
-
-  //   // Distribute the remaining parts greedily between neighboring PEs
-  //   while (remaining_parts > 0) {
-  //     // Greedily select PE with most remaining edges
-  //     PEID current_target_pe = std::numeric_limits<PEID>::max();
-  //     int remaining_part_size = part_size;
-  //     for (const auto &kv : num_edges_for_pe) {
-  //       PEID pe = kv.first;
-  //       PEID num_edges = kv.second;
-  //       if (num_edges > 0 && remaining_part_size > 0) {
-  //         // Set current PE as target for following messages
-  //         if (current_target_pe >= size_) {
-  //           current_target_pe = pe;
-  //           send_buffers[current_target_pe].emplace_back(g.GetGlobalID(vertex_id));
-  //           send_buffers[current_target_pe].emplace_back(repl_vertices_id + repl_vertices_counter);
-  //           if (current_target_pe >= size_) {
-  //             std::cout << "R" << rank_ << " This shouldn't happen: Invalid target PE R" << current_target_pe << std::endl;
-  //           }
-  //           local_edges.emplace_back(repl_vertices_id + repl_vertices_counter);
-  //           local_edges.emplace_back(current_target_pe);
-  //           repl_vertices_counter++;
-  //         }
-  //         // Add edges in current block
-  //         for (const auto &v : edges_for_pe[pe]) {
-  //           send_buffers[current_target_pe].emplace_back(std::move(v));
-  //           send_buffers[current_target_pe].emplace_back(pe);
-  //           if (current_target_pe >= size_) {
-  //             std::cout << "R" << rank_ << " This shouldn't happen: Invalid target PE R" << current_target_pe << std::endl;
-  //           }
-  //         }
-  //         remaining_part_size -= num_edges; 
-  //         if (remaining_part_size <= 0) {
-  //           PEID current_target_pe = std::numeric_limits<PEID>::max();
-  //           // First step guarantees that edgelists are now smaller than a part
-  //           remaining_parts--;
-  //         }
-  //         edges_for_pe[pe].clear();
-  //       }
-  //     }
-  //   }
-  //   edges_for_pe.clear();
-
-  //   // Update the adjacency list of the original (replicated) vertex
-  //   g.RemoveAllEdges(vertex_id);
-  //   for (VertexID i = 0; i < local_edges.size(); i += 2) {
-  //     VertexID target =  local_edges[i];
-  //     VertexID target_pe =  local_edges[i+1];
-  //     g.AddGhostVertex(target, target_pe);
-  //     g.AddEdge(vertex_id, target, target_pe);
-  //   }
-  // }
-
-  // void ProcessAdjLists(DynamicGraphCommunicator &g, 
-  //                      const VertexID &offset,
-  //                      google::dense_hash_map<PEID, VertexBuffer> &receive_buffer,
-  //                      google::dense_hash_map<PEID, VertexBuffer> &send_buffer) {
-  //   // Clear send buffers
-  //   for (const auto &kv : send_buffer) {
-  //     PEID pe = kv.first;
-  //     send_buffer[pe].clear();
-  //   }
-  //   send_buffer.clear();
-  //   // Process incoming vertices/edges
-  //   for (const auto &kv : receive_buffer) {
-  //     PEID pe = kv.first;
-  //     auto& buffer = kv.second;
-  //     if (buffer.size() > 0) {
-  //       VertexID source, copy_vertex;
-  //       for (VertexID i = 0; i < buffer.size(); i+=2) {
-  //         // New source
-  //         // Note: This might not work if number of global vertices is smaller than number of PEs
-  //         if (buffer[i+1] >= offset) {
-  //           source = buffer[i];
-  //           copy_vertex = buffer[i+1];
-  //           VertexID local_copy_id = g.AddVertex(copy_vertex);
-  //           replicated_vertices_[source] = copy_vertex;
-  //           g.AddEdge(local_copy_id, source, pe);
-  //         } else {
-  //           VertexID target = buffer[i];
-  //           VertexID target_pe = buffer[i+1];
-  //           // Neighbor is local vertex
-  //           if (target_pe == rank_) {
-  //             g.RelinkEdge(g.GetLocalID(target), source, copy_vertex, rank_);
-  //           // Neighbor is remote vertex
-  //           } else {
-  //             g.AddGhostVertex(target, target_pe);
-  //             // Target PE needs to reroute (target, source) from (original) PE to (target, copy) on sender PE
-  //             send_buffer[target_pe].emplace_back(target);
-  //             send_buffer[target_pe].emplace_back(source);
-  //             send_buffer[target_pe].emplace_back(copy_vertex);
-  //           }
-  //           g.AddEdge(g.GetLocalID(copy_vertex), target, target_pe);
-  //         }
-  //       }
-  //     }
-  //   }
-  // }
-
-  // void ProcessRelinking(DynamicGraphCommunicator &g, 
-  //                     google::dense_hash_map<PEID, VertexBuffer> &receive_buffer) {
-  //   // Process incoming vertices/edges
-  //   for (const auto &kv : receive_buffer) {
-  //     PEID pe = kv.first;
-  //     auto& buffer = kv.second;
-  //     if (buffer.size() > 0) {
-  //       for (VertexID i = 0; i < buffer.size(); i+=3) {
-  //         VertexID source = buffer[i];
-  //         VertexID old_target = buffer[i+1];
-  //         VertexID new_target = buffer[i+2];
-
-  //         if (!g.IsGhostFromGlobal(new_target)) {
-  //           g.AddGhostVertex(new_target, pe);
-  //         }
-  //         g.RelinkEdge(g.GetLocalID(source), old_target, new_target, pe);
-  //       }
-  //     }
-  //   }
-  // }
-
   void ComputeInitialBinomialPartitioning(DynamicGraphCommunicator &g,
                                           const std::vector<VertexID> &high_degree_vertices,
                                           google::dense_hash_map<VertexID, PEID> &parents,
@@ -870,9 +814,6 @@ class ExponentialContraction {
               if (current_target_pe >= size_) {
                 std::cout << "R" << rank_ << " This shouldn't happen: Invalid target (down propagation) PE R" << current_target_pe << std::endl;
               }
-              // if (rank_ == 0 || rank_ == 2 || rank_ == 1) {
-              //   std::cout << "R" << rank_ << " propagate (" << replicate << " (repl of " << source << ")," << target << ") target(pe)=" << target_pe << " to R" << current_target_pe << std::endl;
-              // }
               leaves.erase(source);
               // TODO: -- or -= 2?
               message_size -= 2;
@@ -880,9 +821,6 @@ class ExponentialContraction {
               local_edges[source].emplace_back(replicate);
               local_edges[source].emplace_back(target);
               local_edges[source].emplace_back(target_pe);
-              // if (rank_ == 0 || rank_ == 2 || rank_ == 1) {
-              //   std::cout << "R" << rank_ << " add (" << replicate << " (repl of " << source << ")," << target << ") target(pe)=" << target_pe << " to local edges (during propagation)" << std::endl;
-              // }
             }
             // Mark elements for deletion
             edges[i] = std::numeric_limits<PEID>::max() - 1;
@@ -905,9 +843,6 @@ class ExponentialContraction {
               if (current_target_pe >= size_) {
                 std::cout << "R" << rank_ << " This shouldn't happen: Invalid target (down propagation) PE R" << current_target_pe << std::endl;
               }
-              // if (rank_ == 0 || rank_ == 2 || rank_ == 1) {
-              //   std::cout << "R" << rank_ << " propagate (" << replicate << " (repl of " << source << ")," << target << ") target(pe)=" << target_pe << " to R" << current_target_pe << std::endl;
-              // }
               leaves.erase(source);
             }
             // Remove processed edges from buffer
@@ -924,9 +859,6 @@ class ExponentialContraction {
             local_edges[source].emplace_back(replicate);
             local_edges[source].emplace_back(edges[i]);
             local_edges[source].emplace_back(edges[i + 1]);
-            // if (rank_ == 0 || rank_ == 2 || rank_ == 1) {
-            //   std::cout << "R" << rank_ << " add (" << replicate << " (repl of " << source << ")," << edges[i] << ") target(pe)=" << edges[i+1] << " to local edges (remaining local edge)" << std::endl;
-            // }
           }
           edges.clear();
         }
@@ -943,9 +875,6 @@ class ExponentialContraction {
         auto &edges = kv.second;
 
         // Group messages based on target vertices
-        // if (rank_ == 6 || rank_ == 10) {
-        //   std::cout << "R" << rank_ << " recv " << edges.size() / 4 << " edges from R" << sender_pe << std::endl;
-        // }
         for (VertexID i = 0; i < edges.size(); i += 4) {
           VertexID source = edges[i];
           VertexID parent_replicate = edges[i + 1];
@@ -957,9 +886,6 @@ class ExponentialContraction {
           if (replicated_vertices_.find(source) == end(replicated_vertices_)) {
             VertexID replicate = replicate_offset + replicate_counter++;
             replicated_vertices_[source] = replicate;
-            // if (rank_ == 6 || rank_ == 10) {
-            //   std::cout << "R" << rank_ << " add replicate " << replicate << " of v " << source << " parent(replicate)=" << sender_pe << std::endl;
-            // }
             g.AddVertex(replicate);
             parents[replicate] = sender_pe;
             // Add ghost vertex if parent replicate does not exist
@@ -970,13 +896,7 @@ class ExponentialContraction {
             parent_edges[source].emplace_back(replicate);
             parent_edges[source].emplace_back(parent_replicate);
             parent_edges[source].emplace_back(sender_pe);
-            // if (rank_ == 6 || rank_ == 10) {
-            //   std::cout << "R" << rank_ << " add (" << replicate << "," << parent_replicate << ") target(pe)=" << sender_pe << " to local edges (during propagation)" << std::endl;
-            // }
             g.AddEdge(g.GetLocalID(replicate), parent_replicate, sender_pe);
-            // if (rank_ == 6 || rank_ == 10) {
-            //   std::cout << "R" << rank_ << " add edge (" << replicate << "," << parent_replicate << ") pe(target)=" << sender_pe << std::endl;
-            // }
           }
 
           // Add messages to propagation buffer
@@ -1076,9 +996,6 @@ class ExponentialContraction {
           if (parent_pe >= size_) {
             std::cout << "R" << rank_ << " This shouldn't happen: Invalid target (up propagation) PE R" << parent_pe << std::endl;
           }
-          // if (rank_ == 0 || rank_ == 2 || rank_ == 1) {
-          //   std::cout << "R" << rank_ << " (up-)propagate (" << edges[i] << " (repl of " << source << ")," << edges[i + 1] << ") pe(source)=" << edges[i + 2] << " back to R" << parent_pe << " via local repl " << replicate << std::endl;
-          // }
         }
         edges.clear();
       }
@@ -1095,9 +1012,6 @@ class ExponentialContraction {
         auto &edges = kv.second;
 
         // Group messages based on target vertices
-        // if (rank_ == 6 || rank_ == 10) {
-        //   std::cout << "R" << rank_ << " recv " << edges.size() / 4 << " edges from " << sender_pe << std::endl;
-        // }
         for (VertexID i = 0; i < edges.size(); i += 5) {
           VertexID source = edges[i];
           VertexID replicate = source;
@@ -1116,9 +1030,6 @@ class ExponentialContraction {
               g.AddGhostVertex(child_replicate, sender_pe);
             }
             g.AddEdge(g.GetLocalID(replicate), child_replicate, sender_pe);
-            // if (rank_ == 6 || rank_ == 10) {
-            //   std::cout << "R" << rank_ << " add edge (" << replicate << "," << child_replicate << ") pe(target)=" << sender_pe << std::endl;
-            // }
           }
 
           // Store mapping of edge to PE if root
@@ -1187,9 +1098,6 @@ class ExponentialContraction {
           g.AddGhostVertex(target, target_pe);
         }
         g.AddEdge(g.GetLocalID(replicate), target, target_pe);
-        // if (rank_ == 6 || rank_ == 10) {
-        //   std::cout << "R" << rank_ << " add edge (" << replicate << "," << target << ") pe(target)=" << target_pe << std::endl;
-        // }
       }
     }
   }
@@ -1216,16 +1124,10 @@ class ExponentialContraction {
           if (target_pe >= size_) {
             std::cout << "R" << rank_ << " This shouldn't happen: Invalid target (first round) PE R" << target_pe << std::endl;
           }
-          // if (rank_ == 6 || rank_ == 10) {
-          //   std::cout << "R" << rank_ << " send relink (" << target << "," << source << ") -> (" << target << "," << replicate << ") pe(target)=" << rank_ << " to R" << target_pe << std::endl;
-          // }
         } else {
           if (edge_distribution.find(target) == edge_distribution.end()
               || (edge_distribution.find(target) != edge_distribution.end()
                 && edge_distribution[target].find(source) == edge_distribution[target].end())) {
-            // if (rank_ == 6 || rank_ == 10) {
-            //   std::cout << "R" << rank_ << " local relink (" << target << "," << source << ") -> (" << target << "," << replicate << ") pe(target)=" << target_pe << std::endl;
-            // }
             bool relink_success = g.RelinkEdge(g.GetLocalID(target), source, replicate, rank_);
             if (!relink_success) {
               std::cout << "R" << rank_ << " This shouldn't happen: Invalid (first round) relink (" << target << "," << source << ") -> (" << target << "," << replicate << ") from R" << rank_ << " isLocal(target)=" << g.IsLocalFromGlobal(target) << " isLocal(source)=" << g.IsLocalFromGlobal(source) << " isLocal(replicate)=" << g.IsLocalFromGlobal(replicate) << std::endl;
@@ -1234,9 +1136,6 @@ class ExponentialContraction {
             send_buffers[rank_].emplace_back(target);
             send_buffers[rank_].emplace_back(source);
             send_buffers[rank_].emplace_back(replicate);
-            // if (rank_ == 6 || rank_ == 10) {
-            //   std::cout << "R" << rank_ << " send relink (" << target << "," << source << ") -> (" << target << "," << replicate << ") pe(target)=" << rank_ << " to R" << rank_ << std::endl;
-            // }
           }
         }
       }
@@ -1268,9 +1167,6 @@ class ExponentialContraction {
         // Check if both endpoints have been replicated
         if (edge_distribution.find(source) != edge_distribution.end() 
             && (edge_distribution[source].find(old_target) != edge_distribution[source].end())) {
-            // if (rank_ == 6 || rank_ == 10) {
-            //   std::cout << "R" << rank_ << " answer relink reply (" << source << "," << new_target << ") from R" << target_pe << " with (" << edge_distribution[source][old_target].first << "," << new_target << ") pe(source)=" << edge_distribution[source][old_target].second << " to R" << target_pe << std::endl;
-            // }
             send_buffers[target_pe].emplace_back(edge_distribution[source][old_target].first);
             send_buffers[target_pe].emplace_back(edge_distribution[source][old_target].second);
             send_buffers[target_pe].emplace_back(old_target);
@@ -1284,9 +1180,6 @@ class ExponentialContraction {
           if (!(g.IsLocalFromGlobal(new_target) || g.IsGhostFromGlobal(new_target))) {
             g.AddGhostVertex(new_target, target_pe);
           }
-          // if (rank_ == 6 || rank_ == 10) {
-          //   std::cout << "R" << rank_ << " answer relink (" << source << "," << old_target << ") -> (" << source << "," << new_target << ") pe(target)=" << target_pe << std::endl;
-          // }
           bool relink_success = g.RelinkEdge(g.GetLocalID(source), old_target, new_target, target_pe);
           if (!relink_success) {
             std::cout << "R" << rank_ << " This shouldn't happen: Invalid (local answer) relink (" << source << "," << old_target << ") -> (" << source << "," << new_target << ") from R" << target_pe << std::endl;
@@ -1351,9 +1244,6 @@ class ExponentialContraction {
         if (!(g.IsLocalFromGlobal(new_target) || g.IsGhostFromGlobal(new_target))) {
           g.AddGhostVertex(new_target, sender_pe);
         }
-        // if (rank_ == 6 || rank_ == 10) {
-        //   std::cout << "R" << rank_ << " relink (" << source << "," << old_target << ") -> (" << source << "," << new_target << ") pe(target)=" << sender_pe << std::endl;
-        // }
         bool relink_success = g.RelinkEdge(g.GetLocalID(source), old_target, new_target, sender_pe);
         if (!relink_success) {
           std::cout << "R" << rank_ << " This shouldn't happen: Invalid (second round) relink (" << source << "," << old_target << ") -> (" << source << "," << new_target << ") from R" << sender_pe << std::endl;

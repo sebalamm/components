@@ -49,7 +49,7 @@ class VertexCommunicator {
     receive_buffers_.set_deleted_key(-1);
     neighborhood_sample_.set_empty_key(-1);
     neighborhood_sample_.set_deleted_key(-1);
-    message_tag_ = static_cast<unsigned int>(100 * size_);
+    message_tag_ = static_cast<unsigned int>(39 * size_);
   }
   virtual ~VertexCommunicator() {};
 
@@ -84,7 +84,7 @@ class VertexCommunicator {
   void SendAndReceiveGhostVertices() {
     comm_timer_.Restart();
     CommunicationUtility::SparseAllToAll(send_buffers_, receive_buffers_, 
-                                         rank_, size_, message_tag_++);
+                                         rank_, size_, message_tag_);
     comm_time_ += comm_timer_.Elapsed();
     CommunicationUtility::ClearBuffers(send_buffers_);
     UpdateGhostVertices();

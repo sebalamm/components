@@ -69,6 +69,9 @@ void ParseParameters(int argn, char **argv,
   // Vertex replication
   conf.replicate_high_degree = args.IsSet("replicate");
 
+  // BFS
+  conf.use_bfs = args.IsSet("bfs");
+
   // Generator
   conf.gen = args.Get<std::string>("gen", "null");
   conf.gen_k = args.Get<PEID>("k", 0);

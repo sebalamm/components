@@ -55,6 +55,8 @@ struct Config {
   unsigned int prop_iterations{};
   // Decomposition
   double beta{};
+  // BFS
+  bool use_bfs;
   // Contraction
   bool use_contraction;
   bool direct_contraction;
