@@ -112,10 +112,10 @@ class CAGBuilder {
 
     contraction_timer_.Restart();
     ExchangeGhostContractionMapping();
-    // if (rank_ == ROOT) {
-    std::cout << "[STATUS] |-- Exchanging ghost contraction mapping took " 
-              << "[TIME] " << contraction_timer_.Elapsed() << std::endl;
-    // }
+    if (rank_ == ROOT) {
+      std::cout << "[STATUS] |-- R" << rank_ << " Exchanging ghost contraction mapping took " 
+                << "[TIME] " << contraction_timer_.Elapsed() << std::endl;
+    }
     
     contraction_timer_.Restart();
     GenerateLocalContractionEdges();
@@ -184,8 +184,8 @@ class CAGBuilder {
     IdentifyLargestInterfaceComponents();
     AddComponentMessages();
 
-    std::cout << "[STATUS] |--- Filling buffers took " 
-              << "[TIME] " << exchange_timer.Elapsed() << std::endl;
+    // std::cout << "[STATUS] |--- R" << rank_ << " Filling buffers took " 
+    //           << "[TIME] " << exchange_timer.Elapsed() << std::endl;
 
     exchange_timer.Restart();
     google::dense_hash_map<PEID, VertexID> largest_component; 
@@ -202,17 +202,19 @@ class CAGBuilder {
     comm_time_ += comm_timer_.Elapsed();
     CommunicationUtility::ClearBuffers(send_buffers_);
 
-    std::cout << "[STATUS] |--- Sparse exchange took " 
-              << "[TIME] " << exchange_timer.Elapsed() << std::endl;
+    // std::cout << "[STATUS] |--- Sparse exchange took " 
+    //           << "[TIME] " << exchange_timer.Elapsed() << std::endl;
 
     exchange_timer.Restart();
     HandleMessages(largest_component, vertex_message);
     CommunicationUtility::ClearBuffers(receive_buffers_);
+    // std::cout << "[STATUS] |--- Message handling took " 
+    //           << "[TIME] " << exchange_timer.Elapsed() << std::endl;
 
+    exchange_timer.Restart();
     ApplyUpdatesToGhostVertices(largest_component, vertex_message);
-
-    std::cout << "[STATUS] |--- Local updates took " 
-              << "[TIME] " << exchange_timer.Elapsed() << std::endl;
+    // std::cout << "[STATUS] |--- R" << rank_ << " Local updates took " 
+    //           << "[TIME] " << exchange_timer.Elapsed() << std::endl;
   }
 
   void IdentifyLargestInterfaceComponents() {
@@ -268,34 +270,50 @@ class CAGBuilder {
     google::dense_hash_map<PEID, google::sparse_hash_set<VertexID>> unique_neighbors;
     unique_neighbors.set_empty_key(-1);
     unique_neighbors.set_deleted_key(-1);
+    google::dense_hash_set<VertexID> targets;
+    targets.set_empty_key(-1);
+    targets.set_deleted_key(-1);
     VertexID buffer_size = 0;
+    VertexID num_checks = 0;
+    VertexID num_edges = 0;
+    VertexID messages_for_vertex = 0;
+    VertexID max_messages = 0;
     g_.ForallLocalVertices([&](const VertexID v) {
       if (g_.IsInterface(v)) {
         google::dense_hash_set<PEID> receiving_pes;
         receiving_pes.set_empty_key(-1);
         receiving_pes.set_deleted_key(-1);
+        messages_for_vertex = 0;
         g_.ForallNeighbors(v, [&](const VertexID w) {
           if (!g_.IsLocal(w)) {
             PEID target_pe = g_.GetPE(w);
             VertexID contraction_vertex = g_.GetContractionVertex(v);
             VertexID largest_component = send_buffers_[target_pe][1];
+            num_edges++;
             // Only send message if not part of largest component
             if (contraction_vertex != largest_component) {
               // Avoid duplicates by hashing the message
-              VertexID comp_pair = pair(w, g_.GetContractionVertex(v));
-              if (unique_neighbors[target_pe].find(comp_pair) == end(unique_neighbors[target_pe]) &&
-                  receiving_pes.find(target_pe) == end(receiving_pes)) {
+              VertexID comp_pair = pair(w, contraction_vertex);
+              num_checks++;
+              if (targets.find(w) == targets.end()) {
+                targets.insert(w);
+              }
+              if (unique_neighbors[target_pe].find(comp_pair) == end(unique_neighbors[target_pe]) 
+                && receiving_pes.find(target_pe) == end(receiving_pes)) {
                 unique_neighbors[target_pe].insert(comp_pair);
                 receiving_pes.insert(target_pe);
                 send_buffers_[target_pe].push_back(g_.GetGlobalID(v));
                 send_buffers_[target_pe].push_back(contraction_vertex);
+                messages_for_vertex++;
                 buffer_size++;
               }
             }
           }
         });
+        if (messages_for_vertex > max_messages) max_messages = messages_for_vertex;
       }
     });
+    // std::cout << "R" << rank_ << " num messages sent " << buffer_size << " checks " << num_checks << " edges " << num_edges << " (read=" << g_.GetNumberOfEdges() << ", cut=" << g_.GetNumberOfCutEdges() << ") unique target " << targets.size() << " max messages " << max_messages << std::endl;
   }
 
   void HandleMessages(google::dense_hash_map<PEID, VertexID> &largest_component, 
@@ -327,31 +345,29 @@ class CAGBuilder {
     });
 
     g_.ForallLocalVertices([&](const VertexID v) {
-      google::dense_hash_map<PEID, VertexID> component_id;
-      component_id.set_empty_key(-1);
-      component_id.set_deleted_key(-1);
       if (g_.IsInterface(v)) {
-        // Store largest component for each PE
-        for (auto &kv : largest_component) {
-          component_id[kv.first] = kv.second;
-        }
+        google::dense_hash_map<PEID, VertexID> component_id;
+        component_id.set_empty_key(-1);
+        component_id.set_deleted_key(-1);
         g_.ForallNeighbors(v, [&](const VertexID w) {
           if (g_.IsGhost(w)) {
             PEID pe = g_.GetPE(w);
             VertexID cid = g_.GetContractionVertex(w);
-            // There are two adjacent vertices on the same PE with different component IDs?
-            if (cid != component_id[pe] && cid != largest_component[pe]) {
+            if (component_id.find(pe) == component_id.end()) {
               component_id[pe] = cid;
+            } else {
+              // There are two adjacent vertices on the same PE with different component IDs?
+              if (cid != component_id[pe] && cid != largest_component[pe]) {
+                component_id[pe] = cid;
+              }
             }
           }
         });
+        // Apply updates
         g_.ForallNeighbors(v, [&](const VertexID w) {
           if (g_.IsGhost(w)) {
             PEID pe = g_.GetPE(w);
-            VertexID cid = g_.GetContractionVertex(w);
-            if (cid != component_id[pe]) {
-              g_.SetContractionVertex(w, component_id[pe]);
-            }
+            g_.SetContractionVertex(w, component_id[pe]);
           }
         });
       }

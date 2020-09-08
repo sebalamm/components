@@ -58,6 +58,7 @@ class ExponentialContraction {
   void FindComponents(GraphType &g, std::vector<VertexID> &g_labels) {
     rng_offset_ = size_ + config_.seed;
     contraction_timer_.Restart();
+
     if constexpr (std::is_same<GraphType, StaticGraph>::value) {
       FindLocalComponents(g, g_labels);
       if (rank_ == ROOT) {
@@ -79,8 +80,6 @@ class ExponentialContraction {
 
         if (config_.replicate_high_degree) {
           contraction_timer_.Restart();
-          // MPI_Barrier(MPI_COMM_WORLD);
-          // cag.OutputLocal();
           DistributeHighDegreeVertices(cag);
           OutputStats<DynamicGraphCommunicator>(cag);
           if (rank_ == ROOT) {
@@ -439,7 +438,6 @@ class ExponentialContraction {
     // Set initial parent and payload
     int active_round = 0;
     int max_round = 0;
-    std::vector<bool> is_active(g.GetNumberOfLocalVertices(), false);
     std::exponential_distribution<LPFloat> distribution(config_.beta);
     std::mt19937
         generator(static_cast<unsigned int>(rank_ + config_.seed + iteration_ * rng_offset_));
@@ -481,45 +479,80 @@ class ExponentialContraction {
       std::cout << "[STATUS] |-- Pick deviates " 
                 << "[TIME] " << iteration_timer_.Elapsed() << std::endl;
 
+    std::cout << "[STATUS] |-- Max round " << max_round
+              << " [TIME] " << iteration_timer_.Elapsed() << std::endl;
+
     VertexID exchange_rounds = 0;
     int converged_globally = 0;
     int local_iterations = 0;
     Timer round_timer;
+    google::dense_hash_set<VertexID> active_vertices; 
+    active_vertices.set_empty_key(-1);
+    active_vertices.set_deleted_key(-1);
+    VertexID num_active = 0;
     while (converged_globally == 0) {
       round_timer.Restart();
       contraction_timer_.Restart();
       int converged_locally = 1;
       // Increase active round to simulate time step
-      active_round++;
-      if (max_round > active_round) converged_locally = 0;
+      if (max_round > active_round 
+          && num_active < g.GetNumberOfVertices()) 
+        converged_locally = 0;
 
-      // Perform update for local vertices
-      // i.e. check if their neighbors started a BFS
-      g.ForallLocalVertices([&](VertexID v) {
-        auto vertex_payload = g.GetVertexMessage(v);
+      // Mark vertices active if their deviate (starting time) is the current round
+      g.ForallVertices([&](VertexID v) {
         VertexID vertex_round = g.GetVertexDeviate(v);
-        bool is_active = vertex_round == active_round;
-        g.ForallNeighbors(v, [&](VertexID w) {
-            VertexID neighbor_round = g.GetVertexDeviate(w);
-            if (neighbor_round + 1 < vertex_round ||
-                (neighbor_round + 1 == vertex_round &&
-                 g.GetVertexLabel(w) < vertex_payload.label_) {
-              g.SetParent(v, g.GetGlobalID(w));
-              smallest_payload = {g.GetVertexDeviate(w) + 1, 
-                                  g.GetVertexLabel(w),
-#ifdef TIEBREADEGREE
-                                  g.GetVertexDegree(w),
-#endif
-                                  g.GetVertexRoot(w)};
-              converged_locally = 0;
-              is_active = true;
-            }
-        });
-        // Vertex will propagate: 
-        // (1) if its active round started 
-        // (2) its neighbor propagated a payload in the previous round
-        g.SetVertexPayload(v, std::move(vertex_payload), is_active);
+        if (vertex_round == active_round && active_vertices.find(v) == active_vertices.end()) {
+          active_vertices.insert(v);
+          num_active++;
+        }
       });
+
+      // Iterate over currently active vertices (including ghosts)
+      google::dense_hash_map<VertexID, VertexPayload> updated_payloads; 
+      updated_payloads.set_empty_key(-1);
+      updated_payloads.set_deleted_key(-1);
+      for (const VertexID &v : active_vertices) {
+        // Iterate over neighborhood and look for non-active vertices
+        g.ForallNeighbors(v, [&](VertexID w) {
+          // Non-active neighbor
+          if (active_vertices.find(w) == active_vertices.end()) {
+            // Local neighbor (no message)
+            // If the neighbor is a ghost, the other PE takes care of it after receiving the payload in the last round
+            auto vertex_payload = (updated_payloads.find(w) == updated_payloads.end()) ? 
+                                    g.GetVertexMessage(w) : updated_payloads[w];
+            if (g.IsLocal(w)) {
+              // Neighbor might get more than one update
+              // Choose min for now
+              if (g.GetVertexDeviate(v) + 1 < vertex_payload.deviate_ ||
+                    (g.GetVertexDeviate(v) + 1 == vertex_payload.deviate_ &&
+                     g.GetVertexLabel(v) < vertex_payload.label_)) {
+                g.SetParent(w, g.GetGlobalID(v));
+                vertex_payload = {g.GetVertexDeviate(v) + 1,
+                                  g.GetVertexLabel(v),
+#ifdef TIEBREAK_DEGREE
+                                  g.GetVertexDegree(v),
+#endif
+                                  g.GetVertexRoot(v)};
+                converged_locally = 0;
+                // Delay inserting the neighbor into active vertices and sending the payload
+                updated_payloads[w] = std::move(vertex_payload);
+              }
+            } 
+          }
+        });
+      }
+
+      // Remove previously active vertices (did propagate already)
+      active_vertices.clear();
+
+      // Activate updated vertices and set payloads
+      for (auto &kv : updated_payloads) {
+        active_vertices.insert(kv.first);
+        num_active++;
+        g.SetVertexPayload(kv.first, std::move(kv.second), true);
+      }
+
       if (rank_ == ROOT) {
         std::cout << "[STATUS] |--- Updating payloads took " 
                   << "[TIME] " << contraction_timer_.Elapsed() << std::endl;
@@ -546,6 +579,7 @@ class ExponentialContraction {
                   << "[TIME] " << contraction_timer_.Elapsed() << std::endl;
       }
 
+      active_round++;
       if (rank_ == ROOT) 
         std::cout << "[STATUS] |--- Round finished " 
                   << "[TIME] " << round_timer.Elapsed() << std::endl;
