@@ -17,7 +17,6 @@ StaticGraphCommunicator::~StaticGraphCommunicator() {
 }
 
 void StaticGraphCommunicator::ResetCommunicator() {
-  delete ghost_comm_;
   ghost_comm_ = new VertexCommunicator<StaticGraphCommunicator>(rank_, size_);
   ghost_comm_->SetGraph(this);
 }

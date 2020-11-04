@@ -72,6 +72,7 @@ class ExponentialContraction {
           contraction(g, g_labels, rank_, size_);
         auto cag 
           = contraction.BuildComponentAdjacencyGraph<DynamicGraphCommunicator>();
+        cag.ResetCommunicator();
         OutputStats<DynamicGraphCommunicator>(cag);
         if (rank_ == ROOT) {
           std::cout << "[STATUS] |- Building cag took " 
@@ -135,6 +136,7 @@ class ExponentialContraction {
           second_contraction(cag, cag_labels, rank_, size_);
         auto ccag 
           = second_contraction.BuildComponentAdjacencyGraph<DynamicGraphCommunicator>();
+        ccag.ResetCommunicator();
         OutputStats<DynamicGraphCommunicator>(ccag);
         if (rank_ == ROOT) {
           std::cout << "[STATUS] |- Building second cag took " 
@@ -191,7 +193,12 @@ class ExponentialContraction {
         RemoveReplicatedVertices(g);
       }
 
+      google::sparse_hash_map<VertexID, VertexID> comp_sizes;
       g.ForallLocalVertices([&](const VertexID v) {
+          if (comp_sizes.find(g.GetVertexLabel(v)) == comp_sizes.end()) {
+            comp_sizes[g.GetVertexLabel(v)] = 0;
+          }
+          comp_sizes[g.GetVertexLabel(v)]++;
           g_labels[v] = g.GetVertexLabel(v);
       });
     }
@@ -283,7 +290,7 @@ class ExponentialContraction {
                   << " [TIME] " << iteration_timer_.Elapsed() << std::endl;
     }
     iteration_timer_.Restart();
-    
+
     std::exponential_distribution<LPFloat> distribution(config_.beta);
     std::mt19937
         generator(static_cast<unsigned int>(rank_ + config_.seed + iteration_ * rng_offset_));
@@ -479,9 +486,6 @@ class ExponentialContraction {
       std::cout << "[STATUS] |-- Pick deviates " 
                 << "[TIME] " << iteration_timer_.Elapsed() << std::endl;
 
-    std::cout << "[STATUS] |-- Max round " << max_round
-              << " [TIME] " << iteration_timer_.Elapsed() << std::endl;
-
     VertexID exchange_rounds = 0;
     int converged_globally = 0;
     int local_iterations = 0;
@@ -500,6 +504,7 @@ class ExponentialContraction {
         converged_locally = 0;
 
       // Mark vertices active if their deviate (starting time) is the current round
+      // This includes ghost vertices
       g.ForallVertices([&](VertexID v) {
         VertexID vertex_round = g.GetVertexDeviate(v);
         if (vertex_round == active_round && active_vertices.find(v) == active_vertices.end()) {
@@ -515,42 +520,32 @@ class ExponentialContraction {
       for (const VertexID &v : active_vertices) {
         // Iterate over neighborhood and look for non-active vertices
         g.ForallNeighbors(v, [&](VertexID w) {
-          // Non-active neighbor
-          if (active_vertices.find(w) == active_vertices.end()) {
-            // Local neighbor (no message)
-            // If the neighbor is a ghost, the other PE takes care of it after receiving the payload in the last round
+          // Local neighbor (no message)
+          // If the neighbor is a ghost, the other PE takes care of it after receiving the payload in the last round
+          if (g.IsLocal(w) && active_vertices.find(w) == active_vertices.end()) {
             auto vertex_payload = (updated_payloads.find(w) == updated_payloads.end()) ? 
                                     g.GetVertexMessage(w) : updated_payloads[w];
-            if (g.IsLocal(w)) {
-              // Neighbor might get more than one update
-              // Choose min for now
-              if (g.GetVertexDeviate(v) + 1 < vertex_payload.deviate_ ||
-                    (g.GetVertexDeviate(v) + 1 == vertex_payload.deviate_ &&
-                     g.GetVertexLabel(v) < vertex_payload.label_)) {
-                g.SetParent(w, g.GetGlobalID(v));
-                vertex_payload = {g.GetVertexDeviate(v) + 1,
-                                  g.GetVertexLabel(v),
+            // Neighbor might get more than one update
+            // Choose min for now
+            if (g.GetVertexDeviate(v) + 1 < vertex_payload.deviate_) { 
+              g.SetParent(w, g.GetGlobalID(v));
+              vertex_payload = {g.GetVertexDeviate(v) + 1,
+                                g.GetVertexLabel(v),
 #ifdef TIEBREAK_DEGREE
-                                  g.GetVertexDegree(v),
+                                g.GetVertexDegree(v),
 #endif
-                                  g.GetVertexRoot(v)};
-                converged_locally = 0;
-                // Delay inserting the neighbor into active vertices and sending the payload
-                updated_payloads[w] = std::move(vertex_payload);
-              }
-            } 
-          }
+                                g.GetVertexRoot(v)};
+              converged_locally = 0;
+              // Delay inserting the neighbor into active vertices and sending the payload
+              updated_payloads[w] = vertex_payload;
+            }
+          } 
         });
       }
 
-      // Remove previously active vertices (did propagate already)
-      active_vertices.clear();
-
       // Activate updated vertices and set payloads
       for (auto &kv : updated_payloads) {
-        active_vertices.insert(kv.first);
-        num_active++;
-        g.SetVertexPayload(kv.first, std::move(kv.second), true);
+        g.ForceVertexPayload(kv.first, std::move(kv.second));
       }
 
       if (rank_ == ROOT) {
@@ -580,6 +575,7 @@ class ExponentialContraction {
       }
 
       active_round++;
+      active_vertices.clear();
       if (rank_ == ROOT) 
         std::cout << "[STATUS] |--- Round finished " 
                   << "[TIME] " << round_timer.Elapsed() << std::endl;

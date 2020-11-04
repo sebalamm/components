@@ -217,7 +217,7 @@ class DynamicGraphCommunicator : public DynamicGraph {
 #ifdef TIEBREAK_DEGREE
                          degree,
 #endif
-                         root});
+                         root}, false);
   }
 
   //////////////////////////////////////////////

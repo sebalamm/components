@@ -17,7 +17,6 @@ DynamicGraphCommunicator::~DynamicGraphCommunicator() {
 }
 
 void DynamicGraphCommunicator::ResetCommunicator() {
-  delete ghost_comm_;
   ghost_comm_ = new VertexCommunicator<DynamicGraphCommunicator>(rank_, size_);
   ghost_comm_->SetGraph(this);
 }
