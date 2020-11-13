@@ -507,6 +507,9 @@ class DynamicContraction {
         }
         // Add edge
         g_.AddEdge(vlocal, wlabel, pe);
+        if (!g_.IsLocalFromGlobal(wlabel)) {
+          g_.AddEdge(g_.GetLocalID(wlabel), vlabel, rank_);
+        }
         VertexID wlocal = g_.GetLocalID(wlabel);
         // Vertices remain active
         inactive_level_[vlocal] = -1;

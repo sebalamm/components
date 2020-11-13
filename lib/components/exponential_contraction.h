@@ -508,8 +508,21 @@ class ExponentialContraction {
       g.ForallVertices([&](VertexID v) {
         VertexID vertex_round = g.GetVertexDeviate(v);
         if (vertex_round == active_round && active_vertices.find(v) == active_vertices.end()) {
+          if (iteration_ == 10 && rank_ == 30) std::cout << "R" << rank_ << " activate " << g.GetGlobalID(v) << " round " << active_round << std::endl;
           active_vertices.insert(v);
           num_active++;
+        }
+        // Vertex becomes active next round so we need to schedule its payload
+        else if (vertex_round == active_round + 1) {
+          auto vertex_payload = g.GetVertexMessage(v);
+          vertex_payload = {g.GetVertexDeviate(v),
+                            g.GetVertexLabel(v),
+#ifdef TIEBREAK_DEGREE
+                            g.GetVertexDegree(v),
+#endif
+                            g.GetVertexRoot(v)};
+          g.ForceVertexPayload(v, std::move(vertex_payload));
+          converged_locally = 0;
         }
       });
 
@@ -520,11 +533,14 @@ class ExponentialContraction {
       for (const VertexID &v : active_vertices) {
         // Iterate over neighborhood and look for non-active vertices
         g.ForallNeighbors(v, [&](VertexID w) {
-          // Local neighbor (no message)
+          // Local neighbor (no message) 
           // If the neighbor is a ghost, the other PE takes care of it after receiving the payload in the last round
           if (g.IsLocal(w) && active_vertices.find(w) == active_vertices.end()) {
-            auto vertex_payload = (updated_payloads.find(w) == updated_payloads.end()) ? 
-                                    g.GetVertexMessage(w) : updated_payloads[w];
+            // auto vertex_payload = (updated_payloads.find(w) == updated_payloads.end()) ? 
+            //                         g.GetVertexMessage(w) : updated_payloads[w];
+            // auto vertex_payload = (updated_payloads.find(w) == updated_payloads.end()) ? 
+            //                         g.GetVertexMessage(w) : updated_payloads[w];
+            auto vertex_payload = g.GetVertexMessage(w);
             // Neighbor might get more than one update
             // Choose min for now
             if (g.GetVertexDeviate(v) + 1 < vertex_payload.deviate_) { 
@@ -537,15 +553,11 @@ class ExponentialContraction {
                                 g.GetVertexRoot(v)};
               converged_locally = 0;
               // Delay inserting the neighbor into active vertices and sending the payload
-              updated_payloads[w] = vertex_payload;
+              // updated_payloads[w] = vertex_payload;
+              g.SetVertexPayload(w, std::move(vertex_payload));
             }
           } 
         });
-      }
-
-      // Activate updated vertices and set payloads
-      for (auto &kv : updated_payloads) {
-        g.ForceVertexPayload(kv.first, std::move(kv.second));
       }
 
       if (rank_ == ROOT) {
@@ -592,6 +604,13 @@ class ExponentialContraction {
     }
 
     if (rank_ == ROOT) std::cout << "done shortcutting... mem " << Utility::GetFreePhysMem() << std::endl;
+
+    if (iteration_ == 10) {
+      if (rank_ == ROOT) std::cout << "Final round " << active_round - 1 << std::endl;
+      g.OutputLocal();
+      MPI_Barrier(MPI_COMM_WORLD);
+      exit(1);
+    }
 
     contraction_timer_.Restart();
     if (config_.direct_contraction) {
@@ -779,8 +798,6 @@ class ExponentialContraction {
       VertexID v_deg = g.GetVertexDegree(v);
       VertexID num_parts = tlx::integer_log2_ceil(v_deg);
       if (num_parts <= 1) continue;
-      if (rank_ != 0 && rank_ != 1)
-      std::cout << "R" << rank_ << " split v " << g.GetGlobalID(v) << " deg(v)=" << v_deg << " in " << num_parts << " parts" << std::endl;
 
       // Gather all non-local neighbors
       g.ForallNeighbors(v, [&](const VertexID w) {
