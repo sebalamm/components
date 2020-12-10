@@ -81,8 +81,8 @@ set(LIBS
         spooky
         sampling
         ${MPI_LIBRARIES}
-        asan
         )
+      # asan
 
 target_link_libraries(exponential LINK_PUBLIC ${LIBS})
 target_link_libraries(allreduce LINK_PUBLIC ${LIBS})
