@@ -41,15 +41,15 @@ class VertexCommunicator {
         rank_(rank),
         size_(size),
         comm_time_(0.0) {
-    packed_pes_.set_empty_key(-1);
-    packed_pes_.set_deleted_key(-1);
-    send_buffers_.set_empty_key(-1);
-    send_buffers_.set_deleted_key(-1);
-    receive_buffers_.set_empty_key(-1);
-    receive_buffers_.set_deleted_key(-1);
-    neighborhood_sample_.set_empty_key(-1);
-    neighborhood_sample_.set_deleted_key(-1);
-    message_tag_ = static_cast<unsigned int>(39 * size_);
+    packed_pes_.set_empty_key(EmptyKey);
+    packed_pes_.set_deleted_key(DeleteKey);
+    send_buffers_.set_empty_key(EmptyKey);
+    send_buffers_.set_deleted_key(DeleteKey);
+    receive_buffers_.set_empty_key(EmptyKey);
+    receive_buffers_.set_deleted_key(DeleteKey);
+    neighborhood_sample_.set_empty_key(EmptyKey);
+    neighborhood_sample_.set_deleted_key(DeleteKey);
+    message_tag_ = static_cast<unsigned int>(CommTag);
   }
   virtual ~VertexCommunicator() {};
 
@@ -85,6 +85,7 @@ class VertexCommunicator {
     comm_timer_.Restart();
     CommunicationUtility::SparseAllToAll(send_buffers_, receive_buffers_, 
                                          rank_, size_, message_tag_);
+    message_tag_++;
     comm_time_ += comm_timer_.Elapsed();
     CommunicationUtility::ClearBuffers(send_buffers_);
     UpdateGhostVertices();

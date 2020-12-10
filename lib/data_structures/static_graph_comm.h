@@ -81,7 +81,7 @@ class StaticGraphCommunicator : public StaticGraph {
 
   inline std::string GetVertexString(const VertexID v) {
     std::stringstream out;
-    std::string deviate = GetVertexDeviate(v) == std::numeric_limits<VertexID>::max() - 1 ? "-" : std::to_string(GetVertexDeviate(v));
+    std::string deviate = GetVertexDeviate(v) == MaxDeviate ? "-" : std::to_string(GetVertexDeviate(v));
     out << "(" << deviate << ","
         << GetVertexLabel(v) << ","
         << GetVertexRoot(v) << ")";

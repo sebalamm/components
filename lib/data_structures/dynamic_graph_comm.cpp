@@ -66,7 +66,7 @@ VertexID DynamicGraphCommunicator::AddGhostVertex(VertexID v, PEID pe) {
   ghost_active_[local_id - ghost_offset_] = true;
 
   // Set payload
-  ghost_payload_[local_id - ghost_offset_] = {std::numeric_limits<VertexID>::max() - 1, 
+  ghost_payload_[local_id - ghost_offset_] = {MaxDeviate, 
                                               v, 
 #ifdef TIEBREAK_DEGREE
                                               0,

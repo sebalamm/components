@@ -66,16 +66,16 @@ class DynamicGraphCommunicator : public DynamicGraph {
   void BuildLabelShortcuts() {
     // Gather labels
     google::dense_hash_set<VertexID> labels; 
-    labels.set_empty_key(-1);
-    labels.set_deleted_key(-1);
+    labels.set_empty_key(EmptyKey);
+    labels.set_deleted_key(DeleteKey);
     ForallLocalVertices([&](const VertexID v) {
         labels.insert(GetVertexLabel(v));
     });
 
     // Init shortcuts
     google::dense_hash_map<VertexID, std::pair<VertexID, VertexID>> smallest_deviate; 
-    smallest_deviate.set_empty_key(-1);
-    smallest_deviate.set_deleted_key(-1);
+    smallest_deviate.set_empty_key(EmptyKey);
+    smallest_deviate.set_deleted_key(DeleteKey);
     FindSmallestDeviates(labels, smallest_deviate);
 
     // Set actual shortcuts
@@ -132,7 +132,7 @@ class DynamicGraphCommunicator : public DynamicGraph {
 
   inline std::string GetVertexString(const VertexID v) {
     std::stringstream out;
-    std::string deviate = GetVertexDeviate(v) == std::numeric_limits<VertexID>::max() - 1 ? "-" : std::to_string(GetVertexDeviate(v));
+    std::string deviate = GetVertexDeviate(v) == MaxDeviate ? "-" : std::to_string(GetVertexDeviate(v));
     out << "(" << deviate << ","
         << GetVertexLabel(v) << ","
         << GetVertexRoot(v) << ")";
@@ -186,7 +186,7 @@ class DynamicGraphCommunicator : public DynamicGraph {
     local_active_[local_id] = true;
 
     // Set payload
-    local_payload_[local_id] = {std::numeric_limits<VertexID>::max() - 1, 
+    local_payload_[local_id] = {MaxDeviate, 
                                 v, 
 #ifdef TIEBREAK_DEGREE
                                 0,

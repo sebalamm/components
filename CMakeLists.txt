@@ -3,8 +3,8 @@ project(components)
 
 find_package(MPI REQUIRED)
 
-set(OMPI_CC gcc-9)
-set(OMPI_CXX g++-9)
+set(OMPI_CC gcc-8)
+set(OMPI_CXX g++-8)
 set(CMAKE_EXPORT_COMPILE_COMMANDS ON)
 
 if (NOT CMAKE_BUILD_TYPE)
@@ -24,8 +24,8 @@ endif()
 set(CMAKE_CXX_FLAGS "${CMAKE_CXX_FLAGS} ${KACOMP_DEFINITIONS}")
 
 include_directories(SYSTEM ${MPI_CXX_INCLUDE_PATH})
-set(CMAKE_CXX_FLAGS "${CMAKE_CXX_FLAGS} ${MPI_COMPILE_FLAGS} -fsanitize=address -std=c++14 -fno-omit-frame-pointer -march=native -DNDEBUG -Wall -fPIC -O3 -g")
-# set(CMAKE_CXX_FLAGS "${CMAKE_CXX_FLAGS} ${MPI_COMPILE_FLAGS} -std=c++14 -fno-omit-frame-pointer -march=native -DNDEBUG -Wall -fPIC -O3 -g")
+set(CMAKE_CXX_FLAGS "${CMAKE_CXX_FLAGS} ${MPI_COMPILE_FLAGS} -std=c++14 -fno-omit-frame-pointer -march=native -DNDEBUG -Wall -fPIC -O3 -g")
+# set(CMAKE_CXX_FLAGS "${CMAKE_CXX_FLAGS} ${MPI_COMPILE_FLAGS} -fsanitize=address -std=c++14 -fno-omit-frame-pointer -march=native -fno-stack-limit -DNDEBUG -Wall -fPIC -Og -g")
 set(CMAKE_CXX_LINK_FLAGS "${CMAKE_CXX_LINK_FLAGS} ${MPI_LINK_FLAGS}")
 
 add_subdirectory(extern/kagen)

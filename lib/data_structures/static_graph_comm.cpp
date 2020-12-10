@@ -61,7 +61,7 @@ VertexID StaticGraphCommunicator::AddGhostVertex(VertexID v, PEID pe) {
   ghost_vertices_data_[ghost_counter_ - ghost_offset_].global_id_ = v;
 
   // Set payload
-  vertex_payload_[ghost_counter_] = {std::numeric_limits<VertexID>::max() - 1, 
+  vertex_payload_[ghost_counter_] = {MaxDeviate, 
                                      v, 
 #ifdef TIEBREAK_DEGREE
                                      0,

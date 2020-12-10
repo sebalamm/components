@@ -76,8 +76,8 @@ class GraphIO {
 
     // Count ghost vertices
     google::dense_hash_set<VertexID> ghost_vertices; 
-    ghost_vertices.set_empty_key(-1);
-    ghost_vertices.set_deleted_key(-1);
+    ghost_vertices.set_empty_key(EmptyKey);
+    ghost_vertices.set_deleted_key(DeleteKey);
     VertexID number_of_ghost_vertices 
       = DetermineGhostVertices(edge_list, from, to, ghost_vertices);
     if (rank == ROOT) std::cout << "done finding ghosts... mem " << Utility::GetFreePhysMem() << std::endl;
@@ -204,8 +204,8 @@ class GraphIO {
 
     std::vector<std::pair<VertexID, VertexID>> edge_list;
     google::dense_hash_set<VertexID> ghost_vertices; 
-    ghost_vertices.set_empty_key(-1);
-    ghost_vertices.set_deleted_key(-1);
+    ghost_vertices.set_empty_key(EmptyKey);
+    ghost_vertices.set_deleted_key(DeleteKey);
 
     ParseVertexFilestream(in, from, to, ghost_vertices, edge_list);
 
@@ -302,8 +302,8 @@ class GraphIO {
 
     std::vector<std::pair<VertexID, VertexID>> edge_list;
     google::dense_hash_set<VertexID> ghost_vertices; 
-    ghost_vertices.set_empty_key(-1);
-    ghost_vertices.set_deleted_key(-1);
+    ghost_vertices.set_empty_key(EmptyKey);
+    ghost_vertices.set_deleted_key(DeleteKey);
 
     ParseVertexFilestream(in, from, to, ghost_vertices, edge_list);
 
@@ -412,8 +412,8 @@ class GraphIO {
 
     // Determine local and ghost vertices
     google::dense_hash_set<VertexID> ghost_vertices; 
-    ghost_vertices.set_empty_key(-1);
-    ghost_vertices.set_deleted_key(-1);
+    ghost_vertices.set_empty_key(EmptyKey);
+    ghost_vertices.set_deleted_key(DeleteKey);
 
     VertexID number_of_ghost_vertices 
       = DetermineGhostVertices(edge_list, first_vertex, last_vertex, ghost_vertices);
@@ -477,7 +477,7 @@ class GraphIO {
                                                  VertexID, 
                                                  VertexID,
                                                  PEID>>> vertex_ranges;
-    vertex_ranges.set_empty_key(-1);
+    vertex_ranges.set_empty_key(EmptyKey);
 
     // Construct mapping: v -> list<[first edge, last edge], duplicate ID, pe>
     VertexID prev_range_last = std::get<1>(vertex_dist[0]);
@@ -648,8 +648,8 @@ class GraphIO {
 
     // Determine local and ghost vertices
     google::dense_hash_set<VertexID> ghost_vertices; 
-    ghost_vertices.set_empty_key(-1);
-    ghost_vertices.set_deleted_key(-1);
+    ghost_vertices.set_empty_key(EmptyKey);
+    ghost_vertices.set_deleted_key(DeleteKey);
 
     VertexID number_of_ghost_vertices 
       = DetermineGhostVertices(edge_list, first_vertex, last_vertex, ghost_vertices);
@@ -713,7 +713,7 @@ class GraphIO {
                                                  VertexID, 
                                                  VertexID,
                                                  PEID>>> vertex_ranges;
-    vertex_ranges.set_empty_key(-1);
+    vertex_ranges.set_empty_key(EmptyKey);
 
     // Construct mapping: v -> list<[first edge, last edge], duplicate ID, pe>
     VertexID prev_range_last = std::get<1>(vertex_dist[0]);
