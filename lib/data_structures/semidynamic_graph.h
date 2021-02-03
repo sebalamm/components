@@ -472,10 +472,12 @@ class SemidynamicGraph {
     local_component_sizes.set_empty_key(EmptyKey);
     local_component_sizes.set_deleted_key(DeleteKey);
     ForallLocalVertices([&](const VertexID v) {
-      VertexID c = labels[v];
-      if (local_component_sizes.find(c) == end(local_component_sizes))
-        local_component_sizes[c] = 0;
-      local_component_sizes[c]++;
+      if (GetGlobalID(v) <= global_num_vertices) {
+        VertexID c = labels[v];
+        if (local_component_sizes.find(c) == end(local_component_sizes))
+          local_component_sizes[c] = 0;
+        local_component_sizes[c]++;
+      }
     });
 
     // Gather component message

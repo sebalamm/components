@@ -239,7 +239,9 @@ class DynamicGraph {
 
   VertexID GatherNumberOfGlobalVertices() {
     VertexID local_vertices = 0;
-    ForallLocalVertices([&](const VertexID v) { local_vertices++; });
+    ForallLocalVertices([&](const VertexID v) { 
+        local_vertices++; 
+    });
     // Check if all PEs are done
     comm_timer_.Restart();
     MPI_Allreduce(&local_vertices,
@@ -534,10 +536,12 @@ class DynamicGraph {
     local_component_sizes.set_empty_key(EmptyKey);
     local_component_sizes.set_deleted_key(DeleteKey);
     ForallLocalVertices([&](const VertexID v) {
-      VertexID c = labels[v];
-      if (local_component_sizes.find(c) == end(local_component_sizes))
-        local_component_sizes[c] = 0;
-      local_component_sizes[c]++;
+      if (GetGlobalID(v) <= global_num_vertices) {
+        VertexID c = labels[v];
+        if (local_component_sizes.find(c) == end(local_component_sizes))
+          local_component_sizes[c] = 0;
+        local_component_sizes[c]++;
+      }
     });
 
     // Gather component message
