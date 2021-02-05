@@ -879,32 +879,38 @@ class GraphIO {
     VertexID to = from + number_of_local_edges - 1;
 
     // Gather local edges
-    std::vector<std::pair<VertexID, VertexID>> edge_list(number_of_local_edges);
+    // std::vector<std::pair<VertexID, VertexID>> edge_list(number_of_local_edges);
+    std::vector<std::pair<VertexID, VertexID>> edge_input(number_of_local_edges);
     auto header_offset = sizeof(VertexID) + sizeof(EdgeID);
     auto edge_offset = from * sizeof(VertexID) * 2;
     auto edge_buffer_size = number_of_local_edges * sizeof(VertexID) * 2;
     in.seekg(header_offset + edge_offset, std::ios::beg);
-    in.read(reinterpret_cast<char*>(&edge_list[0]), edge_buffer_size);
+    in.read(reinterpret_cast<char*>(&edge_input[0]), edge_buffer_size);
 
     // Compute vertex ranges
+    std::vector<std::pair<VertexID, VertexID>> edge_list;
+    edge_list.reserve(2 * number_of_local_edges);
     VertexID first_vertex = std::numeric_limits<VertexID>::max();
     VertexID last_vertex = 0;
     std::pair<VertexID, VertexID> first_vertex_range 
       = {std::numeric_limits<VertexID>::max(), std::numeric_limits<VertexID>::max()};
-    for (EdgeID e = 0; e < edge_list.size(); ++e) {
-      edge_list[e].first--;
-      edge_list[e].second--;
+    for (EdgeID e = 0; e < edge_input.size(); ++e) {
+      edge_input[e].first--;
+      edge_input[e].second--;
 
       if (first_vertex == std::numeric_limits<VertexID>::max()) {
-        first_vertex = edge_list[e].first;
+        first_vertex = edge_input[e].first;
       }
-      last_vertex = edge_list[e].first;
+      last_vertex = edge_input[e].first;
 
-      if (edge_list[e].first == first_vertex) {
+      edge_list.emplace_back(edge_input[e].first, edge_input[e].second);
+      edge_list.emplace_back(edge_input[e].second, edge_input[e].first);
+
+      if (edge_input[e].first == first_vertex) {
         if (first_vertex_range.first == std::numeric_limits<VertexID>::max()) {
-          first_vertex_range.first = edge_list[e].second;
+          first_vertex_range.first = edge_input[e].second;
         }
-        first_vertex_range.second = edge_list[e].second;
+        first_vertex_range.second = edge_input[e].second;
       }
     }
 
