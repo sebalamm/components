@@ -684,14 +684,267 @@ class ExponentialContraction {
     // Determine high degree vertices
     std::vector<VertexID> high_degree_vertices;
     VertexID avg_max_deg = Utility::ComputeAverageMaxDegree(g, rank_, size_);
-    // Utility::SelectHighDegreeVertices(g, config_.degree_threshold * avg_max_deg, high_degree_vertices);
+    // TODO: Use sqrt(n) here
     Utility::SelectHighDegreeVertices(g, config_.degree_threshold, high_degree_vertices);
     std::cout << "R" << rank_ << " num high degree " << high_degree_vertices.size() << std::endl;
     
+    // Split high degree vertices into one layer of proxies with degree sqrt(n)
+    SplitHighDegreeVerticesSqrt(g, avg_max_deg, high_degree_vertices);
     // Split high degree vertices into binomial trees
-    SplitHighDegreeVerticesIntoTrees(g, avg_max_deg, high_degree_vertices);
+    // SplitHighDegreeVerticesIntoTrees(g, avg_max_deg, high_degree_vertices);
     // Split vertices into stars if they have a high degree
     // SplitHighDegreeVerticesIntoStars(g, avg_max_deg, high_degree_vertices);
+  }
+
+  void SplitHighDegreeVerticesSqrt(DynamicGraphCommunicator &g,
+                                   const VertexID &avg_max_deg,
+                                   const std::vector<VertexID> &high_degree_vertices) {
+    // Compute offset for IDs of replicated vertices
+    VertexID num_global_vertices = g.GatherNumberOfGlobalVertices();
+    // TODO: Check if this offset if correct
+    VertexID vertex_offset = num_global_vertices * rank_ + num_global_vertices * (10 * size);
+    VertexID repl_vertices_id = vertex_offset;
+
+    // Default buffers for message exchange
+    google::dense_hash_map<PEID, VertexBuffer> send_buffers;
+    send_buffers.set_empty_key(-1);
+    send_buffers.set_deleted_key(-1);
+    google::dense_hash_map<PEID, VertexBuffer> receive_buffers;
+    receive_buffers.set_empty_key(-1);
+    receive_buffers.set_deleted_key(-1);
+    
+    // New edges to replicated vertices
+    std::vector<VertexID> local_edges;
+
+    // Map to answer relink messages
+    google::dense_hash_map<VertexID, 
+                           google::sparse_hash_map<VertexID, 
+                                                   std::pair<VertexID, PEID>>> replicated_edges;
+    replicated_edges.set_empty_key(-1);
+    replicated_edges.set_deleted_key(-1);
+
+    //////////////////////////////////////////
+    // Send edges to replicates
+    //////////////////////////////////////////
+    // TODO: Optimize to keep local edges in separate buffer
+    std::random_device rd;
+    std::mt19937 gen(rd());
+    std::uniform_int_distribution<PEID> dist(0, size_ - 1);
+    for (const VertexID &v : high_degree_vertices) {
+      VertexID edge_counter = 0;
+      // Select random target pe 
+      PEID target_pe = dist(gen);
+      // Start message with (Vertex, Replicate)
+      send_buffers[target_pe].emplace_back(g.GetGlobalID(v));
+      send_buffers[target_pe].emplace_back(repl_vertices_id++);
+      g.ForallNeighbors(v, [&](const VertexID w) {
+        if (edge_counter >= config_.degree_threshold) {
+          // Select new random target pe
+          target_pe = dist(gen);
+          // Start message with (Vertex, Replicate)
+          send_buffers[target_pe].emplace_back(g.GetGlobalID(v));
+          send_buffers[target_pe].emplace_back(repl_vertices_id);
+          // Add ghost vertex if not already present
+          if (!(g.IsLocalFromGlobal(repl_vertices_id) || g.IsGhostFromGlobal(repl_vertices_id))) {
+            g.AddGhostVertex(repl_vertices_id, target_pe);
+          }
+          // Store edge
+          local_edges.emplace_back(repl_vertices_id);
+          local_edges.emplace_back(target_pe);
+          repl_vertices_id++;
+          edge_counter = 0;
+        }
+        // Add message to buffer
+        send_buffers[target_pe].emplace_back(g.GetGlobalID(w));
+        send_buffers[target_pe].emplace_back(g.GetPE(w));
+        // Store edge to later answer relink messages
+        replicated_edges[v][w] = std::make_pair(repl_vertices_id, g.GetPE(w));
+        edge_counter++;
+      });
+      // Replace edges with new edges to replicates
+      g.RemoveAllEdges(v);
+      for (VertexID i = 0; i < local_edges.size(); i+= 2) {
+        g.AddEdge(v, local_edges[i], local_edges[i+1]);
+        g.AddEdge(g.GetLocalID(local_edges[i]), v, rank_);
+      }
+    }
+    // Send edges
+    receive_buffers[rank_] = send_buffers[rank_];
+    send_buffers[rank_].clear();
+
+    comm_timer_.Restart();
+    CommunicationUtility::SparseAllToAll(send_buffers, receive_buffers, rank_, size_, 993);
+    comm_time_ += comm_timer_.Elapsed();
+    CommunicationUtility::ClearBuffers(send_buffers);
+
+    //////////////////////////////////////////
+    // Process received edges and send relink messages
+    //////////////////////////////////////////
+    // google::dense_hash_map<PEID, VertexBuffer> replicate_edges;
+    // replicate_edges.set_empty_key(-1);
+    // replicate_edges.set_deleted_key(-1);
+    for (auto &kv : receive_buffers) {
+      PEID source_pe = kv.first;
+      auto &edges = kv.second;
+
+      // Group messages based on target vertices
+      VertexID source_vertex;
+      VertexID replicate_vertex;
+      for (VertexID i = 0; i < edges.size(); i += 2) {
+        VertexID target_vertex = edges[i];
+        VertexID target_pe = edges[i + 1];
+        // Check if message is replicate vertex ID
+        if (target_pe > size_) {
+          source_vertex = target_vertex;
+          replicate_vertex = target_pe;
+          // Create replicate vertex
+          if (replicated_vertices_.find(source_vertex) == end(replicated_vertices_)) {
+            replicated_vertices_[source_vertex] = replicate_vertex;
+            g.AddVertex(replicate_vertex);
+            // Add ghost vertex if parent replicate does not exist
+            if (!(g.IsLocalFromGlobal(source_vertex) || g.IsGhostFromGlobal(source_vertex))) {
+              g.AddGhostVertex(parent_replicate, sender_pe);
+            }
+            // Add local edge from replicate to source (and vice versa)
+            g.AddEdge(g.GetLocalID(replicate_vertex), source_vertex, source_pe);
+            g.AddEdge(g.GetLocalID(source_vertex), replicate_vertex, rank_);
+          }
+        } else {
+          // For now delay adding ghost vertices and edges after relinking was processed
+          if (target_pe != rank) {
+            // Case: Target is remote (still open if it is replicated)
+            // replicate_edges[replicate_vertex].emplace_back(target_vertex);
+            // replicate_edges[replicate_vertex].emplace_back(target_pe);
+            send_buffers[target_pe].emplace_back(target_vertex);
+            send_buffers[target_pe].emplace_back(source_vertex);
+            send_buffers[target_pe].emplace_back(replicate_vertex);
+          } else {
+            if (replicated_edges.find(target_vertex) == replicated_edges.end()
+                || (replicated_edges.find(target_vertex) != replicated_edges.end()
+                  && replicated_edges[target_vertex].find(source_vertex) == replicated_edges[target_vertex].end())) {
+              // Case: Target is local and was not replicated
+              bool relink_success = g.RelinkEdge(g.GetLocalID(target_vertex), source_vertex, replicate_vertex, rank_);
+              if (!relink_success) {
+                std::cout << "R" << rank_ << " This shouldn't happen: Invalid (first round) relink (" << target_vertex << "," << source_vertex << ") -> (" << target_vertex << "," << replicate_vertex << ") from R" << rank_ << " isLocal(target_vertex)=" << g.IsLocalFromGlobal(target_vertex) << " isLocal(source)=" << g.IsLocalFromGlobal(source_vertex) << " isLocal(replicate)=" << g.IsLocalFromGlobal(replicate_vertex) << std::endl;
+              }
+            } else {
+              // Case: Target is local and was replicated
+              send_buffers[rank_].emplace_back(target_vertex);
+              send_buffers[rank_].emplace_back(source_vertex);
+              send_buffers[rank_].emplace_back(replicate_vertex);
+            }
+          }
+        }
+      }
+    }
+    // Exchange relink messages
+    CommunicationUtility::ClearBuffers(receive_buffers);
+    receive_buffers[rank_] = send_buffers[rank_];
+    send_buffers[rank_].clear();
+
+    comm_timer_.Restart();
+    CommunicationUtility::SparseAllToAll(send_buffers, receive_buffers, rank_, size_, 993);
+    comm_time_ += comm_timer_.Elapsed();
+    CommunicationUtility::ClearBuffers(send_buffers);
+
+    //////////////////////////////////////////
+    // Check relink messages for necessary answer messages
+    //////////////////////////////////////////
+    for (auto &kv : receive_buffers) {
+      PEID target_pe = kv.first;
+      auto &relink_buffer = kv.second;
+
+      for (VertexID i = 0; i < relink_buffer.size(); i += 3) {
+        VertexID source_vertex = relink_buffer[i];
+        VertexID old_target_vertex = relink_buffer[i + 1];
+        VertexID new_target_vertex = relink_buffer[i + 2];
+
+        // If so send answer message back to sender
+        if (replicated_edges.find(source_vertex) != replicated_edges.end() 
+            && (replicated_edges[source_vertex].find(old_target_vertex) != replicated_edges[source_vertex].end())) {
+          // Case: Target is remote and was replicated
+          // Send back (new target, source vertex, replicated vertex, replicated vertex PE)
+          // Receiving PE can then relink edge (new target, source vertex) to (new target, replicated vertex)
+          send_buffers[target_pe].emplace_back(new_target_vertex);
+          send_buffers[target_pe].emplace_back(source_vertex);
+          send_buffers[target_pe].emplace_back(replicated_edges[source_vertex][old_target_vertex].first);
+          send_buffers[target_pe].emplace_back(replicated_edges[source_vertex][old_target_vertex].second);
+        }
+        else {
+          // Case: Target is remote and was not replicated
+          if (!(g.IsLocalFromGlobal(new_target_vertex) || g.IsGhostFromGlobal(new_target_vertex))) {
+            g.AddGhostVertex(new_target_vertex, target_pe);
+          }
+          bool relink_success = g.RelinkEdge(g.GetLocalID(source_vertex), old_target_vertex, new_target_vertex, target_pe);
+          if (!relink_success) {
+            std::cout << "R" << rank_ << " This shouldn't happen: Invalid (local answer) relink (" << source_vertex << "," << old_target_vertex << ") -> (" << source_vertex << "," << new_target_vertex << ") from R" << target_pe << std::endl;
+          }
+        }
+      }
+    }
+    CommunicationUtility::ClearBuffers(receive_buffers);
+    receive_buffers[rank_] = send_buffers[rank_];
+    send_buffers[rank_].clear();
+
+    // Send second round of relink (answer) messages
+    comm_timer_.Restart();
+    CommunicationUtility::SparseAllToAll(send_buffers, receive_buffers, rank_, size_, 993);
+    comm_time_ += comm_timer_.Elapsed();
+    CommunicationUtility::ClearBuffers(send_buffers);
+
+    //////////////////////////////////////////
+    // TODO: Send (final) updates from replicates to neighbors
+    //////////////////////////////////////////
+    for (auto &kv : receive_buffers) {
+      PEID sender_pe = kv.first;
+      auto &answer_buffer = kv.second;
+      for (VertexID i = 0; i < answer_buffer.size(); i += 4) {
+        VertexID source_vertex = answer_buffer[i];
+        VertexID old_target_vertex = answer_buffer[i + 1];
+        VertexID new_target_vertex = answer_buffer[i + 2];
+        PEID new_target_pe = answer_buffer[i + 3];
+
+        if (!(g.IsLocalFromGlobal(new_target_vertex) || g.IsGhostFromGlobal(new_target_vertex))) {
+          g.AddGhostVertex(new_target_vertex, new_target_pe);
+        }
+        bool relink_success = g.RelinkEdge(g.GetLocalID(source_vertex), old_target_vertex, new_target_vertex, new_target_pe);
+        if (!relink_success) {
+          std::cout << "R" << rank_ << " This shouldn't happen: Invalid (second round) relink (" << source_vertex << "," << old_target_vertex << ") -> (" << source_vertex << "," << new_target_vertex << ") from R" << sender_pe << std::endl;
+        }
+      }
+    }
+    CommunicationUtility::ClearBuffers(receive_buffers);
+    // receive_buffers[rank_] = send_buffers[rank_];
+    // send_buffers[rank_].clear();
+
+    // // Send final round of relink messages
+    // comm_timer_.Restart();
+    // CommunicationUtility::SparseAllToAll(send_buffers, receive_buffers, rank_, size_, 993);
+    // comm_time_ += comm_timer_.Elapsed();
+    // CommunicationUtility::ClearBuffers(send_buffers);
+
+    //////////////////////////////////////////
+    // TODO: Apply the final replicate messages (is this even necessary?)
+    //////////////////////////////////////////
+    // for (auto &kv : receive_buffers) {
+    //   PEID sender_pe = kv.first;
+    //   auto &relink_buffer = kv.second;
+
+    //   for (VertexID i = 0; i < relink_buffer.size(); i += 3) {
+    //     VertexID source_vertex = relink_buffer[i];
+    //     VertexID old_target_vertex = relink_buffer[i + 1];
+    //     VertexID new_target_vertex = relink_buffer[i + 2];
+
+    //     if (!(g.IsLocalFromGlobal(new_target_vertex) || g.IsGhostFromGlobal(new_target_vertex))) {
+    //       g.AddGhostVertex(new_target_vertex, sender_pe);
+    //     }
+    //     bool relink_success = g.RelinkEdge(g.GetLocalID(source_vertex), old_target_vertex, new_target_vertex, sender_pe);
+    //     if (!relink_success) {
+    //       std::cout << "R" << rank_ << " This shouldn't happen: Invalid (second round) relink (" << source_vertex << "," << old_target_vertex << ") -> (" << source_vertex << "," << new_target_vertex << ") from R" << sender_pe << std::endl;
+    //     }
+    //   }
+    // }
+    // CommunicationUtility::ClearBuffers(receive_buffers);
   }
 
   void SplitHighDegreeVerticesIntoTrees(DynamicGraphCommunicator &g,
