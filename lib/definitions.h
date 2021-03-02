@@ -23,6 +23,7 @@
 #define _GRAPH_DEFINITIONS_H_
 
 #include <vector> 
+#include <limits> 
 
 #define MPI_VERTEX MPI_UNSIGNED_LONG_LONG
 // #define MPI_VERTEX MPI_UNSIGNED_LONG
@@ -47,5 +48,15 @@ using VertexID = ULONG;
 using EdgeID = ULONG;
 
 using VertexBuffer = std::vector<VertexID>;
+
+// Graph constants
+const int EmptyKey = -1;
+const int DeleteKey = -2;
+const VertexID MaxDeviate = std::numeric_limits<VertexID>::max() - 1;
+
+// Message tags
+const int CAGTag = 10;
+const int ContractionTag = 100;
+const int CommTag = 1000;
 
 #endif

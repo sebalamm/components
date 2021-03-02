@@ -33,7 +33,7 @@ struct VertexPayload {
   PEID root_;
 
   VertexPayload()
-      : deviate_(std::numeric_limits<VertexID>::max() - 1),
+      : deviate_(MaxDeviate),
         label_(0),
 #ifdef TIEBREAK_DEGREE
         degree_(0),

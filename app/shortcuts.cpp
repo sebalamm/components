@@ -41,38 +41,46 @@ int main(int argn, char **argv) {
   ParseParameters(argn, argv, conf);
   int initial_seed = conf.seed;
 
+  StaticGraph SG(rank, size);
+  StaticGraphCommunicator SGC(rank, size);
+  MPI_Barrier(MPI_COMM_WORLD);
+  if (conf.use_contraction) {
+      IOUtility::LoadGraph(SG, conf, rank, size);
+      IOUtility::PrintGraphParams(SG, conf, rank, size);
+  } else {
+      IOUtility::LoadGraph(SGC, conf, rank, size);
+      IOUtility::PrintGraphParams(SGC, conf, rank, size);
+  }
+
   // WARMUP RUN
   if (rank == ROOT) std::cout << "WARMUP RUN" << std::endl;
-
   {
     ShortcutPropagation comp(conf, rank, size);
     if (conf.use_contraction) {
-      StaticGraph G(rank, size);
-      IOUtility::LoadGraph(G, conf, rank, size);
-      IOUtility::PrintGraphParams(G, conf, rank, size);
+      StaticGraph CG = SG;
 
       // Determine labels
-      std::vector<VertexID> labels(G.GetNumberOfVertices(), 0);
-      G.ForallLocalVertices([&](const VertexID v) {
-        labels[v] = G.GetGlobalID(v);
+      std::vector<VertexID> labels(CG.GetNumberOfVertices(), 0);
+      CG.ForallLocalVertices([&](const VertexID v) {
+        labels[v] = CG.GetGlobalID(v);
       });
-      comp.FindComponents(G, labels);
+      comp.FindComponents(CG, labels);
     } else {
-      StaticGraphCommunicator G(rank, size);
-      IOUtility::LoadGraph(G, conf, rank, size);
-      IOUtility::PrintGraphParams(G, conf, rank, size);
+      StaticGraphCommunicator CG = SGC;
+      CG.ResetCommunicator();
 
       // Determine labels
-      std::vector<VertexID> labels(G.GetNumberOfVertices(), 0);
-      G.ForallLocalVertices([&](const VertexID v) {
-        labels[v] = G.GetGlobalID(v);
+      std::vector<VertexID> labels(CG.GetNumberOfVertices(), 0);
+      CG.ForallLocalVertices([&](const VertexID v) {
+        labels[v] = CG.GetGlobalID(v);
       });
-      comp.FindComponents(G, labels);
+      comp.FindComponents(CG, labels);
     }
   }
 
   // ACTUAL RUN
   if (rank == ROOT) std::cout << "BENCH RUN" << std::endl;
+
   Statistics stats;
   
   for (int i = 0; i < conf.iterations; ++i) {
@@ -86,37 +94,34 @@ int main(int argn, char **argv) {
     ShortcutPropagation comp(conf, rank, size);
 
     if (conf.use_contraction) {
-      StaticGraph G(rank, size);
-      IOUtility::LoadGraph(G, conf, rank, size);
-      IOUtility::PrintGraphParams(G, conf, rank, size);
+      StaticGraph CG = SG;
 
       // Determine labels
-      std::vector<VertexID> labels(G.GetNumberOfVertices(), 0);
-      G.ForallLocalVertices([&](const VertexID v) {
-        labels[v] = G.GetGlobalID(v);
+      std::vector<VertexID> labels(CG.GetNumberOfVertices(), 0);
+      CG.ForallLocalVertices([&](const VertexID v) {
+        labels[v] = CG.GetGlobalID(v);
       });
       t.Restart();
-      comp.FindComponents(G, labels);
+      comp.FindComponents(CG, labels);
       local_time = t.Elapsed();
 
       // Print labels
-      G.OutputComponents(labels);
+      CG.OutputComponents(labels);
     } else {
-      StaticGraphCommunicator G(rank, size);
-      IOUtility::LoadGraph(G, conf, rank, size);
-      IOUtility::PrintGraphParams(G, conf, rank, size);
+      StaticGraphCommunicator CG = SGC;
+      CG.ResetCommunicator();
 
       // Determine labels
-      std::vector<VertexID> labels(G.GetNumberOfVertices(), 0);
-      G.ForallLocalVertices([&](const VertexID v) {
-        labels[v] = G.GetGlobalID(v);
+      std::vector<VertexID> labels(CG.GetNumberOfVertices(), 0);
+      CG.ForallLocalVertices([&](const VertexID v) {
+        labels[v] = CG.GetGlobalID(v);
       });
       t.Restart();
-      comp.FindComponents(G, labels);
+      comp.FindComponents(CG, labels);
       local_time = t.Elapsed();
 
       // Print labels
-      G.OutputComponents(labels);
+      CG.OutputComponents(labels);
     }
 
     // Gather total time

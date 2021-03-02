@@ -60,12 +60,12 @@ class DynamicGraph {
       edge_counter_(0),
       ghost_offset_(0),
       comm_time_(0.0) {
-    label_shortcut_.set_empty_key(-1);
-    label_shortcut_.set_deleted_key(-1);
-    global_to_local_map_.set_empty_key(-1);
-    global_to_local_map_.set_deleted_key(-1);
-    adjacent_pes_.set_empty_key(-1);
-    adjacent_pes_.set_deleted_key(-1);
+    label_shortcut_.set_empty_key(EmptyKey);
+    label_shortcut_.set_deleted_key(DeleteKey);
+    global_to_local_map_.set_empty_key(EmptyKey);
+    global_to_local_map_.set_deleted_key(DeleteKey);
+    adjacent_pes_.set_empty_key(EmptyKey);
+    adjacent_pes_.set_deleted_key(DeleteKey);
   }
 
   virtual ~DynamicGraph() {};
@@ -168,7 +168,7 @@ class DynamicGraph {
   }
 
   inline bool IsLocalFromGlobal(VertexID v) {
-    return global_to_local_map_.find(v) != global_to_local_map_.end() && IsLocal(global_to_local_map_[v]);
+    return global_to_local_map_.find(v) != global_to_local_map_.end() ? IsLocal(global_to_local_map_[v]) : false;
   }
 
   inline bool IsGhost(VertexID v) const {
@@ -176,7 +176,7 @@ class DynamicGraph {
   }
 
   inline bool IsGhostFromGlobal(VertexID v) {
-    return global_to_local_map_.find(v) != global_to_local_map_.end() && IsGhost(global_to_local_map_[v]);
+    return global_to_local_map_.find(v) != global_to_local_map_.end() ? IsGhost(global_to_local_map_[v]) : false;
   }
 
   inline bool IsInterface(VertexID v) {
@@ -194,13 +194,19 @@ class DynamicGraph {
   }
 
   inline VertexID GetLocalID(VertexID v) {
-    return global_to_local_map_[v];
+    if (global_to_local_map_.find(v) != global_to_local_map_.end()) return global_to_local_map_[v];
+    else {
+      std::cout << "R" << rank_ << " This shouldn't happen (illegal get local on v=" << v << ")" << std::endl;
+      exit(1);
+    }
   }
 
   inline VertexID GetGlobalID(VertexID v) {
     return IsLocal(v) ? local_vertices_data_[v].global_id_ 
                       : ghost_vertices_data_[v - ghost_offset_].global_id_;
   }
+
+  inline VertexID GetGhostOffset() { return ghost_offset_; }
 
   inline PEID GetPE(VertexID v) {
     return IsLocal(v) ? rank_
@@ -233,7 +239,9 @@ class DynamicGraph {
 
   VertexID GatherNumberOfGlobalVertices() {
     VertexID local_vertices = 0;
-    ForallLocalVertices([&](const VertexID v) { local_vertices++; });
+    ForallLocalVertices([&](const VertexID v) { 
+        local_vertices++; 
+    });
     // Check if all PEs are done
     comm_timer_.Restart();
     MPI_Allreduce(&local_vertices,
@@ -320,7 +328,7 @@ class DynamicGraph {
       AddLocalEdge(from, to);
     } else {
       if (rank == size_) {
-        std::cout << "This shouldn't happen" << std::endl;
+        std::cout << "This shouldn't happen (illegal add edge)" << std::endl;
         exit(1);
       }
       // NOTE: from always local
@@ -330,7 +338,7 @@ class DynamicGraph {
         AddGhostEdge(from, to);
         SetAdjacentPE(rank, true);
       } else {
-        std::cout << "This shouldn't happen" << std::endl;
+        std::cout << "This shouldn't happen (illegal add edge)" << std::endl;
         exit(1);
       }
     }
@@ -345,11 +353,14 @@ class DynamicGraph {
       }
       local_adjacent_edges_[from].emplace_back(global_to_local_map_[to]);
     }
-    else {
+    else if (IsGhost(from)) {
       if (from - ghost_offset_ >= ghost_adjacent_edges_.size()) {
         ghost_adjacent_edges_.resize(from - ghost_offset_ + 1);
       }
       ghost_adjacent_edges_[from - ghost_offset_].emplace_back(global_to_local_map_[to]);
+    } else {
+      std::cout << "This shouldn't happen (illegal add local edge)" << std::endl;
+      exit(1);
     }
   }
 
@@ -370,11 +381,11 @@ class DynamicGraph {
         local_adjacent_edges_[from].erase(local_adjacent_edges_[from].begin() + delete_pos);
         if (IsGhost(to)) number_of_cut_edges_--;
       } else {
-        std::cout << "This shouldn't happen" << std::endl;
+        std::cout << "This shouldn't happen (illegal remove edge)" << std::endl;
         exit(1);
       }
     } else {
-      std::cout << "This shouldn't happen" << std::endl;
+      std::cout << "This shouldn't happen (illegal remove edge)" << std::endl;
       exit(1);
     }
   }
@@ -389,7 +400,7 @@ class DynamicGraph {
     else {
       if (!IsGhost(old_to_local)) number_of_cut_edges_++;
       if (rank == size_) {
-        std::cout << "This shouldn't happen" << std::endl;
+        std::cout << "This shouldn't happen (illegal relink edge)" << std::endl;
         exit(1);
       }
       SetAdjacentPE(rank, true);
@@ -522,13 +533,15 @@ class DynamicGraph {
     VertexID global_num_vertices = GatherNumberOfGlobalVertices();
     // Gather component sizes
     google::dense_hash_map<VertexID, VertexID> local_component_sizes; 
-    local_component_sizes.set_empty_key(-1);
-    local_component_sizes.set_deleted_key(-1);
+    local_component_sizes.set_empty_key(EmptyKey);
+    local_component_sizes.set_deleted_key(DeleteKey);
     ForallLocalVertices([&](const VertexID v) {
-      VertexID c = labels[v];
-      if (local_component_sizes.find(c) == end(local_component_sizes))
-        local_component_sizes[c] = 0;
-      local_component_sizes[c]++;
+      if (GetGlobalID(v) <= global_num_vertices) {
+        VertexID c = labels[v];
+        if (local_component_sizes.find(c) == end(local_component_sizes))
+          local_component_sizes[c] = 0;
+        local_component_sizes[c]++;
+      }
     });
 
     // Gather component message
@@ -565,8 +578,8 @@ class DynamicGraph {
 
     if (rank_ == ROOT) {
       google::dense_hash_map<VertexID, VertexID> global_component_sizes; 
-      global_component_sizes.set_empty_key(-1);
-      global_component_sizes.set_deleted_key(-1);
+      global_component_sizes.set_empty_key(EmptyKey);
+      global_component_sizes.set_deleted_key(DeleteKey);
       for (auto &comp : global_components) {
         VertexID c = comp.first;
         VertexID size = comp.second;
@@ -576,8 +589,8 @@ class DynamicGraph {
       }
 
       google::dense_hash_map<VertexID, VertexID> condensed_component_sizes; 
-      condensed_component_sizes.set_empty_key(-1);
-      condensed_component_sizes.set_deleted_key(-1);
+      condensed_component_sizes.set_empty_key(EmptyKey);
+      condensed_component_sizes.set_deleted_key(DeleteKey);
       for (auto &cs : global_component_sizes) {
         VertexID c = cs.first;
         VertexID size = cs.second;

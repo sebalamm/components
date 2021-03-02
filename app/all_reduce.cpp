@@ -41,14 +41,14 @@ int main(int argn, char **argv) {
   ParseParameters(argn, argv, conf);
   int initial_seed = conf.seed;
 
+  StaticGraph G(rank, size);
+  IOUtility::LoadGraph(G, conf, rank, size);
+  IOUtility::PrintGraphParams(G, conf, rank, size);
+
   // WARMUP RUN
   if (rank == ROOT) std::cout << "WARMUP RUN" << std::endl;
 
   {
-    StaticGraph G(rank, size);
-    IOUtility::LoadGraph(G, conf, rank, size);
-    IOUtility::PrintGraphParams(G, conf, rank, size);
-
     // Determine labels
     std::vector<VertexID> labels(G.GetNumberOfVertices(), 0);
     G.ForallLocalVertices([&](const VertexID v) {
@@ -61,14 +61,12 @@ int main(int argn, char **argv) {
 
   // ACTUAL RUN
   if (rank == ROOT) std::cout << "BENCH RUN" << std::endl;
+
   Statistics stats;
   
   for (int i = 0; i < conf.iterations; ++i) {
     int round_seed = initial_seed + i + 1000;
     conf.seed = round_seed;
-    StaticGraph G(rank, size);
-    IOUtility::LoadGraph(G, conf, rank, size);
-    IOUtility::PrintGraphParams<StaticGraph>(G, conf, rank, size);
 
     Timer t;
     double local_time = 0.0;

@@ -40,6 +40,8 @@ class IOUtility {
       GraphIO::ReadSortedEdgeFile<GraphType>(g, config, rank, size, MPI_COMM_WORLD);
     } else if (config.input_type == "partition") {
       GraphIO::ReadPartitionedSortedEdgeFile<GraphType>(g, config, rank, size, MPI_COMM_WORLD);
+    } else if (config.input_type == "binary") {
+      GraphIO::ReadSortedBinaryFile<GraphType>(g, config, rank, size, MPI_COMM_WORLD);
     } else if (config.gen != "null") {
       // Generator I/O
       kagen::KaGen gen(rank, size);

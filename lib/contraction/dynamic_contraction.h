@@ -40,18 +40,18 @@ class DynamicContraction {
         global_num_vertices_(0),
         contraction_level_(0),
         comm_time_(0.0) { 
-    inactive_level_.set_empty_key(-1);
-    inactive_level_.set_deleted_key(-1);
-    send_buffers_.set_empty_key(-1);
-    send_buffers_.set_deleted_key(-1);
-    receive_buffers_.set_empty_key(-1);
-    receive_buffers_.set_deleted_key(-1);
-    inserted_edges_.set_empty_key(-1);
-    inserted_edges_.set_deleted_key(-1);
-    propagated_edges_.set_empty_key(-1);
-    propagated_edges_.set_deleted_key(-1);
-    edges_to_add_.set_empty_key(-1);
-    edges_to_add_.set_deleted_key(-1);
+    is_active_.set_empty_key(EmptyKey);
+    is_active_.set_deleted_key(DeleteKey);
+    send_buffers_.set_empty_key(EmptyKey);
+    send_buffers_.set_deleted_key(DeleteKey);
+    receive_buffers_.set_empty_key(EmptyKey);
+    receive_buffers_.set_deleted_key(DeleteKey);
+    inserted_edges_.set_empty_key(EmptyKey);
+    inserted_edges_.set_deleted_key(DeleteKey);
+    propagated_edges_.set_empty_key(EmptyKey);
+    propagated_edges_.set_deleted_key(DeleteKey);
+    edges_to_add_.set_empty_key(EmptyKey);
+    edges_to_add_.set_deleted_key(DeleteKey);
   }
 
   virtual ~DynamicContraction() = default;
@@ -62,9 +62,8 @@ class DynamicContraction {
     propagation_timer.Restart();
     global_num_vertices_ = g_.GatherNumberOfGlobalVertices();
 
-    // Update with new vertices added during last contraction
     g_.ForallVertices([&](VertexID v) {
-      inactive_level_[v] = -1;
+      is_active_[contraction_level_][v] = true;
     });
 
     contraction_timer_.Restart();
@@ -80,7 +79,7 @@ class DynamicContraction {
 
       contraction_timer_.Restart();
       comm_timer_.Restart();
-      CommunicationUtility::SparseAllToAll(send_buffers_, receive_buffers_, rank_, size_, 1000);
+      CommunicationUtility::SparseAllToAll(send_buffers_, receive_buffers_, rank_, size_, ContractionTag + local_iterations);
       comm_time_ += comm_timer_.Elapsed();
       std::cout << "[STATUS] |---- R" << rank_ << " Message exchange took " 
                 << "[TIME] " << contraction_timer_.Elapsed() << std::endl;
@@ -110,23 +109,28 @@ class DynamicContraction {
     std::cout << "[STATUS] |---- R" << rank_ << " Propagation done " 
               << "[INFO] rounds "  << local_iterations << " "
               << "[TIME] " << propagation_timer.Elapsed() << std::endl;
+    contraction_level_++;
 
+    // Clear propagation buffers
     inserted_edges_.clear();
     propagated_edges_.clear();
 
-    // Insert edges and keep corresponding vertices
+    // Remove all edges and disable interface vertices
     contraction_timer_.Restart();
-    g_.ForallLocalVertices([&](VertexID v) { g_.RemoveAllEdges(v); });
-    contraction_level_++;
-
-    UpdateActiveVertices();
+    g_.ForallVertices([&](VertexID v) { 
+      g_.RemoveAllEdges(v); 
+      g_.SetInterface(v, false);
+    });
     g_.ResetNumberOfCutEdges();
     g_.ResetAdjacentPEs();
-    InsertAndClearEdges();
+    ResetActiveVertices();
 
+    // Insert edges and keep corresponding vertices
+    InsertAndClearEdges();
     std::cout << "[STATUS] |---- R" << rank_ << " Updating edges took " 
               << "[TIME] " << contraction_timer_.Elapsed() << std::endl;
 
+    // Reenable vertices that have at least one edge
     UpdateGraphVertices();
   }
 
@@ -138,7 +142,7 @@ class DynamicContraction {
 
     // Update with new vertices added during last contraction
     g_.ForallVertices([&](VertexID v) {
-      inactive_level_[v] = -1;
+      is_active_[contraction_level_][v] = true;
     });
 
     contraction_timer_.Restart();
@@ -151,7 +155,7 @@ class DynamicContraction {
     int num_requests = 0;
 
     comm_timer_.Restart();
-    CommunicationUtility::SparseAllToAll(send_buffers_, receive_buffers_, rank_, size_, 1000);
+    CommunicationUtility::SparseAllToAll(send_buffers_, receive_buffers_, rank_, size_, ContractionTag);
     comm_time_ += comm_timer_.Elapsed();
     CommunicationUtility::ClearBuffers(send_buffers_);
     ProcessDirectMessages();
@@ -162,10 +166,13 @@ class DynamicContraction {
 
     // Insert edges and keep corresponding vertices
     contraction_timer_.Restart();
-    g_.ForallLocalVertices([&](VertexID v) { g_.RemoveAllEdges(v); });
+    g_.ForallVertices([&](VertexID v) { 
+      g_.RemoveAllEdges(v); 
+      g_.SetInterface(v, false);
+    });
     contraction_level_++;
 
-    UpdateActiveVertices();
+    ResetActiveVertices();
     g_.ResetNumberOfCutEdges();
     g_.ResetAdjacentPEs();
     InsertAndClearEdges();
@@ -184,7 +191,7 @@ class DynamicContraction {
 
     // Update with new vertices added during last contraction
     g_.ForallVertices([&](VertexID v) {
-      inactive_level_[v] = -1;
+      is_active_[contraction_level_][v] = true;
     });
 
     FindLocalConflictingEdges();
@@ -194,7 +201,7 @@ class DynamicContraction {
     int local_iterations = 0;
     while (converged_globally == 0) {
       comm_timer_.Restart();
-      CommunicationUtility::SparseAllToAll(send_buffers_, receive_buffers_, rank_, size_, 1000);
+      CommunicationUtility::SparseAllToAll(send_buffers_, receive_buffers_, rank_, size_, ContractionTag + local_iterations);
       comm_time_ += comm_timer_.Elapsed();
       CommunicationUtility::ClearBuffers(send_buffers_);
 
@@ -226,10 +233,13 @@ class DynamicContraction {
     propagated_edges_.clear();
 
     // Insert edges and keep corresponding vertices
-    g_.ForallLocalVertices([&](VertexID v) { g_.RemoveAllEdges(v); });
+    g_.ForallVertices([&](VertexID v) { 
+      g_.RemoveAllEdges(v); 
+      g_.SetInterface(v, false);
+    });
     contraction_level_++;
 
-    UpdateActiveVertices();
+    ResetActiveVertices();
     g_.ResetNumberOfCutEdges();
     g_.ResetAdjacentPEs();
     InsertAndClearEdges();
@@ -488,9 +498,15 @@ class DynamicContraction {
     send_buffers_[pe].emplace_back(parent);
   }
 
-  void UpdateActiveVertices() {
-    for (auto &kv : inactive_level_) {
-      if (kv.second == -1) inactive_level_[kv.first] = contraction_level_ - 1;
+  void ResetActiveVertices() {
+    // Set vertices from previously level to inactive
+    std::vector<VertexID> prev_active;
+    for (auto &kv : is_active_[contraction_level_ - 1]) {
+      prev_active.emplace_back(kv.first);
+    }
+    // Decouple loop
+    for (const VertexID &v : prev_active) {
+      is_active_[contraction_level_][v] = false;
     }
   }
 
@@ -505,12 +521,16 @@ class DynamicContraction {
         if (!g_.IsLocalFromGlobal(wlabel) && !g_.IsGhostFromGlobal(wlabel)) {
           g_.AddGhostVertex(wlabel, pe);
         }
+        VertexID wlocal = g_.GetLocalID(wlabel);
         // Add edge
         g_.AddEdge(vlocal, wlabel, pe);
-        VertexID wlocal = g_.GetLocalID(wlabel);
-        // Vertices remain active
-        inactive_level_[vlocal] = -1;
-        inactive_level_[wlocal] = -1;
+        // Add reverse add for ghosts
+        if (g_.IsGhost(wlocal)) {
+          g_.AddEdge(wlocal, vlabel, rank_);
+        }
+        // Set corresponding vertices to active
+        is_active_[contraction_level_][vlocal] = true;
+        is_active_[contraction_level_][wlocal] = true;
         g_.SetVertexMessage(vlocal, {
                               std::numeric_limits<VertexID>::max() - 1,
                               vlabel, 
@@ -531,12 +551,16 @@ class DynamicContraction {
       }
       buffer.clear();
     }
+    for (auto &kv : edges_to_add_) {
+      edges_to_add_[kv.first].clear();
+    }
     edges_to_add_.clear();
   }
 
   void UpdateGraphVertices() {
-    for (auto &kv : inactive_level_) {
-      g_.SetActive(kv.first, kv.second == -1);
+    // Activate remaining vertices in graph representation
+    for (auto &kv : is_active_[contraction_level_]) {
+      g_.SetActive(kv.first, kv.second);
     }
   }
 
@@ -547,17 +571,17 @@ class DynamicContraction {
       contraction_timer_.Restart();
       // Remove current edges from current level
       google::dense_hash_map<VertexID, VertexID> current_components; 
-      current_components.set_empty_key(-1);
-      current_components.set_deleted_key(-1);
-      g_.ForallLocalVertices([&](VertexID v) {
+      current_components.set_empty_key(EmptyKey);
+      current_components.set_deleted_key(DeleteKey);
+      g_.ForallVertices([&](VertexID v) {
         g_.RemoveAllEdges(v);
+        g_.SetInterface(v, false);
       });
 
       // Decrease level
       contraction_level_--;
 
       // Update active graph portion
-      EnableActiveVertices();
       AddRemovedEdges();
       UpdateGraphVertices();
       if (rank_ == ROOT) {
@@ -628,18 +652,16 @@ class DynamicContraction {
     }
   }
 
-  void EnableActiveVertices() {
-    for (auto &kv : inactive_level_) {
-      if (kv.second == contraction_level_) inactive_level_[kv.first] = -1;
-    }
-  }
-
+  // TODO: Does this work with ghosts are handled now?
   void AddRemovedEdges() {
     while (!removed_edges_.empty()) {
       auto e = removed_edges_.top();
       removed_edges_.pop();
       if (std::get<0>(e) == std::numeric_limits<VertexID>::max() - 1) break;
       g_.AddEdge(std::get<0>(e), std::get<1>(e), g_.GetPE(g_.GetLocalID(std::get<1>(e))));
+      if (!g_.IsLocalFromGlobal(std::get<1>(e))) {
+        g_.AddEdge(g_.GetLocalID(std::get<1>(e)), g_.GetGlobalID(std::get<0>(e)), rank_);
+      }
     }
   }
 
@@ -658,7 +680,7 @@ class DynamicContraction {
   VertexID contraction_level_;
   VertexID global_num_vertices_;
   std::stack<std::pair<VertexID, VertexID>> removed_edges_;
-  google::dense_hash_map<VertexID, short> inactive_level_;
+  google::dense_hash_map<VertexID, google::sparse_hash_map<VertexID, bool>> is_active_;
 
   // Buffers
   google::dense_hash_map<PEID, VertexBuffer> send_buffers_;

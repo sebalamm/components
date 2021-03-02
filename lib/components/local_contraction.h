@@ -190,8 +190,8 @@ class LocalContraction {
     std::vector<VertexPayload> n_smallest_neighbor(g.GetNumberOfLocalVertices());
     std::vector<VertexPayload> n_smallest_update(g.GetNumberOfLocalVertices());
     google::dense_hash_map<VertexID, VertexID> initial_parents;
-    initial_parents.set_empty_key(-1);
-    initial_parents.set_deleted_key(-1);
+    initial_parents.set_empty_key(EmptyKey);
+    initial_parents.set_deleted_key(DeleteKey);
     g.ForallLocalVertices([&](VertexID v) {
       n_smallest_neighbor[v] = g.GetVertexMessage(v);
       n_smallest_update[v] = g.GetVertexMessage(v);
@@ -304,8 +304,8 @@ class LocalContraction {
   void RunSequentialCC(DynamicGraphCommunicator &g) {
     // Build vertex mapping 
     google::dense_hash_map<VertexID, int> vertex_map; 
-    vertex_map.set_empty_key(-1);
-    vertex_map.set_deleted_key(-1);
+    vertex_map.set_empty_key(EmptyKey);
+    vertex_map.set_deleted_key(DeleteKey);
     std::vector<VertexID> reverse_vertex_map(g.GetNumberOfLocalVertices());
     int current_vertex = 0;
     g.ForallLocalVertices([&](const VertexID v) {

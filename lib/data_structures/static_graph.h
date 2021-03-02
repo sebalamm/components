@@ -67,11 +67,11 @@ class StaticGraph {
       ghost_counter_(0),
       last_source_(0),
       comm_time_(0.0) {
-    global_to_local_map_.set_empty_key(-1);
-    global_to_local_map_.set_deleted_key(-1);
-    // duplicates_.set_empty_key(-1);
-    adjacent_pes_.set_empty_key(-1);
-    adjacent_pes_.set_deleted_key(-1);
+    global_to_local_map_.set_empty_key(EmptyKey);
+    global_to_local_map_.set_deleted_key(DeleteKey);
+    // duplicates_.set_empty_key(EmptyKey);
+    adjacent_pes_.set_empty_key(EmptyKey);
+    adjacent_pes_.set_deleted_key(DeleteKey);
   }
 
   virtual ~StaticGraph() {};
@@ -277,7 +277,9 @@ class StaticGraph {
 
   VertexID GatherNumberOfGlobalVertices() {
     VertexID local_vertices = 0;
-    ForallLocalVertices([&](const VertexID v) { local_vertices++; });
+    ForallLocalVertices([&](const VertexID v) { 
+        local_vertices++; 
+    });
     // Check if all PEs are done
     comm_timer_.Restart();
     MPI_Allreduce(&local_vertices,
@@ -446,13 +448,15 @@ class StaticGraph {
     VertexID global_num_vertices = GatherNumberOfGlobalVertices();
     // Gather component sizes
     google::dense_hash_map<VertexID, VertexID> local_component_sizes; 
-    local_component_sizes.set_empty_key(-1);
-    local_component_sizes.set_deleted_key(-1);
+    local_component_sizes.set_empty_key(EmptyKey);
+    local_component_sizes.set_deleted_key(DeleteKey);
     ForallLocalVertices([&](const VertexID v) {
-      VertexID c = labels[v];
-      if (local_component_sizes.find(c) == end(local_component_sizes))
-        local_component_sizes[c] = 0;
-      local_component_sizes[c]++;
+      if (GetGlobalID(v) <= global_num_vertices) {
+        VertexID c = labels[v];
+        if (local_component_sizes.find(c) == end(local_component_sizes))
+          local_component_sizes[c] = 0;
+        local_component_sizes[c]++;
+      }
     });
 
     // Gather component message
@@ -488,8 +492,8 @@ class StaticGraph {
 
     if (rank_ == ROOT) {
       google::dense_hash_map<VertexID, VertexID> global_component_sizes; 
-      global_component_sizes.set_empty_key(-1);
-      global_component_sizes.set_deleted_key(-1);
+      global_component_sizes.set_empty_key(EmptyKey);
+      global_component_sizes.set_deleted_key(DeleteKey);
       for (auto &comp : global_components) {
         VertexID c = comp.first;
         VertexID size = comp.second;
@@ -499,8 +503,8 @@ class StaticGraph {
       }
 
       google::dense_hash_map<VertexID, VertexID> condensed_component_sizes; 
-      condensed_component_sizes.set_empty_key(-1);
-      condensed_component_sizes.set_deleted_key(-1);
+      condensed_component_sizes.set_empty_key(EmptyKey);
+      condensed_component_sizes.set_deleted_key(DeleteKey);
       for (auto &cs : global_component_sizes) {
         VertexID c = cs.first;
         VertexID size = cs.second;
