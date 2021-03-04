@@ -74,7 +74,7 @@ class DynamicGraph {
   // Graph construction
   //////////////////////////////////////////////
   void StartConstruct(VertexID local_n, VertexID ghost_n, VertexID ghost_offset) {
-    ghost_offset_ = ghost_offset;
+    ghost_offset_ = size_ * ghost_offset;
   }
 
   void FinishConstruct() { number_of_edges_ = edge_counter_; }
