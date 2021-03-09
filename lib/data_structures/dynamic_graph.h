@@ -381,11 +381,11 @@ class DynamicGraph {
         local_adjacent_edges_[from].erase(local_adjacent_edges_[from].begin() + delete_pos);
         if (IsGhost(to)) number_of_cut_edges_--;
       } else {
-        std::cout << "This shouldn't happen (illegal remove edge)" << std::endl;
+        std::cout << "R" << rank_ << " This shouldn't happen (illegal remove edge (" << GetGlobalID(from) << "," << GetGlobalID(to) << "))" << std::endl;
         exit(1);
       }
     } else {
-      std::cout << "This shouldn't happen (illegal remove edge)" << std::endl;
+      std::cout << "R" << rank_ << " This shouldn't happen (illegal remove edge (ghost source))" << std::endl;
       exit(1);
     }
   }
@@ -524,7 +524,9 @@ class DynamicGraph {
 
     std::cout << "[R" << rank << "] [G] [ ";
     for (auto &e : global_to_local_map_) {
-      std::cout << e.first << " ";
+      if (IsGhost(e.second)) {
+        std::cout << e.first << " ";
+      }
     }
     std::cout << "]" << std::endl;
   }
