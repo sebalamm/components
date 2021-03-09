@@ -692,7 +692,7 @@ class ExponentialContraction {
     std::vector<VertexID> high_degree_vertices;
     VertexID avg_max_deg = Utility::ComputeAverageMaxDegree(g, rank_, size_);
     // Use sqrt(n) as a degree threshold
-    config_.degree_threshold = static_cast<VertexID>(2*sqrt(global_vertices));
+    config_.degree_threshold = static_cast<VertexID>(config_.degree_threshold*sqrt(global_vertices));
     if (rank_ == ROOT) {
       std::cout << "[STATUS] |- High degree threshold " << config_.degree_threshold
                 << " [TIME] " << contraction_timer_.Elapsed() << std::endl;
