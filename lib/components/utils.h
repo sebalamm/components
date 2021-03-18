@@ -80,11 +80,11 @@ class Utility {
   template <typename GraphType>
   static void SelectHighDegreeVertices(GraphType &g, 
                                        VertexID degree_threshold,
-                                       std::vector<VertexID> &high_degree_vertices) {
+                                       std::vector<std::pair<VertexID, VertexID>> &high_degree_vertices) {
     g.ForallLocalVertices([&](const VertexID v) {
       VertexID v_deg = g.GetVertexDegree(v);
       if (v_deg >= degree_threshold) {
-        high_degree_vertices.emplace_back(v);
+        high_degree_vertices.emplace_back(v, v_deg);
       }
     });
   }

@@ -676,20 +676,20 @@ class ExponentialContraction {
     });
   }
 
-  void SampleHighDegreeNeighborhoods(DynamicGraphCommunicator &g) {
-    std::vector<VertexID> high_degree_vertices;
-    VertexID avg_max_deg = Utility::ComputeAverageMaxDegree(g, rank_, size_);
-    Utility::SelectHighDegreeVertices(g, config_.degree_threshold * avg_max_deg, high_degree_vertices);
+  // void SampleHighDegreeNeighborhoods(DynamicGraphCommunicator &g) {
+  //   std::vector<std::pair<VertexID, VertexID>> high_degree_vertices;
+  //   VertexID avg_max_deg = Utility::ComputeAverageMaxDegree(g, rank_, size_);
+  //   Utility::SelectHighDegreeVertices(g, config_.degree_threshold * avg_max_deg, high_degree_vertices);
 
-    for (const VertexID &v : high_degree_vertices) {
-      g.SampleVertexNeighborhood(v, config_.neighborhood_sampling_factor);
-    }
-  }
+  //   for (const auto &vd : high_degree_vertices) {
+  //     g.SampleVertexNeighborhood(v, config_.neighborhood_sampling_factor);
+  //   }
+  // }
 
   void DistributeHighDegreeVertices(DynamicGraphCommunicator &g) {
     // Determine high degree vertices
     VertexID global_vertices = g.GatherNumberOfGlobalVertices();
-    std::vector<VertexID> high_degree_vertices;
+    std::vector<std::pair<VertexID, VertexID>> high_degree_vertices;
     VertexID avg_max_deg = Utility::ComputeAverageMaxDegree(g, rank_, size_);
     // Use sqrt(n) as a degree threshold
     config_.degree_threshold = static_cast<VertexID>(config_.degree_threshold*sqrt(global_vertices));
@@ -700,18 +700,291 @@ class ExponentialContraction {
     Utility::SelectHighDegreeVertices(g, config_.degree_threshold, high_degree_vertices);
     
     // Split high degree vertices into one layer of proxies with degree sqrt(n)
-    SplitHighDegreeVerticesSqrtPseudo(g, avg_max_deg, high_degree_vertices);
+    SplitHighDegreeVerticesSqrtEdge(g, avg_max_deg, high_degree_vertices);
+    // SplitHighDegreeVerticesSqrtPseudo(g, avg_max_deg, high_degree_vertices);
     // SplitHighDegreeVerticesSqrt(g, avg_max_deg, high_degree_vertices);
     // Split high degree vertices into binomial trees
     // SplitHighDegreeVerticesIntoTrees(g, avg_max_deg, high_degree_vertices);
   }
 
-  void SplitHighDegreeVerticesSqrtPseudo(DynamicGraphCommunicator &g,
+  void SplitHighDegreeVerticesSqrtEdge(DynamicGraphCommunicator &g,
                                          const VertexID &avg_max_deg,
-                                         const std::vector<VertexID> &high_degree_vertices) {
+                                         std::vector<std::pair<VertexID, VertexID>> &high_degree_vertices) {
     // Compute offset for IDs of replicated vertices
     VertexID num_global_vertices = g.GatherNumberOfGlobalVertices();
-    // TODO: Check if this offset if correct
+
+    // Default buffers for message exchange
+    google::dense_hash_map<PEID, VertexBuffer> send_buffers;
+    send_buffers.set_empty_key(EmptyKey);
+    send_buffers.set_deleted_key(DeleteKey);
+    google::dense_hash_map<PEID, VertexBuffer> receive_buffers;
+    receive_buffers.set_empty_key(EmptyKey);
+    receive_buffers.set_deleted_key(DeleteKey);
+    
+    // New edges to replicated vertices
+    std::vector<VertexID> local_edges;
+
+    // Map to relink edges
+    // Source, Target, Pair(Repl, Repl PE)
+    google::dense_hash_map<VertexID, google::sparse_hash_map<VertexID, std::pair<VertexID, PEID>>> replicated_edges;
+    replicated_edges.set_empty_key(EmptyKey);
+    replicated_edges.set_deleted_key(DeleteKey);
+
+    //////////////////////////////////////////
+    // Send high degree neighbors (their degree)
+    //////////////////////////////////////////
+    google::dense_hash_set<PEID> packed_pes;
+    packed_pes.set_empty_key(EmptyKey);
+    packed_pes.set_deleted_key(DeleteKey);
+    for (VertexID i = 0; i < high_degree_vertices.size(); ++i) {
+      VertexID v = high_degree_vertices[i].first;
+      VertexID deg_v = high_degree_vertices[i].second;
+
+      g.ForallNeighbors(v, [&](const VertexID w) {
+        if (!g.IsLocal(w)) {
+          PEID target_pe = g.GetPE(w);
+          // Only send vertex once
+          if (packed_pes.find(target_pe) == packed_pes.end()) {
+            send_buffers[target_pe].emplace_back(g.GetGlobalID(v));
+            send_buffers[target_pe].emplace_back(deg_v);
+            packed_pes.insert(target_pe);
+          }
+        }
+      });
+      packed_pes.clear();
+    }
+
+    // Send updates
+    receive_buffers[rank_] = send_buffers[rank_];
+    send_buffers[rank_].clear();
+
+    comm_timer_.Restart();
+    CommunicationUtility::SparseAllToAll(send_buffers, receive_buffers, rank_, size_, 993);
+    comm_time_ += comm_timer_.Elapsed();
+    CommunicationUtility::ClearBuffers(send_buffers);
+
+    //////////////////////////////////////////
+    // Receive high degree neighbors (their degree)
+    //////////////////////////////////////////
+    for (auto &kv : receive_buffers) {
+      PEID source_pe = kv.first;
+      auto &vertex_degrees = kv.second;
+      for (VertexID i = 0; i < vertex_degrees.size(); i += 2) {
+        VertexID vertex = vertex_degrees[i];
+        VertexID degree = vertex_degrees[i + 1];
+        high_degree_vertices.emplace_back(g.GetLocalID(vertex), degree);
+      }
+    }
+    CommunicationUtility::ClearBuffers(receive_buffers);
+
+    //////////////////////////////////////////
+    // Each PE now has a vector of his and neighboring high degree vertices
+    // Compute distribution of replicates
+    //////////////////////////////////////////
+    std::uniform_int_distribution<PEID> dist(0, size_ - 1);
+    PEID num_replicates = std::min(size_ - 1, static_cast<PEID>(config_.degree_threshold));
+    // This now also includes ghosts
+    for (VertexID i = 0; i < high_degree_vertices.size(); ++i) {
+      // Careful: v is local ID
+      VertexID v = high_degree_vertices[i].first;
+      // TODO: Check if this seed makes sense
+      VertexID vertex_seed = config_.seed + g.GetGlobalID(v);
+      PEID taboo_rank = g.GetPE(v);
+      // If we compute the repl_vertices_id here, this should be recomputed consistently
+      VertexID vertex_offset = num_global_vertices * (taboo_rank + 1) + g.GetGlobalID(v);
+      VertexID repl_vertices_id = vertex_offset;
+
+      // Compute set of min(P - 1, sqrt(n)) _unique_ possible targets to sample from
+      // Associate a unique replicate with each target
+      // We have to initialize a mersenne twister (or something similar) for each vertex
+      // so that a neighboring PE can reproduce this set without communication
+      std::mt19937 gen(vertex_seed);
+      google::dense_hash_map<PEID, VertexID> pes_for_replication;
+      pes_for_replication.set_empty_key(EmptyKey);
+      pes_for_replication.set_deleted_key(DeleteKey);
+      // Vector to actually sample PEs from
+      std::vector<std::pair<PEID, VertexID>> sampling_vector;
+      while (pes_for_replication.size() < num_replicates) {
+        PEID target_pe = size_;
+        do {
+          target_pe = dist(gen);
+        } while (target_pe == taboo_rank || pes_for_replication.find(target_pe) != pes_for_replication.end());
+        pes_for_replication[target_pe] = repl_vertices_id;
+        // std::cout << "R" << rank_ << " store replicate vertex " << repl_vertices_id << " PE(rep) " << target_pe << " for v " << g.GetGlobalID(v) << " PE(v) " << taboo_rank << std::endl;
+        sampling_vector.emplace_back(target_pe, repl_vertices_id);
+        repl_vertices_id++;
+      }
+
+      // For each outgoing edge select a random PE from the set of targets
+      std::uniform_int_distribution<PEID> dist(0, num_replicates - 1);
+      g.ForallNeighbors(v, [&](const VertexID w) {
+        // Create a unique seed for the current edge
+        VertexID edge_seed = config_.seed + g.GetGlobalID(v) * num_global_vertices + g.GetGlobalID(w);
+        // Select the (random) target PE
+        std::mt19937 gen(edge_seed);
+        PEID index = dist(gen);
+        // Get the associated elements from the sampling vector
+        PEID target_pe = sampling_vector[index].first;
+        VertexID repl_vertices_id = sampling_vector[index].second;
+
+        // PE now knows that edge (v, w) will be replicated to repl_vertices_id on target_pe
+        // For each edge store its associated replicate
+        // std::cout << "R" << rank_ << " store replicate edge (" << repl_vertices_id << "," << g.GetGlobalID(w) << ") for e (" << g.GetGlobalID(v) << "," << g.GetGlobalID(w) << ")" << std::endl;
+        replicated_edges[g.GetGlobalID(v)][g.GetGlobalID(w)] = std::make_pair(repl_vertices_id, target_pe);
+      });
+    }
+
+    // MPI_Barrier(MPI_COMM_WORLD);
+    // if (rank_ == ROOT) std::cout << "[R" << rank_ << "] Computed initial replicates" << std::endl;
+    // MPI_Barrier(MPI_COMM_WORLD);
+    // exit(1);
+
+    // We have to relink our replicated edges based on the recomputed information 
+    // I.e. if for an edge (v,w) both endpoints have been replicated (replicated_edges[v][w] and replicated_edges[w][v] exist)
+    // In this case update the edge with the correct target
+    // Finally, send the edges to their respective replicates
+    for (VertexID i = 0; i < high_degree_vertices.size(); ++i) {
+      VertexID v = high_degree_vertices[i].first;
+      // Only handle local vertices
+      if (!g.IsLocal(v)) continue;
+
+      VertexID edge_source_id = g.GetGlobalID(v);
+      PEID edge_source_pe = rank_;
+
+      g.ForallNeighbors(v, [&](const VertexID w) {
+        VertexID edge_target_id = g.GetGlobalID(w);
+        PEID edge_target_pe = g.GetPE(w);
+
+        auto &replicate = replicated_edges[edge_source_id][edge_target_id];
+        VertexID repl_source_id = replicate.first;
+        PEID repl_source_pe = replicate.second;
+
+        // Add replicates (and corresponding edge) if they are not already present
+        if (!(g.IsLocalFromGlobal(repl_source_id) || g.IsGhostFromGlobal(repl_source_id))) {
+          g.AddGhostVertex(repl_source_id, repl_source_pe);
+          local_edges.emplace_back(repl_source_id);
+          local_edges.emplace_back(repl_source_pe);
+        }
+
+        // Always start message with original and replicated source
+        send_buffers[repl_source_pe].emplace_back(edge_source_id);
+        send_buffers[repl_source_pe].emplace_back(repl_source_id);
+
+        // Now check if the target is still valid or was also replicated
+        if (replicated_edges.find(edge_target_id) != replicated_edges.end() &&
+            replicated_edges[edge_target_id].find(edge_source_id) != replicated_edges[edge_target_id].end()) {
+          auto &reverse_replicate = replicated_edges[edge_target_id][edge_source_id];
+          // If so, overwrite the edge target with the replicate and the associated pe
+          edge_target_id = reverse_replicate.first;
+          edge_target_pe = reverse_replicate.second;
+        }
+
+        // Add (correct) edge target to message
+        send_buffers[repl_source_pe].emplace_back(edge_target_id);
+        send_buffers[repl_source_pe].emplace_back(edge_target_pe);
+
+        // std::cout << "R" << rank_ << " send edge (" << repl_source_id << "," << edge_target_id << " (PE " << edge_target_pe << ")) to PE " << repl_source_pe << std::endl;
+      });
+
+      // Replace edges with new edges to replicates
+      g.RemoveAllEdges(v);
+      for (VertexID i = 0; i < local_edges.size(); i+= 2) {
+        g.AddEdge(v, local_edges[i], local_edges[i+1]);
+        g.AddEdge(g.GetLocalID(local_edges[i]), g.GetGlobalID(v), rank_);
+      }
+      local_edges.clear();
+    }
+
+    // MPI_Barrier(MPI_COMM_WORLD);
+    // if (rank_ == ROOT) std::cout << "[R" << rank_ << "] Updated and sent replicates" << std::endl;
+    // MPI_Barrier(MPI_COMM_WORLD);
+    // exit(1);
+    
+    // Send updates
+    receive_buffers[rank_] = send_buffers[rank_];
+    send_buffers[rank_].clear();
+
+    comm_timer_.Restart();
+    CommunicationUtility::SparseAllToAll(send_buffers, receive_buffers, rank_, size_, 993);
+    comm_time_ += comm_timer_.Elapsed();
+    CommunicationUtility::ClearBuffers(send_buffers);
+
+    //////////////////////////////////////////
+    // Process received edges 
+    //////////////////////////////////////////
+    // First add any replicate vertices
+    for (auto &kv : receive_buffers) {
+      PEID edge_source_pe = kv.first;
+      auto &edges = kv.second;
+
+      // Iterate over received edges
+      for (VertexID i = 0; i < edges.size(); i += 4) {
+        VertexID edge_source_id = edges[i];
+        VertexID repl_source_id = edges[i + 1];
+        VertexID edge_target_id = edges[i + 2];
+        PEID edge_target_pe = edges[i + 3];
+
+        // Add replicate if not existent yet
+        if (!(g.IsLocalFromGlobal(repl_source_id) || g.IsGhostFromGlobal(repl_source_id))) {
+          g.AddVertex(repl_source_id);
+          // std::cout << "R" << rank_ << " add repl (local) " << repl_source_id << std::endl;
+
+          // Also add original source if not existent yet
+          if (!(g.IsLocalFromGlobal(edge_source_id) || g.IsGhostFromGlobal(edge_source_id))) {
+            g.AddGhostVertex(edge_source_id, edge_source_pe);
+          }
+          // Add local edge from replicate to source (and vice versa)
+          g.AddEdge(g.GetLocalID(repl_source_id), edge_source_id, edge_source_pe);
+          g.AddEdge(g.GetLocalID(edge_source_id), repl_source_id, rank_);
+          // std::cout << "R" << rank_ << " add edge (repl) (" << repl_source_id << "," << edge_source_id << " (PE " << edge_source_pe << "))" << std::endl;
+        }
+      }
+    }
+
+    // Now add edges once all replicates are in place
+    for (auto &kv : receive_buffers) {
+      PEID edge_source_pe = kv.first;
+      auto &edges = kv.second;
+
+      // Iterate over received edges
+      for (VertexID i = 0; i < edges.size(); i += 4) {
+        VertexID edge_source_id = edges[i];
+        VertexID repl_source_id = edges[i + 1];
+        VertexID edge_target_id = edges[i + 2];
+        PEID edge_target_pe = edges[i + 3];
+
+        // Add any remaining ghosts
+        if (!(g.IsLocalFromGlobal(edge_target_id) || g.IsGhostFromGlobal(edge_target_id))) {
+          g.AddGhostVertex(edge_target_id, edge_target_pe);
+        }
+
+        // If this is a local edge only insert it for one of the two 
+        if (edge_target_pe == rank_ && repl_source_id < edge_target_id) {
+          g.AddEdge(g.GetLocalID(repl_source_id), edge_target_id, edge_target_pe);
+          g.AddEdge(g.GetLocalID(edge_target_id), repl_source_id, rank_);
+          // std::cout << "R" << rank_ << " add edge (direct local) (" << repl_source_id << "," << edge_target_id << " (PE " << edge_target_pe << "))" << std::endl;
+        } 
+        // Otherwise we can insert it without problems
+        else if (edge_target_pe != rank_){
+          g.AddEdge(g.GetLocalID(repl_source_id), edge_target_id, edge_target_pe);
+          g.AddEdge(g.GetLocalID(edge_target_id), repl_source_id, rank_);
+          // std::cout << "R" << rank_ << " add edge (direct remote) (" << repl_source_id << "," << edge_target_id << " (PE " << edge_target_pe << "))" << std::endl;
+        }
+      }
+    }
+    CommunicationUtility::ClearBuffers(receive_buffers);
+
+    // MPI_Barrier(MPI_COMM_WORLD);
+    // if (rank_ == ROOT) std::cout << "[R" << rank_ << "] Finished replication" << std::endl;
+    // MPI_Barrier(MPI_COMM_WORLD);
+    // exit(1);
+  }
+
+  void SplitHighDegreeVerticesSqrtPseudo(DynamicGraphCommunicator &g,
+                                         const VertexID &avg_max_deg,
+                                         const std::vector<std::pair<VertexID, VertexID>> &high_degree_vertices) {
+    // Compute offset for IDs of replicated vertices
+    VertexID num_global_vertices = g.GatherNumberOfGlobalVertices();
     VertexID vertex_offset = num_global_vertices * (rank_ + 1);
     VertexID repl_vertices_id = vertex_offset;
 
@@ -745,7 +1018,7 @@ class ExponentialContraction {
     std::mt19937 gen(config_.seed + rank_);
     std::uniform_int_distribution<PEID> dist(0, size_ - 1);
     for (VertexID i = 0; i < high_degree_vertices.size(); ++i) {
-      VertexID v = high_degree_vertices[i];
+      VertexID v = high_degree_vertices[i].first;
       // Select random (different) target pe 
       PEID target_pe = dist(gen);
       while (target_pe == rank_) {
@@ -787,26 +1060,6 @@ class ExponentialContraction {
       });
     }
 
-    //////////////////////////////////////////
-    // Exchange targets with high degree neighbors
-    //////////////////////////////////////////
-    // for (VertexID i = 0; i < high_degree_vertices.size(); ++i) {
-    //   VertexID v = high_degree_vertices[i];
-    //   // Iterate over neighbors and check if they are ghosts
-    //   g.ForallNeighbors(v, [&](const VertexID w) {
-    //     if (g.IsGhost(w)) {
-    //       PEID source_pe = g.GetPE(w);
-    //       VertexID edge_source = g.GetGlobalID(w);
-    //       VertexID edge_target = g.GetGlobalID(v);
-    //       auto &new_target = replicated_edges[edge_target][edge_source];
-    //       VertexID new_edge_target = new_target.first;
-    //       PEID new_target_pe = new_target.second;
-    //       // Queue message (edge source, edge target, new edge target, new target pe) to source pe,
-    //       // Thus source PE can redistribute (edge source, new edge target, new target pe) to his replicate
-    //     }
-    //   });
-    // }
-
     // Send updates
     receive_buffers[rank_] = send_buffers[rank_];
     send_buffers[rank_].clear();
@@ -846,7 +1099,7 @@ class ExponentialContraction {
     std::mt19937 gen_san(config_.seed + rank_);
     std::uniform_int_distribution<PEID> dist_san(0, size_ - 1);
     for (VertexID i = 0; i < high_degree_vertices.size(); ++i) {
-      VertexID v = high_degree_vertices[i];
+      VertexID v = high_degree_vertices[i].first;
       VertexID source_vertex = g.GetGlobalID(v);
       // Load replicates
       VertexID replicate_counter = 0;
