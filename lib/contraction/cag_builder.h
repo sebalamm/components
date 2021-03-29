@@ -184,8 +184,8 @@ class CAGBuilder {
     IdentifyLargestInterfaceComponents();
     AddComponentMessages();
 
-    // std::cout << "[STATUS] |--- R" << rank_ << " Filling buffers took " 
-    //           << "[TIME] " << exchange_timer.Elapsed() << std::endl;
+    std::cout << "[STATUS] |--- R" << rank_ << " Filling buffers took " 
+              << "[TIME] " << exchange_timer.Elapsed() << std::endl;
 
     exchange_timer.Restart();
     google::dense_hash_map<PEID, VertexID> largest_component; 
@@ -202,19 +202,19 @@ class CAGBuilder {
     comm_time_ += comm_timer_.Elapsed();
     CommunicationUtility::ClearBuffers(send_buffers_);
 
-    // std::cout << "[STATUS] |--- Sparse exchange took " 
-    //           << "[TIME] " << exchange_timer.Elapsed() << std::endl;
+    std::cout << "[STATUS] |--- Sparse exchange took " 
+              << "[TIME] " << exchange_timer.Elapsed() << std::endl;
 
     exchange_timer.Restart();
     HandleMessages(largest_component, vertex_message);
     CommunicationUtility::ClearBuffers(receive_buffers_);
-    // std::cout << "[STATUS] |--- Message handling took " 
-    //           << "[TIME] " << exchange_timer.Elapsed() << std::endl;
+    std::cout << "[STATUS] |--- Message handling took " 
+              << "[TIME] " << exchange_timer.Elapsed() << std::endl;
 
     exchange_timer.Restart();
     ApplyUpdatesToGhostVertices(largest_component, vertex_message);
-    // std::cout << "[STATUS] |--- R" << rank_ << " Local updates took " 
-    //           << "[TIME] " << exchange_timer.Elapsed() << std::endl;
+    std::cout << "[STATUS] |--- R" << rank_ << " Local updates took " 
+              << "[TIME] " << exchange_timer.Elapsed() << std::endl;
   }
 
   void IdentifyLargestInterfaceComponents() {
