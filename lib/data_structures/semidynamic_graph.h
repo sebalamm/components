@@ -329,8 +329,8 @@ class SemidynamicGraph {
         std::cout << "This shouldn't happen" << std::endl;
         exit(1);
       }
-      local_vertices_data_[from].is_interface_vertex_ = true;
       if (IsGhostFromGlobal(to)) { // true if ghost already in map, otherwise false
+        local_vertices_data_[from].is_interface_vertex_ = true;
         number_of_cut_edges_++;
         AddGhostEdge(from, to);
         SetAdjacentPE(rank, true);

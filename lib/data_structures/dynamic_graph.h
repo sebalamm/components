@@ -331,9 +331,9 @@ class DynamicGraph {
         std::cout << "This shouldn't happen (illegal add edge)" << std::endl;
         exit(1);
       }
-      // NOTE: from always local
-      local_vertices_data_[from].is_interface_vertex_ = true;
+      // NOTE: from always local 
       if (IsGhostFromGlobal(to)) { // true if ghost already in map, otherwise false
+        local_vertices_data_[from].is_interface_vertex_ = true;
         number_of_cut_edges_++;
         AddGhostEdge(from, to);
         SetAdjacentPE(rank, true);

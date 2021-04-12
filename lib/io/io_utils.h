@@ -89,6 +89,13 @@ class IOUtility {
     VertexID n = g.GatherNumberOfGlobalVertices();
     EdgeID m = g.GatherNumberOfGlobalEdges();
 
+    VertexID highest_degree = 0;
+    g.ForallLocalVertices([&](const VertexID v) {
+      if (g.GetVertexDegree(v) > highest_degree) {
+        highest_degree = g.GetVertexDegree(v);
+      }
+    });
+
     // Determine min/maximum cut size
     EdgeID m_cut = g.GetNumberOfCutEdges();
     EdgeID min_cut, max_cut;
@@ -105,6 +112,7 @@ class IOUtility {
                 << "m=" << m << ", "
                 << "c(min,max)=" << min_cut << "," << max_cut << std::endl;
     }
+    std::cout << "R" << rank << " LOCAL INPUT" << " c= " << m_cut << ", hd=" << highest_degree << std::endl;
   }
 };
 

@@ -528,6 +528,7 @@ class DynamicContraction {
         if (g_.IsGhost(wlocal)) {
           g_.AddEdge(wlocal, vlabel, rank_);
         }
+        // std::cout << "R" << rank_ << " add contraction edge (" << vlabel << "," << wlabel << "(R" << pe << "))" << std::endl;
         // Set corresponding vertices to active
         is_active_[contraction_level_][vlocal] = true;
         is_active_[contraction_level_][wlocal] = true;
