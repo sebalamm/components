@@ -108,7 +108,7 @@ class ExponentialContraction {
         comm_time_ += contraction.GetCommTime() 
                       + exp_contraction_->GetCommTime()
                       + cag.GetCommTime() + g.GetCommTime();
-      } else {
+      } else if (config_.use_contraction) {
         // First round of contraction
         contraction_timer_.Restart();
         CAGBuilder<StaticGraph> 
@@ -175,41 +175,58 @@ class ExponentialContraction {
         comm_time_ += first_contraction.GetCommTime() + second_contraction.GetCommTime() 
                       + exp_contraction_->GetCommTime()
                       + ccag.GetCommTime() + cag.GetCommTime() + g.GetCommTime();
-      }
-    } else if constexpr (std::is_same<GraphType, DynamicGraphCommunicator>::value) {
-      if (config_.replicate_high_degree) {
+      } else {
+        // At least contract locally
         contraction_timer_.Restart();
-        DistributeHighDegreeVertices(g);
-        // g.OutputLocal();
-        // g.OutputGhosts();
-        OutputStats<DynamicGraphCommunicator>(g);
+        CAGBuilder<StaticGraph> 
+          local_contraction(g, g_labels, rank_, size_);
+        auto lcag 
+          = local_contraction.BuildLocalComponentGraph<DynamicGraphCommunicator>();
+        lcag.ResetCommunicator();
+        OutputStats<DynamicGraphCommunicator>(lcag);
         if (rank_ == ROOT) {
-          std::cout << "[STATUS] |- Distributing high degree vertices took " 
+          std::cout << "[STATUS] |- Building local cag took " 
                     << "[TIME] " << contraction_timer_.Elapsed() << std::endl;
         }
-      }
 
-      exp_contraction_ = new DynamicContraction(g, rank_, size_);
-
-      PerformDecomposition(g);
-
-      if (config_.replicate_high_degree) {
-        RemoveReplicatedVertices(g);
-      }
-
-      google::sparse_hash_map<VertexID, VertexID> comp_sizes;
-      g.ForallLocalVertices([&](const VertexID v) {
-          if (comp_sizes.find(g.GetVertexLabel(v)) == comp_sizes.end()) {
-            comp_sizes[g.GetVertexLabel(v)] = 0;
+        if (config_.replicate_high_degree) {
+          contraction_timer_.Restart();
+          DistributeHighDegreeVertices(lcag);
+          OutputStats<DynamicGraphCommunicator>(lcag);
+          if (rank_ == ROOT) {
+            std::cout << "[STATUS] |- Distributing high degree vertices took " 
+                      << "[TIME] " << contraction_timer_.Elapsed() << std::endl;
           }
-          comp_sizes[g.GetVertexLabel(v)]++;
-          if (v >= g_labels.size()) {
-            std::cout << "R" << rank_ << " This shouldn't happen: Invalid vertex remap v=" << g.GetGlobalID(v) << " lid=" << v << " label=" << g.GetVertexLabel(v) << std::endl;
-            exit(1);
-          }
-          g_labels[v] = g.GetVertexLabel(v);
-      });
-    }
+        }
+
+        exp_contraction_ = new DynamicContraction(lcag, rank_, size_);
+
+        PerformDecomposition(lcag);
+
+        if (config_.replicate_high_degree) {
+          RemoveReplicatedVertices(lcag);
+        }
+
+        ApplyToLocalComponents(lcag, g, g_labels);
+        comm_time_ += local_contraction.GetCommTime() 
+                      + exp_contraction_->GetCommTime()
+                      + lcag.GetCommTime() + g.GetCommTime();
+
+        // TODO: I think this fails 
+        // google::sparse_hash_map<VertexID, VertexID> comp_sizes;
+        // g.ForallLocalVertices([&](const VertexID v) {
+        //     if (comp_sizes.find(g.GetVertexLabel(v)) == comp_sizes.end()) {
+        //       comp_sizes[g.GetVertexLabel(v)] = 0;
+        //     }
+        //     comp_sizes[g.GetVertexLabel(v)]++;
+        //     if (v >= g_labels.size()) {
+        //       std::cout << "R" << rank_ << " This shouldn't happen: Invalid vertex remap v=" << g.GetGlobalID(v) << " lid=" << v << " label=" << g.GetVertexLabel(v) << std::endl;
+        //       exit(1);
+        //     }
+        //     g_labels[v] = g.GetVertexLabel(v);
+        // });
+      }
+    } 
   }
 
   void Output(DynamicGraphCommunicator &g) {

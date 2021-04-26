@@ -112,7 +112,7 @@ class IOUtility {
                 << "m=" << m << ", "
                 << "c(min,max)=" << min_cut << "," << max_cut << std::endl;
     }
-    std::cout << "R" << rank << " LOCAL INPUT" << " c= " << m_cut << ", hd=" << highest_degree << std::endl;
+    std::cout << "R" << rank << " LOCAL INPUT" << " c=" << m_cut << ", hd=" << highest_degree << std::endl;
   }
 };
 

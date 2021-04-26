@@ -42,40 +42,24 @@ int main(int argn, char **argv) {
   int initial_seed = conf.seed;
 
   StaticGraph SG(rank, size);
-  DynamicGraphCommunicator DG(rank, size);
+  // DynamicGraph SG(rank, size);
+  // DynamicGraphCommunicator DG(rank, size);
   MPI_Barrier(MPI_COMM_WORLD);
-  if (conf.use_contraction) {
-      IOUtility::LoadGraph(SG, conf, rank, size);
-      IOUtility::PrintGraphParams(SG, conf, rank, size);
-  } else {
-      IOUtility::LoadGraph(DG, conf, rank, size);
-      IOUtility::PrintGraphParams(DG, conf, rank, size);
-  }
+  IOUtility::LoadGraph(SG, conf, rank, size);
+  IOUtility::PrintGraphParams(SG, conf, rank, size);
 
   // WARMUP RUN
   if (rank == ROOT) std::cout << "WARMUP RUN" << std::endl;
   {
     ExponentialContraction comp(conf, rank, size);
-    if (conf.use_contraction) {
-      StaticGraph CG = SG;
+    StaticGraph CG = SG;
 
-      // Determine labels
-      std::vector<VertexID> labels(CG.GetNumberOfVertices(), 0);
-      CG.ForallLocalVertices([&](const VertexID v) {
-        labels[v] = CG.GetGlobalID(v);
-      });
-      comp.FindComponents(CG, labels);
-    } else {
-      DynamicGraphCommunicator CG = DG;
-      CG.ResetCommunicator();
-
-      // Determine labels
-      std::vector<VertexID> labels(CG.GetNumberOfVertices(), 0);
-      CG.ForallLocalVertices([&](const VertexID v) {
-        labels[v] = CG.GetGlobalID(v);
-      });
-      comp.FindComponents(CG, labels);
-    }
+    // Determine labels
+    std::vector<VertexID> labels(CG.GetNumberOfVertices(), 0);
+    CG.ForallLocalVertices([&](const VertexID v) {
+      labels[v] = CG.GetGlobalID(v);
+    });
+    comp.FindComponents(CG, labels);
   }
 
   // ACTUAL RUN
@@ -93,36 +77,19 @@ int main(int argn, char **argv) {
     float total_time = 0.0;
 
     ExponentialContraction comp(conf, rank, size);
-    if (conf.use_contraction) {
-      StaticGraph CG = SG;
+    StaticGraph CG = SG;
 
-      // Determine labels
-      std::vector<VertexID> labels(CG.GetNumberOfVertices(), 0);
-      CG.ForallLocalVertices([&](const VertexID v) {
-        labels[v] = CG.GetGlobalID(v);
-      });
-      t.Restart();
-      comp.FindComponents(CG, labels);
-      local_time = t.Elapsed();
+    // Determine labels
+    std::vector<VertexID> labels(CG.GetNumberOfVertices(), 0);
+    CG.ForallLocalVertices([&](const VertexID v) {
+      labels[v] = CG.GetGlobalID(v);
+    });
+    t.Restart();
+    comp.FindComponents(CG, labels);
+    local_time = t.Elapsed();
 
-      // Print labels
-      CG.OutputComponents(labels);
-    } else {
-      DynamicGraphCommunicator CG = DG;
-      CG.ResetCommunicator();
-
-      // Determine labels
-      std::vector<VertexID> labels(CG.GetNumberOfVertices(), 0);
-      CG.ForallLocalVertices([&](const VertexID v) {
-        labels[v] = CG.GetGlobalID(v);
-      });
-      t.Restart();
-      comp.FindComponents(CG, labels);
-      local_time = t.Elapsed();
-
-      // Print labels
-      CG.OutputComponents(labels);
-    }
+    // Print labels
+    CG.OutputComponents(labels);
 
     // Gather total time
     MPI_Reduce(&local_time, &total_time, 1, MPI_FLOAT, MPI_MAX, ROOT,

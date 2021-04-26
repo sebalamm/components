@@ -49,6 +49,7 @@ class CAGBuilder {
     receive_buffers_.set_empty_key(EmptyKey);
     receive_buffers_.set_deleted_key(DeleteKey);
     offset_ = g_.GatherNumberOfGlobalVertices();
+    smallest_vertex_id_ = offset_;
   }
   virtual ~CAGBuilder() = default;
 
@@ -56,6 +57,12 @@ class CAGBuilder {
   GraphOutputType BuildComponentAdjacencyGraph() {
     PerformContraction();
     return BuildContractionGraph<GraphOutputType>();
+  }
+
+  template <typename GraphOutputType>
+  GraphOutputType BuildLocalComponentGraph() {
+    PerformLocalContraction();
+    return BuildLocalContractionGraph<GraphOutputType>();
   }
 
   float GetCommTime() {
@@ -72,6 +79,9 @@ class CAGBuilder {
 
   // Offset for pairing
   VertexID offset_;
+
+  // Smallest vertex ID
+  VertexID smallest_vertex_id_;
 
   // Component information
   VertexID num_smaller_components_, 
@@ -123,6 +133,70 @@ class CAGBuilder {
       std::cout << "[STATUS] |-- Generating contraction edges took " 
                 << "[TIME] " << contraction_timer_.Elapsed() << std::endl;
     }
+  }
+
+  void PerformLocalContraction() {
+    // Determine remaining vertices
+    g_.AllocateContractionVertices();
+    g_.ForallLocalVertices([&](const VertexID v) {
+      // Set contraction vertex
+      VertexID cv;
+      if (!g_.IsInterface(v)) {
+        cv = vertex_labels_[v];
+      } else {
+        cv = g_.GetGlobalID(v);
+      }
+      g_.SetContractionVertex(v, cv);
+
+      // Store component 
+      if (local_components_.find(cv) == end(local_components_)) {
+        local_components_.insert(cv);
+      }
+      // Store smallest vertex label
+      if (cv < smallest_vertex_id_) {
+        smallest_vertex_id_ = cv;
+      }
+    });
+    num_local_components_ = local_components_.size();
+
+    // Build prefix sum over local components O(log P)
+    VertexID component_prefix_sum;
+    MPI_Scan(&num_local_components_,
+             &component_prefix_sum,
+             1,
+             MPI_VERTEX,
+             MPI_SUM,
+             MPI_COMM_WORLD);
+
+    // Broadcast number of global components
+    num_global_components_ = component_prefix_sum;
+    MPI_Bcast(&num_global_components_,
+              1,
+              MPI_VERTEX,
+              size_ - 1,
+              MPI_COMM_WORLD);
+
+    // Determine remaining edges O(m/P)
+    g_.ForallLocalVertices([&](const VertexID v) {
+      VertexID cv = g_.GetContractionVertex(v);
+      g_.ForallNeighbors(v, [&](const VertexID w) {
+        VertexID cw;
+        if (g_.IsGhost(w)) {
+          cw = g_.GetGlobalID(w);
+        } else {
+          cw = g_.GetContractionVertex(w);
+        }
+        if (cv != cw) {
+          PEID pe = g_.GetPE(w);
+          auto h_edge = HashedEdge{offset_, cv, cw, pe};
+          if (local_edges_.find(h_edge) == end(local_edges_)) {
+            local_edges_.insert(h_edge);
+            edges_.emplace_back(cv, cw, pe);
+            edges_.emplace_back(cw, cv, rank_);
+          }
+        }
+      });
+    });
   }
 
   void ComputeComponentPrefixSum() {
@@ -396,7 +470,6 @@ class CAGBuilder {
   template <typename GraphOutputType>
   GraphOutputType BuildContractionGraph() {
     VertexID from = num_smaller_components_;
-    VertexID to = num_smaller_components_ + num_local_components_ - 1;
 
     // Identify ghost vertices
     google::dense_hash_map<VertexID, PEID> ghost_pe; 
@@ -453,6 +526,89 @@ class CAGBuilder {
           cg.SetVertexLabel(v, from + v);
           cg.SetVertexRoot(v, rank_);
       }
+    }
+
+    // Initialize ghost vertices
+    for (const auto &kv : ghost_pe) {
+      cg.AddGhostVertex(kv.first, kv.second);
+    }
+
+    // Sort edges for static graphs
+    if constexpr (std::is_same<GraphOutputType, StaticGraphCommunicator>::value
+                  || std::is_same<GraphOutputType, StaticGraph>::value) {
+      SortEdges<GraphOutputType>(cg, edges_);
+    }
+
+    for (auto &edge : edges_) {
+      cg.AddEdge(cg.GetLocalID(std::get<0>(edge)), std::get<1>(edge), std::get<2>(edge));
+    }
+
+    cg.FinishConstruct();
+    return cg;
+  }
+
+  template <typename GraphOutputType>
+  GraphOutputType BuildLocalContractionGraph() {
+    // Identify ghost vertices
+    google::dense_hash_map<VertexID, PEID> ghost_pe; 
+    ghost_pe.set_empty_key(EmptyKey);
+    ghost_pe.set_deleted_key(DeleteKey);
+    for (auto &e : edges_) {
+      VertexID target = std::get<1>(e);
+      PEID pe = std::get<2>(e);
+      if (std::get<2>(e) != rank_) {
+        if (ghost_pe.find(target) == ghost_pe.end()) {
+            ghost_pe[target] = pe;
+        } 
+      }
+    }
+
+    VertexID number_of_ghost_vertices = ghost_pe.size();
+    VertexID number_of_edges = edges_.size();
+    VertexID number_of_local_vertices = local_components_.size();
+
+    // std::cout << "R" << rank_ << " local " << number_of_local_vertices << " ghost " << number_of_ghost_vertices << " edges " << number_of_edges << std::endl;
+    GraphOutputType cg(rank_, size_);
+
+    // Build graph
+    // Static graphs also take the number of edges
+    // TODO: Make sure from and num_global_components_ ist correct
+    // num_global_components has to be original number of vertices?
+    // from has to be smallest id 
+    if constexpr (std::is_same<GraphOutputType, StaticGraphCommunicator>::value
+                  || std::is_same<GraphOutputType, StaticGraph>::value) {
+      cg.StartConstruct(number_of_local_vertices, 
+                        number_of_ghost_vertices, 
+                        number_of_edges,
+                        smallest_vertex_id_);
+    } else if constexpr (std::is_same<GraphOutputType, DynamicGraphCommunicator>::value
+                  || std::is_same<GraphOutputType, DynamicGraph>::value) {
+      cg.StartConstruct(number_of_local_vertices, 
+                        number_of_ghost_vertices, 
+                        offset_);
+    } else {
+      cg.StartConstruct(number_of_local_vertices, 
+                        number_of_ghost_vertices, 
+                        smallest_vertex_id_);
+    }
+
+    // Add vertices for dynamic graphs
+    if constexpr (std::is_same<GraphOutputType, DynamicGraphCommunicator>::value
+                  || std::is_same<GraphOutputType, DynamicGraph>::value) {
+      for (auto &v : local_components_) {
+        cg.AddVertex(v);
+      }
+    }
+  
+
+    // Initialize payloads for graphs with communicator 
+    if constexpr (std::is_same<GraphOutputType, StaticGraphCommunicator>::value
+                  || std::is_same<GraphOutputType, DynamicGraphCommunicator>::value
+                  || std::is_same<GraphOutputType, SemidynamicGraphCommunicator>::value) {
+      cg.ForallLocalVertices([&](const VertexID v) {
+          cg.SetVertexLabel(v, cg.GetGlobalID(v));
+          cg.SetVertexRoot(v, rank_);
+      });
     }
 
     // Initialize ghost vertices
