@@ -45,8 +45,8 @@ class ExponentialContraction {
         config_(conf),
         iteration_(0),
         comm_time_(0.0) { 
-    // replicated_vertices_.set_empty_key(EmptyKey);
-    // replicated_vertices_.set_deleted_key(DeleteKey);
+    replicated_vertices_.set_empty_key(EmptyKey);
+    replicated_vertices_.set_deleted_key(DeleteKey);
   }
 
   virtual ~ExponentialContraction() {
@@ -56,7 +56,7 @@ class ExponentialContraction {
 
   template <typename GraphType>
   void FindComponents(GraphType &g, std::vector<VertexID> &g_labels) {
-    rng_offset_ = size_ + config_.seed;
+    // rng_offset_ = size_ + config_.seed;
     contraction_timer_.Restart();
 
     if constexpr (std::is_same<GraphType, StaticGraph>::value) {
@@ -87,6 +87,7 @@ class ExponentialContraction {
             std::cout << "[STATUS] |- Distributing high degree vertices took " 
                       << "[TIME] " << contraction_timer_.Elapsed() << std::endl;
           }
+          IOUtility::PrintGraphParams(cag, config_, rank_, size_);
         }
 
         // Keep contraction labeling for later
@@ -151,6 +152,7 @@ class ExponentialContraction {
             std::cout << "[STATUS] |- Distributing high degree vertices took " 
                       << "[TIME] " << contraction_timer_.Elapsed() << std::endl;
           }
+          IOUtility::PrintGraphParams(ccag, config_, rank_, size_);
           // ccag.OutputLocal();
           // ccag.OutputGhosts();
         }
@@ -192,11 +194,13 @@ class ExponentialContraction {
         if (config_.replicate_high_degree) {
           contraction_timer_.Restart();
           DistributeHighDegreeVertices(lcag);
+          // SampleHighDegreeNeighborhoods(lcag);
           OutputStats<DynamicGraphCommunicator>(lcag);
           if (rank_ == ROOT) {
             std::cout << "[STATUS] |- Distributing high degree vertices took " 
                       << "[TIME] " << contraction_timer_.Elapsed() << std::endl;
           }
+          IOUtility::PrintGraphParams(lcag, config_, rank_, size_);
         }
 
         exp_contraction_ = new DynamicContraction(lcag, rank_, size_);
@@ -258,12 +262,13 @@ class ExponentialContraction {
   DynamicContraction *exp_contraction_;
 
   // Node replication
-  // google::dense_hash_map<VertexID, VertexID> replicated_vertices_;
+  google::dense_hash_map<VertexID, VertexID> replicated_vertices_;
   VertexID global_repl_offset_;
 
   void PerformDecomposition(DynamicGraphCommunicator &g) {
     contraction_timer_.Restart(); 
     VertexID global_vertices = g.GatherNumberOfGlobalVertices();
+    rng_offset_ = global_vertices;
     if (global_vertices > 0) {
       iteration_timer_.Restart();
       iteration_++;
@@ -316,11 +321,12 @@ class ExponentialContraction {
                   << " [TIME] " << iteration_timer_.Elapsed() << std::endl;
     }
     iteration_timer_.Restart();
+    
     // if (iteration_ == 2) g.OutputLocal();
 
-    std::exponential_distribution<LPFloat> distribution(config_.beta);
-    std::mt19937
-        generator(static_cast<unsigned int>(rank_ + config_.seed + iteration_ * rng_offset_));
+    // std::exponential_distribution<LPFloat> distribution(config_.beta);
+    // std::mt19937
+    //     generator(static_cast<unsigned int>(rank_ + config_.seed + iteration_ * rng_offset_));
     g.ForallLocalVertices([&](const VertexID v) {
       // Set preliminary deviate
       g.SetParent(v, g.GetGlobalID(v));
@@ -332,19 +338,49 @@ class ExponentialContraction {
 #else
         1.0;
 #endif
+      // Skip replicated vertices
+      if (replicated_vertices_.find(g.GetGlobalID(v)) == replicated_vertices_.end()) {
+        std::exponential_distribution<LPFloat> distribution(config_.beta);
+        std::mt19937
+            generator(static_cast<unsigned int>(g.GetGlobalID(v) + config_.seed + iteration_ * rng_offset_));
+        g.SetVertexPayload(v, {static_cast<VertexID>(weight * distribution(generator)),
+                               g.GetVertexLabel(v),
+#ifdef TIEBREAK_DEGREE
+                               g.GetVertexDegree(v),
+#endif
+                               g.GetVertexRoot(v)},
+                           true);
+#ifndef NDEBUG
+        std::cout << "[R" << rank_ << ":" << iteration_ << "] update deviate "
+                  << g.GetGlobalID(v) << " -> " << g.GetVertexDeviate(v)
+                  << std::endl;
+#endif
+      }
+    });
+
+    // Iterate over replicates and assign same variate as root
+    for (auto &kv : replicated_vertices_) {
+      VertexID v = g.GetLocalID(kv.first);
+      LPFloat weight = 
+#ifdef TIEBREAK_DEGREE
+        // static_cast<LPFloat>(g.GetVertexDegree(v) / g.GetMaxDegree());
+        // static_cast<LPFloat>(log2(g.GetNumberOfVertices()) / g.GetVertexDegree(v));
+        1.0;
+#else
+        1.0;
+#endif
+      std::exponential_distribution<LPFloat> distribution(config_.beta);
+      std::mt19937
+          generator(static_cast<unsigned int>(kv.second + config_.seed + iteration_ * rng_offset_));
       g.SetVertexPayload(v, {static_cast<VertexID>(weight * distribution(generator)),
-                             g.GetVertexLabel(v), 
+                             g.GetVertexLabel(v),
 #ifdef TIEBREAK_DEGREE
                              g.GetVertexDegree(v),
 #endif
-                             g.GetVertexRoot(v)}, 
+                             g.GetVertexRoot(v)},
                          true);
-#ifndef NDEBUG
-      std::cout << "[R" << rank_ << ":" << iteration_ << "] update deviate "
-                << g.GetGlobalID(v) << " -> " << g.GetVertexDeviate(v)
-                << std::endl;
-#endif
-    });
+    }
+    
     g.SendAndReceiveGhostVertices();
     if (rank_ == ROOT) {
       std::cout << "[STATUS] |-- Computing and exchanging deviates took " 
@@ -472,9 +508,9 @@ class ExponentialContraction {
     // Set initial parent and payload
     int active_round = 0;
     int max_round = 0;
-    std::exponential_distribution<LPFloat> distribution(config_.beta);
-    std::mt19937
-        generator(static_cast<unsigned int>(rank_ + config_.seed + iteration_ * rng_offset_));
+    // std::exponential_distribution<LPFloat> distribution(config_.beta);
+    // std::mt19937
+    //     generator(static_cast<unsigned int>(rank_ + config_.seed + iteration_ * rng_offset_));
     g.ForallLocalVertices([&](const VertexID v) {
       // Set preliminary deviate
       g.SetParent(v, g.GetGlobalID(v));
@@ -486,23 +522,53 @@ class ExponentialContraction {
 #else
         1.0;
 #endif
-      VertexID vertex_round = static_cast<VertexID>(weight * distribution(generator));
-      if (vertex_round > max_round) max_round = vertex_round;
-      // Don't propagate payloads at the beginning
-      // We only want to send payloads if its a vertex turn to do so
-      g.SetVertexPayload(v, {vertex_round,
-                             g.GetVertexLabel(v), 
+      // Skip replicated vertices
+      if (replicated_vertices_.find(g.GetGlobalID(v)) == replicated_vertices_.end()) {
+        std::exponential_distribution<LPFloat> distribution(config_.beta);
+        std::mt19937
+            generator(static_cast<unsigned int>(g.GetGlobalID(v) + config_.seed + iteration_ * rng_offset_));
+        VertexID vertex_round = static_cast<VertexID>(weight * distribution(generator));
+        if (vertex_round > max_round) max_round = vertex_round;
+
+        // Don't propagate payloads at the beginning
+        // We only want to send payloads if its a vertex turn to do so
+        g.SetVertexPayload(v, {vertex_round,
+                               g.GetVertexLabel(v), 
+#ifdef TIEBREAK_DEGREE
+                               g.GetVertexDegree(v),
+#endif
+                               g.GetVertexRoot(v)}, 
+                           vertex_round == active_round);
+#ifndef NDEBUG
+          std::cout << "[R" << rank_ << ":" << iteration_ << "] update deviate "
+                    << g.GetGlobalID(v) << " -> " << g.GetVertexDeviate(v)
+                    << std::endl;
+#endif
+      }
+    });
+
+    // Iterate over replicates and assign same variate as root
+    for (auto &kv : replicated_vertices_) {
+      VertexID v = g.GetLocalID(kv.first);
+      LPFloat weight = 
+#ifdef TIEBREAK_DEGREE
+        // static_cast<LPFloat>(g.GetVertexDegree(v) / g.GetMaxDegree());
+        // static_cast<LPFloat>(log2(g.GetNumberOfVertices()) / g.GetVertexDegree(v));
+        1.0;
+#else
+        1.0;
+#endif
+      std::exponential_distribution<LPFloat> distribution(config_.beta);
+      std::mt19937
+          generator(static_cast<unsigned int>(kv.second + config_.seed + iteration_ * rng_offset_));
+      g.SetVertexPayload(v, {static_cast<VertexID>(weight * distribution(generator)),
+                             g.GetVertexLabel(v),
 #ifdef TIEBREAK_DEGREE
                              g.GetVertexDegree(v),
 #endif
-                             g.GetVertexRoot(v)}, 
-                         vertex_round == active_round);
-#ifndef NDEBUG
-      std::cout << "[R" << rank_ << ":" << iteration_ << "] update deviate "
-                << g.GetGlobalID(v) << " -> " << g.GetVertexDeviate(v)
-                << std::endl;
-#endif
-    });
+                             g.GetVertexRoot(v)},
+                         true);
+    }
     g.SendAndReceiveGhostVertices();
     if (rank_ == ROOT) {
       std::cout << "[STATUS] |-- Computing deviates and starting BFS took " 
@@ -700,15 +766,16 @@ class ExponentialContraction {
     });
   }
 
-  // void SampleHighDegreeNeighborhoods(DynamicGraphCommunicator &g) {
-  //   std::vector<std::pair<VertexID, VertexID>> high_degree_vertices;
-  //   VertexID avg_max_deg = Utility::ComputeAverageMaxDegree(g, rank_, size_);
-  //   Utility::SelectHighDegreeVertices(g, config_.degree_threshold * avg_max_deg, high_degree_vertices);
+  void SampleHighDegreeNeighborhoods(DynamicGraphCommunicator &g) {
+    std::vector<std::pair<VertexID, VertexID>> high_degree_vertices;
+    VertexID avg_max_deg = Utility::ComputeAverageMaxDegree(g, rank_, size_);
+    Utility::SelectHighDegreeVertices(g, avg_max_deg, high_degree_vertices);
 
-  //   for (const auto &vd : high_degree_vertices) {
-  //     g.SampleVertexNeighborhood(v, config_.neighborhood_sampling_factor);
-  //   }
-  // }
+    for (const auto &vd : high_degree_vertices) {
+      std::cout << "R" << rank_ << " sample neighborhood v " << vd.first << " d " << vd.second << " (ad " << avg_max_deg << ") s " << vd.second * config_.neighborhood_sampling_factor << std::endl;
+      g.SampleVertexNeighborhood(vd.first, config_.neighborhood_sampling_factor);
+    }
+  }
 
   void DistributeHighDegreeVertices(DynamicGraphCommunicator &g) {
     // Determine high degree vertices
@@ -722,6 +789,7 @@ class ExponentialContraction {
                 << " [TIME] " << contraction_timer_.Elapsed() << std::endl;
     }
     Utility::SelectHighDegreeVertices(g, config_.degree_threshold, high_degree_vertices);
+    std::cout << "R" << rank_ << " num hd to distribute " << high_degree_vertices.size() << std::endl;
     
     // Split high degree vertices into one layer of proxies with degree sqrt(n)
     SplitHighDegreeVerticesSqrtEdge(g, avg_max_deg, high_degree_vertices);
@@ -861,18 +929,10 @@ class ExponentialContraction {
       });
     }
 
-    // MPI_Barrier(MPI_COMM_WORLD);
-    // if (rank_ == ROOT) std::cout << "[R" << rank_ << "] Computed initial replicates" << std::endl;
-    // MPI_Barrier(MPI_COMM_WORLD);
-    // exit(1);
-
     // We have to relink our replicated edges based on the recomputed information 
     // I.e. if for an edge (v,w) both endpoints have been replicated (replicated_edges[v][w] and replicated_edges[w][v] exist)
     // In this case update the edge with the correct target
     // Finally, send the edges to their respective replicates
-    // TODO: We also have to insert edges that run from ghost replicates to local vertices
-    // since these edges are not present otherwise
-    // for this purpose relink the old edges to the replicates
     for (VertexID i = 0; i < high_degree_vertices.size(); ++i) {
       VertexID v = high_degree_vertices[i].first;
 
@@ -945,6 +1005,7 @@ class ExponentialContraction {
                   if (replicate.second == rank_) {
                     // std::cout << "R" << rank_ << " add repl (local) " << replicate.first << std::endl;
                     g.AddVertex(replicate.first);
+                    replicated_vertices_[replicate.first] = edge_source_id;
                     // Also add original source if not existent yet
                     if (!(g.IsLocalFromGlobal(edge_source_id) || g.IsGhostFromGlobal(edge_source_id))) {
                       g.AddGhostVertex(edge_source_id, edge_source_pe);
@@ -983,11 +1044,6 @@ class ExponentialContraction {
       }
       local_edges.clear();
     }
-
-    // MPI_Barrier(MPI_COMM_WORLD);
-    // if (rank_ == ROOT) std::cout << "[R" << rank_ << "] Updated and sent replicates" << std::endl;
-    // MPI_Barrier(MPI_COMM_WORLD);
-    // exit(1);
     
     // Send updates
     receive_buffers[rank_] = send_buffers[rank_];
@@ -1013,12 +1069,10 @@ class ExponentialContraction {
         VertexID edge_target_id = edges[i + 2];
         PEID edge_target_pe = edges[i + 3];
 
-        // Remove edges from edge source id
-        // TODO: Is this corect?
-
         // Add replicate if not existent yet
         if (!(g.IsLocalFromGlobal(repl_source_id) || g.IsGhostFromGlobal(repl_source_id))) {
           g.AddVertex(repl_source_id);
+          replicated_vertices_[repl_source_id] = edge_source_id;
           // std::cout << "R" << rank_ << " add repl (local) " << repl_source_id << std::endl;
 
           // Also add original source if not existent yet
@@ -1055,23 +1109,9 @@ class ExponentialContraction {
         if (edge_target_pe != rank_) {
           g.AddEdge(g.GetLocalID(edge_target_id), repl_source_id, rank_);
         }
-        // if (edge_target_pe == rank_ && repl_source_id < edge_target_id) {
-        //   std::cout << "R" << rank_ << " add edge (direct local) (" << repl_source_id << "," << edge_target_id << " (PE " << edge_target_pe << "))" << std::endl;
-        // } 
-        // // Otherwise we can insert it without problems
-        // else if (edge_target_pe != rank_){
-        //   g.AddEdge(g.GetLocalID(repl_source_id), edge_target_id, edge_target_pe);
-        //   g.AddEdge(g.GetLocalID(edge_target_id), repl_source_id, rank_);
-        //   std::cout << "R" << rank_ << " add edge (direct remote) (" << repl_source_id << "," << edge_target_id << " (PE " << edge_target_pe << "))" << std::endl;
-        // }
       }
     }
     CommunicationUtility::ClearBuffers(receive_buffers);
-
-    // MPI_Barrier(MPI_COMM_WORLD);
-    // if (rank_ == ROOT) std::cout << "[R" << rank_ << "] Finished replication" << std::endl;
-    // MPI_Barrier(MPI_COMM_WORLD);
-    // exit(1);
   }
 
   void SplitHighDegreeVerticesSqrtPseudo(DynamicGraphCommunicator &g,
