@@ -58,6 +58,29 @@ class Utility {
   }
 
   template <typename GraphType>
+  static void BFS(GraphType &g,
+                  const VertexID &start,
+                  google::dense_hash_map<VertexID, bool> &marked,
+                  google::dense_hash_map<VertexID, VertexID> &parent) {
+    // Standard BFS
+    std::queue<VertexID> q;
+    q.push(start);
+    marked[start] = true;
+    parent[start] = start;
+    while (!q.empty()) {
+      VertexID v = q.front();
+      q.pop();
+      g.ForallNeighbors(v, [&](const VertexID &w) {
+        if (!marked[w]) {
+          q.push(w);
+          marked[w] = true;
+          parent[w] = start;
+        }
+      });
+    }
+  }
+
+  template <typename GraphType>
   static VertexID ComputeAverageMaxDegree(GraphType &g,
                                           const PEID rank, const PEID size) {
     // Determine local max degree

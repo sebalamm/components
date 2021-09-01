@@ -33,10 +33,11 @@
 #include "static_graph.h"
 #include "edge_hash.h"
 
-template <typename GraphType>
+
+template <typename GraphType, typename LabelType = std::vector<VertexID>>
 class CAGBuilder {
  public:
-  CAGBuilder(GraphType &g, std::vector<VertexID> &vertex_labels, const PEID rank, const PEID size)
+  CAGBuilder(GraphType &g, LabelType &vertex_labels, const PEID rank, const PEID size)
       : g_(g), vertex_labels_(vertex_labels), rank_(rank), size_(size),
         num_smaller_components_(0),
         num_local_components_(0),
@@ -72,7 +73,7 @@ class CAGBuilder {
  private:
   // Original graph instance
   GraphType &g_;
-  std::vector<VertexID> &vertex_labels_;
+  LabelType &vertex_labels_;
 
   // Network information
   PEID rank_, size_;
@@ -192,7 +193,11 @@ class CAGBuilder {
           if (local_edges_.find(h_edge) == end(local_edges_)) {
             local_edges_.insert(h_edge);
             edges_.emplace_back(cv, cw, pe);
-            edges_.emplace_back(cw, cv, rank_);
+            // TODO: Does this tie breaking work?
+            // Seems to work for now
+            if (!g_.IsLocal(w)) {
+              edges_.emplace_back(cw, cv, rank_);
+            }
           }
         }
       });
@@ -387,7 +392,6 @@ class CAGBuilder {
         if (messages_for_vertex > max_messages) max_messages = messages_for_vertex;
       }
     });
-    // std::cout << "R" << rank_ << " num messages sent " << buffer_size << " checks " << num_checks << " edges " << num_edges << " (read=" << g_.GetNumberOfEdges() << ", cut=" << g_.GetNumberOfCutEdges() << ") unique target " << targets.size() << " max messages " << max_messages << std::endl;
   }
 
   void HandleMessages(google::dense_hash_map<PEID, VertexID> &largest_component, 
@@ -567,12 +571,10 @@ class CAGBuilder {
     VertexID number_of_edges = edges_.size();
     VertexID number_of_local_vertices = local_components_.size();
 
-    // std::cout << "R" << rank_ << " local " << number_of_local_vertices << " ghost " << number_of_ghost_vertices << " edges " << number_of_edges << std::endl;
     GraphOutputType cg(rank_, size_);
 
     // Build graph
     // Static graphs also take the number of edges
-    // TODO: Make sure from and num_global_components_ ist correct
     // num_global_components has to be original number of vertices?
     // from has to be smallest id 
     if constexpr (std::is_same<GraphOutputType, StaticGraphCommunicator>::value
@@ -600,7 +602,6 @@ class CAGBuilder {
       }
     }
   
-
     // Initialize payloads for graphs with communicator 
     if constexpr (std::is_same<GraphOutputType, StaticGraphCommunicator>::value
                   || std::is_same<GraphOutputType, DynamicGraphCommunicator>::value
@@ -631,8 +632,8 @@ class CAGBuilder {
   }
 
   template <typename GraphOutputType>
-  static void SortEdges(const GraphOutputType &g, auto &edge_list) {
-    std::sort(edge_list.begin(), edge_list.end(), [&](auto &left, auto &right) {
+  static void SortEdges(const GraphOutputType &g, std::vector<std::tuple<VertexID, VertexID, PEID>> &edge_list) {
+    std::sort(edge_list.begin(), edge_list.end(), [&](std::tuple<VertexID, VertexID, PEID> &left, std::tuple<VertexID, VertexID, PEID> &right) {
         VertexID lhs_source = g.GetLocalID(std::get<0>(left));
         VertexID lhs_target = g.GetLocalID(std::get<1>(left));
         VertexID rhs_source = g.GetLocalID(std::get<0>(right));

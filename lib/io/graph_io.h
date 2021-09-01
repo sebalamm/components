@@ -67,7 +67,7 @@ class GraphIO {
   static void ReadMETISGenerator(GraphType &g,
                                  Config &config, 
                                  PEID rank, PEID size, const MPI_Comm &comm,
-                                 auto &edge_list) {
+                                 std::vector<std::pair<VertexID, VertexID>> &edge_list) {
     // Gather local edge lists (transpose)
     VertexID from = edge_list[0].first, to = edge_list[0].second;
     VertexID number_of_local_vertices = to - from + 1;
@@ -1122,7 +1122,7 @@ class GraphIO {
 
  private:
 
-  static VertexID DetermineGhostVertices(auto &edge_list, 
+  static VertexID DetermineGhostVertices(std::vector<std::pair<VertexID, VertexID>> &edge_list, 
                                          VertexID local_from, VertexID local_to, 
                                          google::dense_hash_set<VertexID> &ghost_vertices) {
     for (auto &edge : edge_list) {
@@ -1243,7 +1243,7 @@ class GraphIO {
   }
 
   template <typename GraphType>
-  static void SortEdges(const GraphType &g, auto &edge_list) {
+  static void SortEdges(const GraphType &g, std::vector<std::pair<VertexID, VertexID>> &edge_list) {
     std::sort(edge_list.begin(), edge_list.end(), [&](auto &left, auto &right) {
         VertexID lhs_source = g.GetLocalID(left.first);
         VertexID lhs_target = g.GetLocalID(left.second);
