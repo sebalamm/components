@@ -39,7 +39,9 @@ class DynamicContraction {
         size_(size),
         global_num_vertices_(0),
         contraction_level_(0),
-        comm_time_(0.0) { 
+        comm_time_(0.0),
+        send_volume_(0),
+        recv_volume_(0) { 
     is_active_.set_empty_key(EmptyKey);
     is_active_.set_deleted_key(DeleteKey);
     send_buffers_.set_empty_key(EmptyKey);
@@ -69,8 +71,8 @@ class DynamicContraction {
     contraction_timer_.Restart();
     FindExponentialConflictingEdges();
     
-    std::cout << "[STATUS] |--- R" << rank_ << " Detecting conflicting edges took " 
-              << "[TIME] " << contraction_timer_.Elapsed() << std::endl;
+    // std::cout << "[STATUS] |--- R" << rank_ << " Detecting conflicting edges took " 
+    //           << "[TIME] " << contraction_timer_.Elapsed() << std::endl;
 
     // Propagate edge buffers until all vertices are converged
     int converged_globally = 0;
@@ -78,18 +80,16 @@ class DynamicContraction {
     while (converged_globally == 0) {
 
       contraction_timer_.Restart();
-      comm_timer_.Restart();
-      CommunicationUtility::SparseAllToAll(send_buffers_, receive_buffers_, rank_, size_, ContractionTag + local_iterations);
-      comm_time_ += comm_timer_.Elapsed();
-      std::cout << "[STATUS] |---- R" << rank_ << " Message exchange took " 
-                << "[TIME] " << contraction_timer_.Elapsed() << std::endl;
-      CommunicationUtility::ClearBuffers(send_buffers_);
+      comm_time_ += CommunicationUtility::SparseAllToAll(send_buffers_, receive_buffers_, rank_, size_, ContractionTag + local_iterations);
+      // std::cout << "[STATUS] |---- R" << rank_ << " Message exchange took " 
+      //           << "[TIME] " << contraction_timer_.Elapsed() << std::endl;
+      send_volume_ += CommunicationUtility::ClearBuffers(send_buffers_);
 
       contraction_timer_.Restart();
       int converged_locally = ProcessExponentialMessages();
-      std::cout << "[STATUS] |---- R" << rank_ << " Processing messages took " 
-                << "[TIME] " << contraction_timer_.Elapsed() << std::endl;
-      CommunicationUtility::ClearBuffers(receive_buffers_);
+      // std::cout << "[STATUS] |---- R" << rank_ << " Processing messages took " 
+      //           << "[TIME] " << contraction_timer_.Elapsed() << std::endl;
+      recv_volume_ += CommunicationUtility::ClearBuffers(receive_buffers_);
 
       // Check if all PEs are done
       contraction_timer_.Restart();
@@ -102,13 +102,13 @@ class DynamicContraction {
                     MPI_COMM_WORLD);
       comm_time_ += comm_timer_.Elapsed();
       local_iterations++;
-      std::cout << "[STATUS] |---- R" << rank_ << " Convergence test took " 
-                << "[TIME] " << contraction_timer_.Elapsed() << std::endl;
+      // std::cout << "[STATUS] |---- R" << rank_ << " Convergence test took " 
+      //           << "[TIME] " << contraction_timer_.Elapsed() << std::endl;
     }
 
-    std::cout << "[STATUS] |---- R" << rank_ << " Propagation done " 
-              << "[INFO] rounds "  << local_iterations << " "
-              << "[TIME] " << propagation_timer.Elapsed() << std::endl;
+    // std::cout << "[STATUS] |---- R" << rank_ << " Propagation done " 
+    //           << "[INFO] rounds "  << local_iterations << " "
+    //           << "[TIME] " << propagation_timer.Elapsed() << std::endl;
     contraction_level_++;
 
     // Clear propagation buffers
@@ -127,8 +127,8 @@ class DynamicContraction {
 
     // Insert edges and keep corresponding vertices
     InsertAndClearEdges();
-    std::cout << "[STATUS] |---- R" << rank_ << " Updating edges took " 
-              << "[TIME] " << contraction_timer_.Elapsed() << std::endl;
+    // std::cout << "[STATUS] |---- R" << rank_ << " Updating edges took " 
+    //           << "[TIME] " << contraction_timer_.Elapsed() << std::endl;
 
     // Reenable vertices that have at least one edge
     UpdateGraphVertices();
@@ -148,18 +148,16 @@ class DynamicContraction {
     contraction_timer_.Restart();
     FindDirectConflictingEdges();
     
-    std::cout << "[STATUS] |--- R" << rank_ << " Detecting conflicting edges took " 
-              << "[TIME] " << contraction_timer_.Elapsed() << std::endl;
+    // std::cout << "[STATUS] |--- R" << rank_ << " Detecting conflicting edges took " 
+    //           << "[TIME] " << contraction_timer_.Elapsed() << std::endl;
 
     // Propagate edge buffers until all vertices are converged
     int num_requests = 0;
 
-    comm_timer_.Restart();
-    CommunicationUtility::SparseAllToAll(send_buffers_, receive_buffers_, rank_, size_, ContractionTag);
-    comm_time_ += comm_timer_.Elapsed();
-    CommunicationUtility::ClearBuffers(send_buffers_);
+    comm_time_ += CommunicationUtility::SparseAllToAll(send_buffers_, receive_buffers_, rank_, size_, ContractionTag);
+    send_volume_ += CommunicationUtility::ClearBuffers(send_buffers_);
     ProcessDirectMessages();
-    CommunicationUtility::ClearBuffers(receive_buffers_);
+    recv_volume_ += CommunicationUtility::ClearBuffers(receive_buffers_);
 
     inserted_edges_.clear();
     propagated_edges_.clear();
@@ -177,8 +175,8 @@ class DynamicContraction {
     g_.ResetAdjacentPEs();
     InsertAndClearEdges();
 
-    std::cout << "[STATUS] |---- R" << rank_ << " Updating edges took " 
-              << "[TIME] " << contraction_timer_.Elapsed() << std::endl;
+    // std::cout << "[STATUS] |---- R" << rank_ << " Updating edges took " 
+    //           << "[TIME] " << contraction_timer_.Elapsed() << std::endl;
 
     UpdateGraphVertices();
   }
@@ -200,13 +198,11 @@ class DynamicContraction {
     int converged_globally = 0;
     int local_iterations = 0;
     while (converged_globally == 0) {
-      comm_timer_.Restart();
-      CommunicationUtility::SparseAllToAll(send_buffers_, receive_buffers_, rank_, size_, ContractionTag + local_iterations);
-      comm_time_ += comm_timer_.Elapsed();
-      CommunicationUtility::ClearBuffers(send_buffers_);
+      comm_time_ += CommunicationUtility::SparseAllToAll(send_buffers_, receive_buffers_, rank_, size_, ContractionTag + local_iterations);
+      send_volume_ += CommunicationUtility::ClearBuffers(send_buffers_);
 
       int converged_locally = ProcessLocalMessages(initial_parents);
-      CommunicationUtility::ClearBuffers(receive_buffers_);
+      recv_volume_ += CommunicationUtility::ClearBuffers(receive_buffers_);
 
 
       // Check if all PEs are done
@@ -666,8 +662,16 @@ class DynamicContraction {
     }
   }
 
-  float GetCommTime() {
+  inline float GetCommTime() {
     return comm_time_;
+  }
+
+  inline VertexID GetSendVolume() {
+    return send_volume_;
+  }
+
+  inline VertexID GetReceiveVolume() {
+    return recv_volume_;
   }
 
  private:
@@ -696,6 +700,8 @@ class DynamicContraction {
   float comm_time_;
   Timer contraction_timer_;
   Timer comm_timer_;
+  VertexID send_volume_;
+  VertexID recv_volume_;
 };
 
 #endif

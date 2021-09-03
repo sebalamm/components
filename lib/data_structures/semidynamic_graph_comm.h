@@ -203,6 +203,10 @@ class SemidynamicGraphCommunicator : public SemidynamicGraph {
 
   float GetCommTime();
 
+  VertexID GetSendVolume();
+
+  VertexID GetReceiveVolume();
+
  private:
   std::vector<VertexPayload> vertex_payload_;
 

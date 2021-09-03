@@ -40,7 +40,9 @@ class VertexCommunicator {
         use_sampling_(false),
         rank_(rank),
         size_(size),
-        comm_time_(0.0) {
+        comm_time_(0.0),
+        send_volume_(0),
+        recv_volume_(0) {
     packed_pes_.set_empty_key(EmptyKey);
     packed_pes_.set_deleted_key(DeleteKey);
     send_buffers_.set_empty_key(EmptyKey);
@@ -82,20 +84,25 @@ class VertexCommunicator {
   void UpdateGhostVertices();
 
   void SendAndReceiveGhostVertices() {
-    comm_timer_.Restart();
-    CommunicationUtility::SparseAllToAll(send_buffers_, receive_buffers_, 
-                                         rank_, size_, message_tag_);
+    comm_time_ += CommunicationUtility::SparseAllToAll(send_buffers_, receive_buffers_, 
+                                                       rank_, size_, message_tag_);
     message_tag_++;
-    comm_time_ += comm_timer_.Elapsed();
-    CommunicationUtility::ClearBuffers(send_buffers_);
+    send_volume_ += CommunicationUtility::ClearBuffers(send_buffers_);
     UpdateGhostVertices();
-    CommunicationUtility::ClearBuffers(receive_buffers_);
+    recv_volume_ += CommunicationUtility::ClearBuffers(receive_buffers_);
   }
 
-  float GetCommTime() {
+  inline float GetCommTime() {
     return comm_time_;
   }
 
+  inline VertexID GetSendVolume() {
+    return send_volume_;
+  }
+
+  inline VertexID GetReceiveVolume() {
+    return recv_volume_;
+  }
 
  private:
   GraphType *g_;
@@ -113,7 +120,8 @@ class VertexCommunicator {
   VertexID message_tag_;
 
   float comm_time_;
-  Timer comm_timer_;
+  VertexID send_volume_;
+  VertexID recv_volume_;
 
   void PlaceInBuffer(const PEID &pe,
                      const VertexID &v,

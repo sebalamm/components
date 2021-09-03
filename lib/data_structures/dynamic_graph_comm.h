@@ -231,6 +231,10 @@ class DynamicGraphCommunicator : public DynamicGraph {
 
   float GetCommTime();
 
+  VertexID GetSendVolume();
+
+  VertexID GetReceiveVolume();
+
  private:
   // Payloads
   std::vector<VertexPayload> local_payload_;

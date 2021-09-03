@@ -82,7 +82,8 @@ class Utility {
 
   template <typename GraphType>
   static VertexID ComputeAverageMaxDegree(GraphType &g,
-                                          const PEID rank, const PEID size) {
+                                          const PEID rank, const PEID size,
+                                          float comm_time) {
     // Determine local max degree
     VertexID local_max_deg = 0;
     g.ForallLocalVertices([&](const VertexID v) {
@@ -94,9 +95,12 @@ class Utility {
 
     // Get global average max degree
     VertexID global_max_deg = 0;
+    Timer comm_timer;
+    comm_timer.Restart();
     MPI_Allreduce(&local_max_deg, &global_max_deg, 
                   1, MPI_VERTEX, 
                   MPI_SUM, MPI_COMM_WORLD);
+    comm_time += comm_timer.Elapsed();
     return global_max_deg / size; 
   }
 

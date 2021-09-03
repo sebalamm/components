@@ -116,4 +116,11 @@ float StaticGraphCommunicator::GetCommTime() {
   return comm_time_ + ghost_comm_->GetCommTime();
 }
 
+VertexID StaticGraphCommunicator::GetSendVolume() {
+  return send_volume_ + ghost_comm_->GetSendVolume();
+}
+
+VertexID StaticGraphCommunicator::GetReceiveVolume() {
+  return recv_volume_ + ghost_comm_->GetReceiveVolume();
+}
 

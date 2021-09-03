@@ -44,7 +44,9 @@ class ExponentialContraction {
         size_(size),
         config_(conf),
         iteration_(0),
-        comm_time_(0.0) { 
+        comm_time_(0.0),
+        send_volume_(0),
+        recv_volume_(0) { 
     replicated_vertices_.set_empty_key(EmptyKey);
     replicated_vertices_.set_deleted_key(DeleteKey);
   }
@@ -56,9 +58,7 @@ class ExponentialContraction {
 
   template <typename GraphType>
   void FindComponents(GraphType &g, std::vector<VertexID> &g_labels) {
-    // rng_offset_ = size_ + config_.seed;
     contraction_timer_.Restart();
-
     if constexpr (std::is_same<GraphType, StaticGraph>::value) {
       FindLocalComponents<StaticGraph>(g, g_labels);
       if (rank_ == ROOT) {
@@ -104,11 +104,17 @@ class ExponentialContraction {
         if (config_.replicate_high_degree) {
           RemoveReplicatedVertices(cag);
         }
-
         ApplyToLocalComponents(cag, g, g_labels);
+        // Get stats
         comm_time_ += contraction.GetCommTime() 
                       + exp_contraction_->GetCommTime()
                       + cag.GetCommTime() + g.GetCommTime();
+        send_volume_ += contraction.GetSendVolume()
+                      + exp_contraction_->GetSendVolume()
+                      + cag.GetSendVolume() + g.GetSendVolume();
+        recv_volume_ += contraction.GetReceiveVolume()
+                      + exp_contraction_->GetReceiveVolume()
+                      + cag.GetReceiveVolume() + g.GetReceiveVolume();
       } else if (config_.use_contraction) {
         // First round of contraction
         contraction_timer_.Restart();
@@ -169,12 +175,18 @@ class ExponentialContraction {
         if (config_.replicate_high_degree) {
           RemoveReplicatedVertices(ccag);
         }
-
         ApplyToLocalComponents(ccag, cag, cag_labels);
         ApplyToLocalComponents(cag, cag_labels, g, g_labels);
+        // Get stats
         comm_time_ += first_contraction.GetCommTime() + second_contraction.GetCommTime() 
                       + exp_contraction_->GetCommTime()
                       + ccag.GetCommTime() + cag.GetCommTime() + g.GetCommTime();
+        send_volume_ += first_contraction.GetSendVolume() + second_contraction.GetSendVolume()
+                      + exp_contraction_->GetSendVolume()
+                      + ccag.GetSendVolume() + cag.GetSendVolume() + g.GetSendVolume();
+        recv_volume_ += first_contraction.GetReceiveVolume() + second_contraction.GetReceiveVolume()
+                      + exp_contraction_->GetReceiveVolume()
+                      + ccag.GetReceiveVolume() + cag.GetReceiveVolume() + g.GetReceiveVolume();
       } else {
         // At least contract locally
         contraction_timer_.Restart();
@@ -190,7 +202,6 @@ class ExponentialContraction {
         }
 
         if (config_.replicate_high_degree) {
-
           contraction_timer_.Restart();
           DistributeHighDegreeVertices(lcag);
           // SampleHighDegreeNeighborhoods(lcag);
@@ -201,9 +212,7 @@ class ExponentialContraction {
           }
           IOUtility::PrintGraphParams(lcag, config_, rank_, size_);
 
-          // TODO: Crashes here
           contraction_timer_.Restart();
-          // std::vector<VertexID> lcag_labels(lcag.GetNumberOfVertices(), 0);
           google::dense_hash_map<VertexID, VertexID> lcag_labels;
           lcag_labels.set_empty_key(EmptyKey);
           lcag_labels.set_deleted_key(DeleteKey);
@@ -252,9 +261,16 @@ class ExponentialContraction {
           }
         }
         ApplyToLocalComponents(lcag, g, g_labels);
+        // Get stats
         comm_time_ += local_contraction.GetCommTime() 
                       + exp_contraction_->GetCommTime()
                       + lcag.GetCommTime() + g.GetCommTime();
+        send_volume_ += local_contraction.GetSendVolume()
+                      + exp_contraction_->GetSendVolume()
+                      + lcag.GetSendVolume() + g.GetSendVolume();
+        recv_volume_ += local_contraction.GetReceiveVolume() 
+                      + exp_contraction_->GetReceiveVolume()
+                      + lcag.GetReceiveVolume() + g.GetReceiveVolume();
       }
     } 
   }
@@ -263,8 +279,16 @@ class ExponentialContraction {
     g.OutputLabels();
   }
 
-  float GetCommTime() {
+  inline float GetCommTime() {
     return comm_time_; 
+  }
+
+  inline VertexID GetSendVolume() {
+    return send_volume_; 
+  }
+
+  inline VertexID GetReceiveVolume() {
+    return recv_volume_; 
   }
 
  private:
@@ -279,10 +303,12 @@ class ExponentialContraction {
   VertexID rng_offset_;
 
   // Statistics
+  Timer comm_timer_;
   float comm_time_;
   Timer iteration_timer_;
   Timer contraction_timer_;
-  Timer comm_timer_;
+  VertexID send_volume_;
+  VertexID recv_volume_;
   
   // Contraction
   DynamicContraction *exp_contraction_;
@@ -482,12 +508,14 @@ class ExponentialContraction {
       }
 
       contraction_timer_.Restart();
+      comm_timer_.Restart();
       MPI_Allreduce(&converged_locally,
                     &converged_globally,
                     1,
                     MPI_INT,
                     MPI_MIN,
                     MPI_COMM_WORLD);
+      comm_time_ += comm_timer_.Elapsed();
       exchange_rounds++;
       if (rank_ == ROOT) {
         std::cout << "[STATUS] |--- Convergence test took " 
@@ -706,12 +734,14 @@ class ExponentialContraction {
       }
 
       contraction_timer_.Restart();
+      comm_timer_.Restart();
       MPI_Allreduce(&converged_locally,
                     &converged_globally,
                     1,
                     MPI_INT,
                     MPI_MIN,
                     MPI_COMM_WORLD);
+      comm_time_ += comm_timer_.Elapsed();
       exchange_rounds++;
       if (rank_ == ROOT) {
         std::cout << "[STATUS] |--- Convergence test took " 
@@ -828,7 +858,7 @@ class ExponentialContraction {
 
   void SampleHighDegreeNeighborhoods(DynamicGraphCommunicator &g) {
     std::vector<std::pair<VertexID, VertexID>> high_degree_vertices;
-    VertexID avg_max_deg = Utility::ComputeAverageMaxDegree(g, rank_, size_);
+    VertexID avg_max_deg = Utility::ComputeAverageMaxDegree(g, rank_, size_, comm_time_);
     Utility::SelectHighDegreeVertices(g, avg_max_deg, high_degree_vertices);
 
     for (const auto &vd : high_degree_vertices) {
@@ -841,7 +871,7 @@ class ExponentialContraction {
     // Determine high degree vertices
     VertexID global_vertices = g.GatherNumberOfGlobalVertices();
     std::vector<std::pair<VertexID, VertexID>> high_degree_vertices;
-    VertexID avg_max_deg = Utility::ComputeAverageMaxDegree(g, rank_, size_);
+    VertexID avg_max_deg = Utility::ComputeAverageMaxDegree(g, rank_, size_, comm_time_);
     // Use sqrt(n) as a degree threshold
     config_.degree_threshold = static_cast<VertexID>(config_.degree_threshold*sqrt(global_vertices));
     if (rank_ == ROOT) {
@@ -849,8 +879,8 @@ class ExponentialContraction {
                 << " [TIME] " << contraction_timer_.Elapsed() << std::endl;
     }
     Utility::SelectHighDegreeVertices(g, config_.degree_threshold, high_degree_vertices);
-    std::cout << "R" << rank_ << " num vertices to distribute " << high_degree_vertices.size() << std::endl;
-    
+    std::cout << "[STATUS] |- R" << rank_ << " Num high degree to distributed " 
+              << high_degree_vertices.size() << std::endl;
     // Split high degree vertices into one layer of proxies with degree sqrt(n)
     SplitHighDegreeVerticesSqrtEdge(g, avg_max_deg, high_degree_vertices);
   }
@@ -907,10 +937,8 @@ class ExponentialContraction {
     receive_buffers[rank_] = send_buffers[rank_];
     send_buffers[rank_].clear();
 
-    comm_timer_.Restart();
-    CommunicationUtility::SparseAllToAll(send_buffers, receive_buffers, rank_, size_, 993);
-    comm_time_ += comm_timer_.Elapsed();
-    CommunicationUtility::ClearBuffers(send_buffers);
+    comm_time_ += CommunicationUtility::SparseAllToAll(send_buffers, receive_buffers, rank_, size_, 993);
+    send_volume_ += CommunicationUtility::ClearBuffers(send_buffers);
 
     //////////////////////////////////////////
     // Receive high degree neighbors (their degree)
@@ -924,7 +952,7 @@ class ExponentialContraction {
         high_degree_vertices.emplace_back(g.GetLocalID(vertex), degree);
       }
     }
-    CommunicationUtility::ClearBuffers(receive_buffers);
+    recv_volume_ += CommunicationUtility::ClearBuffers(receive_buffers);
 
     //////////////////////////////////////////
     // Each PE now has a vector of his and neighboring high degree vertices
@@ -958,7 +986,6 @@ class ExponentialContraction {
           target_pe = dist(gen);
         } while (target_pe == taboo_rank || pes_for_replication.find(target_pe) != pes_for_replication.end());
         pes_for_replication[target_pe] = repl_vertices_id;
-        // std::cout << "R" << rank_ << " store replicate vertex " << repl_vertices_id << " PE(rep) " << target_pe << " for v " << g.GetGlobalID(v) << " PE(v) " << taboo_rank << std::endl;
         sampling_vector.emplace_back(target_pe, repl_vertices_id);
         repl_vertices_id++;
       }
@@ -978,7 +1005,6 @@ class ExponentialContraction {
 
           // PE now knows that edge (v, w) will be replicated to repl_vertices_id on target_pe
           // For each edge store its associated replicate
-          // std::cout << "R" << rank_ << " store replicate edge (" << repl_vertices_id << "," << g.GetGlobalID(w) << ") for e (" << g.GetGlobalID(v) << "," << g.GetGlobalID(w) << ")" << std::endl;
           replicated_edges[g.GetGlobalID(v)][g.GetGlobalID(w)] = std::make_pair(repl_vertices_id, target_pe);
         }
       });
@@ -1031,8 +1057,6 @@ class ExponentialContraction {
             // Send (updated) edge target to replicate vertex
             send_buffers[repl_source_pe].emplace_back(edge_target_id);
             send_buffers[repl_source_pe].emplace_back(edge_target_pe);
-
-            // std::cout << "R" << rank_ << " send edge (" << repl_source_id << "," << edge_target_id << " (PE " << edge_target_pe << ")) to PE " << repl_source_pe << std::endl;
           } 
           // Keep local edges
           else {
@@ -1058,7 +1082,6 @@ class ExponentialContraction {
                 // Add replicates if they are not already present
                 if (!(g.IsLocalFromGlobal(replicate.first) || g.IsGhostFromGlobal(replicate.first))) {
                   if (replicate.second == rank_) {
-                    // std::cout << "R" << rank_ << " add repl (local) " << replicate.first << std::endl;
                     g.AddVertex(replicate.first);
                     replicated_vertices_[replicate.first] = edge_source_id;
                     // Also add original source if not existent yet
@@ -1068,9 +1091,7 @@ class ExponentialContraction {
                     // Add local edge from replicate to source (and vice versa)
                     g.AddEdge(g.GetLocalID(replicate.first), edge_source_id, edge_source_pe);
                     g.AddEdge(g.GetLocalID(edge_source_id), replicate.first, rank_);
-                    // std::cout << "R" << rank_ << " add edge (repl) (" << replicate.first << "," << edge_source_id << " (PE " << edge_source_pe << "))" << std::endl;
                   } else {
-                    // std::cout << "R" << rank_ << " add repl (ghost) " << replicate.first << std::endl;
                     g.AddGhostVertex(replicate.first, replicate.second);
                   }
                 }
@@ -1104,10 +1125,8 @@ class ExponentialContraction {
     receive_buffers[rank_] = send_buffers[rank_];
     send_buffers[rank_].clear();
 
-    comm_timer_.Restart();
-    CommunicationUtility::SparseAllToAll(send_buffers, receive_buffers, rank_, size_, 993);
-    comm_time_ += comm_timer_.Elapsed();
-    CommunicationUtility::ClearBuffers(send_buffers);
+    comm_time_ += CommunicationUtility::SparseAllToAll(send_buffers, receive_buffers, rank_, size_, 993);
+    send_volume_ += CommunicationUtility::ClearBuffers(send_buffers);
 
     //////////////////////////////////////////
     // Process received edges 
@@ -1128,7 +1147,6 @@ class ExponentialContraction {
         if (!(g.IsLocalFromGlobal(repl_source_id) || g.IsGhostFromGlobal(repl_source_id))) {
           g.AddVertex(repl_source_id);
           replicated_vertices_[repl_source_id] = edge_source_id;
-          // std::cout << "R" << rank_ << " add repl (local) " << repl_source_id << std::endl;
 
           // Also add original source if not existent yet
           if (!(g.IsLocalFromGlobal(edge_source_id) || g.IsGhostFromGlobal(edge_source_id))) {
@@ -1137,7 +1155,6 @@ class ExponentialContraction {
           // Add local edge from replicate to source (and vice versa)
           g.AddEdge(g.GetLocalID(repl_source_id), edge_source_id, edge_source_pe);
           g.AddEdge(g.GetLocalID(edge_source_id), repl_source_id, rank_);
-          // std::cout << "R" << rank_ << " add edge (repl) (" << repl_source_id << "," << edge_source_id << " (PE " << edge_source_pe << "))" << std::endl;
         }
       }
     }
@@ -1166,7 +1183,7 @@ class ExponentialContraction {
         }
       }
     }
-    CommunicationUtility::ClearBuffers(receive_buffers);
+    recv_volume_ += CommunicationUtility::ClearBuffers(receive_buffers);
   }
 
   void UpdateInterfaceVertices(DynamicGraphCommunicator &g) {
@@ -1203,24 +1220,41 @@ class ExponentialContraction {
 
   template <typename GraphType>
   void OutputStats(GraphType &g) {
-    VertexID n = g.GatherNumberOfGlobalVertices();
-    EdgeID m = g.GatherNumberOfGlobalEdges();
+    VertexID n_local = g.GetNumberOfVertices();
+    EdgeID m_local = g.GetNumberOfEdges();
+    VertexID n_global = g.GatherNumberOfGlobalVertices();
+    EdgeID m_global = g.GatherNumberOfGlobalEdges();
+
+    VertexID highest_degree = 0;
+    g.ForallLocalVertices([&](const VertexID v) {
+      if (g.GetVertexDegree(v) > highest_degree) {
+        highest_degree = g.GetVertexDegree(v);
+      }
+    });
 
     // Determine min/maximum cut size
-    EdgeID m_cut = g.GetNumberOfCutEdges();
+    EdgeID cut_local = g.GetNumberOfCutEdges();
     EdgeID min_cut, max_cut;
-    MPI_Reduce(&m_cut, &min_cut, 1, MPI_VERTEX, MPI_MIN, ROOT,
+    comm_timer_.Restart();
+    MPI_Reduce(&cut_local, &min_cut, 1, MPI_VERTEX, MPI_MIN, ROOT,
                MPI_COMM_WORLD);
-    MPI_Reduce(&m_cut, &max_cut, 1, MPI_VERTEX, MPI_MAX, ROOT,
+    MPI_Reduce(&cut_local, &max_cut, 1, MPI_VERTEX, MPI_MAX, ROOT,
                MPI_COMM_WORLD);
+    comm_time_ += comm_timer_.Elapsed();
 
+    std::cout << "LOCAL TEMP IMPUT"
+              << " rank=" << rank_
+              << " n=" << n_local 
+              << " m=" << m_local 
+              << " c=" << cut_local 
+              << " max_d=" << highest_degree << std::endl;
     if (rank_ == ROOT) {
-      std::cout << "TEMP "
-                << "s=" << config_.seed << ", "
-                << "p=" << size_  << ", "
-                << "n=" << n << ", "
-                << "m=" << m << ", "
-                << "c(min,max)=" << min_cut << "," << max_cut << std::endl;
+      std::cout << "GLOBAL TEMP IMPUT"
+                << " s=" << config_.seed 
+                << " p=" << size_ 
+                << " n=" << n_global
+                << " m=" << m_global
+                << " c(min,max)=" << min_cut << "," << max_cut << std::endl;
     }
   }
 

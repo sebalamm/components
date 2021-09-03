@@ -86,8 +86,10 @@ class IOUtility {
   static void PrintGraphParams(GraphType &g,
                                Config &config,
                                PEID rank, PEID size) {
-    VertexID n = g.GatherNumberOfGlobalVertices();
-    EdgeID m = g.GatherNumberOfGlobalEdges();
+    VertexID n_local = g.GetNumberOfVertices();
+    EdgeID m_local = g.GetNumberOfEdges();
+    VertexID n_global = g.GatherNumberOfGlobalVertices();
+    EdgeID m_global = g.GatherNumberOfGlobalEdges();
 
     VertexID highest_degree = 0;
     g.ForallLocalVertices([&](const VertexID v) {
@@ -97,22 +99,27 @@ class IOUtility {
     });
 
     // Determine min/maximum cut size
-    EdgeID m_cut = g.GetNumberOfCutEdges();
+    EdgeID cut_local = g.GetNumberOfCutEdges();
     EdgeID min_cut, max_cut;
-    MPI_Reduce(&m_cut, &min_cut, 1, MPI_VERTEX, MPI_MIN, ROOT,
+    MPI_Reduce(&cut_local, &min_cut, 1, MPI_VERTEX, MPI_MIN, ROOT,
                MPI_COMM_WORLD);
-    MPI_Reduce(&m_cut, &max_cut, 1, MPI_VERTEX, MPI_MAX, ROOT,
+    MPI_Reduce(&cut_local, &max_cut, 1, MPI_VERTEX, MPI_MAX, ROOT,
                MPI_COMM_WORLD);
 
+    std::cout << "LOCAL INPUT" 
+              << " rank=" << rank
+              << " n=" << n_local 
+              << " m=" << m_local 
+              << " c=" << cut_local 
+              << " max_d=" << highest_degree << std::endl;
     if (rank == ROOT) {
-      std::cout << "INPUT "
-                << "s=" << config.seed << ", "
-                << "p=" << size  << ", "
-                << "n=" << n << ", "
-                << "m=" << m << ", "
-                << "c(min,max)=" << min_cut << "," << max_cut << std::endl;
+      std::cout << "GLOBAL INPUT"
+                << " s=" << config.seed
+                << " p=" << size
+                << " n=" << n_global
+                << " m=" << m_global
+                << " c(min,max)=" << min_cut << "," << max_cut << std::endl;
     }
-    std::cout << "R" << rank << " LOCAL INPUT" << " c=" << m_cut << ", hd=" << highest_degree << std::endl;
   }
 };
 

@@ -66,7 +66,9 @@ class StaticGraph {
       edge_counter_(0),
       ghost_counter_(0),
       last_source_(0),
-      comm_time_(0.0) {
+      comm_time_(0.0),
+      send_volume_(0),
+      recv_volume_(0) {
     global_to_local_map_.set_empty_key(EmptyKey);
     global_to_local_map_.set_deleted_key(DeleteKey);
     // duplicates_.set_empty_key(EmptyKey);
@@ -531,8 +533,16 @@ class StaticGraph {
 
   void Logging(bool active);
 
-  float GetCommTime() {
+  inline float GetCommTime() {
     return comm_time_;
+  }
+
+  inline VertexID GetSendVolume() {
+    return send_volume_;
+  }
+
+  inline VertexID GetReceiveVolume() {
+    return recv_volume_;
   }
 
  protected:
@@ -614,6 +624,8 @@ class StaticGraph {
   // Statistics
   float comm_time_;
   Timer comm_timer_;
+  VertexID send_volume_;
+  VertexID recv_volume_;
 };
 
 #endif

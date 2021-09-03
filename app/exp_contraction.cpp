@@ -66,7 +66,13 @@ int main(int argn, char **argv) {
   if (rank == ROOT) std::cout << "BENCH RUN" << std::endl;
 
   Statistics stats;
+  Statistics global_stats;
   Statistics comm_stats;
+  Statistics global_comm_stats;
+  Statistics send_stats;
+  Statistics global_send_stats;
+  Statistics recv_stats;
+  Statistics global_recv_stats;
 
   for (int i = 0; i < conf.iterations; ++i) {
     int round_seed = initial_seed + i + 1000;
@@ -94,20 +100,44 @@ int main(int argn, char **argv) {
     // Gather total time
     MPI_Reduce(&local_time, &total_time, 1, MPI_FLOAT, MPI_MAX, ROOT,
                MPI_COMM_WORLD);
-    if (rank == ROOT) stats.Push(total_time);
+    stats.Push(local_time);
+    if (rank == ROOT) global_stats.Push(total_time);
 
     // Gather comm time
     float comm_time = comp.GetCommTime();
     float total_comm_time = 0.0;
     MPI_Reduce(&comm_time, &total_comm_time, 1, MPI_FLOAT, MPI_MAX, ROOT,
                MPI_COMM_WORLD);
-    if (rank == ROOT) comm_stats.Push(total_comm_time);
+    comm_stats.Push(comm_time);
+    if (rank == ROOT) global_comm_stats.Push(total_comm_time);
+
+    VertexID send_volume = comp.GetSendVolume();
+    VertexID total_send_volume = 0;
+    MPI_Reduce(&send_volume, &total_send_volume, 1, MPI_LONG, MPI_SUM, ROOT,
+               MPI_COMM_WORLD);
+    send_stats.Push(comm_time);
+    if (rank == ROOT) global_send_stats.Push(total_send_volume);
+
+    VertexID recv_volume = comp.GetReceiveVolume();
+    VertexID total_recv_volume = 0;
+    MPI_Reduce(&recv_volume, &total_recv_volume, 1, MPI_LONG, MPI_SUM, ROOT,
+               MPI_COMM_WORLD);
+    recv_stats.Push(comm_time);
+    if (rank == ROOT) global_recv_stats.Push(total_recv_volume);
   }
 
+  std::cout << "LOCAL RESULT rank=" << rank << " runner=exp"
+            << " time=" << stats.Avg() << " stddev=" << stats.Stddev()
+            << " comm_time=" << comm_stats.Avg() << " stddev=" << comm_stats.Stddev()
+            << " send_volume=" << send_stats.Avg() << " stddev=" << send_stats.Stddev()
+            << " recv_volume=" << recv_stats.Avg() << " stddev=" << recv_stats.Stddev()
+            << " iterations=" << conf.iterations << std::endl;
   if (rank == ROOT) {
-    std::cout << "RESULT runner=exp"
-              << " time=" << stats.Avg() << " stddev=" << stats.Stddev()
-              << " comm_time=" << comm_stats.Avg() << " stddev=" << comm_stats.Stddev()
+    std::cout << "GLOBAL RESULT runner=exp"
+              << " time=" << global_stats.Avg() << " stddev=" << global_stats.Stddev()
+              << " comm_time=" << global_comm_stats.Avg() << " stddev=" << global_comm_stats.Stddev()
+              << " send_volume=" << global_send_stats.Avg() << " stddev=" << global_send_stats.Stddev()
+              << " recv_volume=" << global_recv_stats.Avg() << " stddev=" << global_recv_stats.Stddev()
               << " iterations=" << conf.iterations << std::endl;
   }
 

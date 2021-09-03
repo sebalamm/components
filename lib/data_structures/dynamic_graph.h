@@ -59,7 +59,9 @@ class DynamicGraph {
       ghost_vertex_counter_(0),
       edge_counter_(0),
       ghost_offset_(0),
-      comm_time_(0.0) {
+      comm_time_(0.0),
+      send_volume_(0),
+      recv_volume_(0) {
     label_shortcut_.set_empty_key(EmptyKey);
     label_shortcut_.set_deleted_key(DeleteKey);
     global_to_local_map_.set_empty_key(EmptyKey);
@@ -618,8 +620,16 @@ class DynamicGraph {
 
   void Logging(bool active);
 
-  float GetCommTime() {
+  inline float GetCommTime() {
     return comm_time_;
+  }
+
+  inline VertexID GetSendVolume() {
+    return send_volume_;
+  }
+
+  inline VertexID GetReceiveVolume() {
+    return recv_volume_;
   }
 
  protected:
@@ -702,6 +712,8 @@ class DynamicGraph {
   // Statistics
   float comm_time_;
   Timer comm_timer_;
+  VertexID send_volume_;
+  VertexID recv_volume_;
 };
 
 #endif

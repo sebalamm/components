@@ -27,9 +27,11 @@
 class CommunicationUtility {
  public:
 
-  static void SparseAllToAll(google::dense_hash_map<PEID, VertexBuffer> &send_buffers,
-                             google::dense_hash_map<PEID, VertexBuffer> &receive_buffers,
-                             PEID rank, PEID size, PEID message_tag = 0) {
+  static float SparseAllToAll(google::dense_hash_map<PEID, VertexBuffer> &send_buffers,
+                              google::dense_hash_map<PEID, VertexBuffer> &receive_buffers,
+                              PEID rank, PEID size, PEID message_tag = 0) {
+    Timer comm_timer;
+    comm_timer.Restart();
     PEID num_requests = 0;
     for (const auto &kv : send_buffers) {
       PEID pe = kv.first;
@@ -110,13 +112,17 @@ class CommunicationUtility {
         exit(1);
       }
     }
+    return comm_timer.Elapsed();
   }
 
-  static void ClearBuffers(google::dense_hash_map<PEID, VertexBuffer> &buffers) {
+  static VertexID ClearBuffers(google::dense_hash_map<PEID, VertexBuffer> &buffers) {
+    VertexID messages = 0;
     for (auto &kv: buffers) {
       kv.second.clear();
+      messages += kv.second.size();
     }
     buffers.clear();
+    return messages;
   }
 };
 

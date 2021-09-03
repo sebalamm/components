@@ -127,3 +127,12 @@ void SemidynamicGraphCommunicator::OutputLabels() {
 float SemidynamicGraphCommunicator::GetCommTime() {
   return comm_time_ + ghost_comm_->GetCommTime();
 }
+
+VertexID SemidynamicGraphCommunicator::GetSendVolume() {
+  return send_volume_ + ghost_comm_->GetSendVolume();
+}
+
+VertexID SemidynamicGraphCommunicator::GetReceiveVolume() {
+  return recv_volume_ + ghost_comm_->GetReceiveVolume();
+}
+

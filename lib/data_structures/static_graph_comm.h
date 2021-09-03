@@ -143,6 +143,10 @@ class StaticGraphCommunicator : public StaticGraph {
 
   float GetCommTime();
 
+  VertexID GetSendVolume();
+
+  VertexID GetReceiveVolume();
+
  private:
   std::vector<VertexPayload> vertex_payload_;
 

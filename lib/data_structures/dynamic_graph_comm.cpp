@@ -122,3 +122,11 @@ float DynamicGraphCommunicator::GetCommTime() {
   return comm_time_ + ghost_comm_->GetCommTime();
 }
 
+VertexID DynamicGraphCommunicator::GetSendVolume() {
+  return send_volume_ + ghost_comm_->GetSendVolume();
+}
+
+VertexID DynamicGraphCommunicator::GetReceiveVolume() {
+  return recv_volume_ + ghost_comm_->GetReceiveVolume();
+}
+

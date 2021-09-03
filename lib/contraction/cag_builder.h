@@ -42,7 +42,9 @@ class CAGBuilder {
         num_smaller_components_(0),
         num_local_components_(0),
         num_global_components_(0),
-        comm_time_(0.0) {
+        comm_time_(0.0),
+        send_volume_(0), 
+        recv_volume_(0) {
     local_components_.set_empty_key(EmptyKey);
     local_components_.set_deleted_key(DeleteKey);
     send_buffers_.set_empty_key(EmptyKey);
@@ -66,8 +68,16 @@ class CAGBuilder {
     return BuildLocalContractionGraph<GraphOutputType>();
   }
 
-  float GetCommTime() {
+  inline float GetCommTime() {
     return comm_time_;
+  }
+
+  inline VertexID GetSendVolume() {
+    return send_volume_;
+  }
+
+  inline VertexID GetReceiveVolume() {
+    return recv_volume_;
   }
 
  private:
@@ -103,12 +113,12 @@ class CAGBuilder {
   float comm_time_;
   Timer contraction_timer_;
   Timer comm_timer_;
+  VertexID send_volume_;
+  VertexID recv_volume_;
 
   void PerformContraction() {
     contraction_timer_.Restart();
-    comm_timer_.Restart();
     ComputeComponentPrefixSum();
-    comm_time_ += comm_timer_.Elapsed();
     if (rank_ == ROOT) {
       std::cout << "[STATUS] |-- Computing component prefix sum took " 
                 << "[TIME] " << contraction_timer_.Elapsed() << std::endl;
@@ -162,20 +172,24 @@ class CAGBuilder {
 
     // Build prefix sum over local components O(log P)
     VertexID component_prefix_sum;
+    comm_timer_.Restart();
     MPI_Scan(&num_local_components_,
              &component_prefix_sum,
              1,
              MPI_VERTEX,
              MPI_SUM,
              MPI_COMM_WORLD);
+    comm_time_ += comm_timer_.Elapsed();
 
     // Broadcast number of global components
     num_global_components_ = component_prefix_sum;
+    comm_timer_.Restart();
     MPI_Bcast(&num_global_components_,
               1,
               MPI_VERTEX,
               size_ - 1,
               MPI_COMM_WORLD);
+    comm_time_ += comm_timer_.Elapsed();
 
     // Determine remaining edges O(m/P)
     g_.ForallLocalVertices([&](const VertexID v) {
@@ -210,20 +224,24 @@ class CAGBuilder {
 
     // Build prefix sum over local components O(log P)
     VertexID component_prefix_sum;
+    comm_timer_.Restart();
     MPI_Scan(&num_local_components_,
              &component_prefix_sum,
              1,
              MPI_VERTEX,
              MPI_SUM,
              MPI_COMM_WORLD);
+    comm_time_ += comm_timer_.Elapsed();
 
     // Broadcast number of global components
     num_global_components_ = component_prefix_sum;
+    comm_timer_.Restart();
     MPI_Bcast(&num_global_components_,
               1,
               MPI_VERTEX,
               size_ - 1,
               MPI_COMM_WORLD);
+    comm_time_ += comm_timer_.Elapsed();
 
     num_smaller_components_ = component_prefix_sum - num_local_components_;
   }
@@ -263,8 +281,8 @@ class CAGBuilder {
     IdentifyLargestInterfaceComponents();
     AddComponentMessages();
 
-    std::cout << "[STATUS] |--- R" << rank_ << " Filling buffers took " 
-              << "[TIME] " << exchange_timer.Elapsed() << std::endl;
+    // std::cout << "[STATUS] |--- R" << rank_ << " Filling buffers took " 
+    //           << "[TIME] " << exchange_timer.Elapsed() << std::endl;
 
     exchange_timer.Restart();
     google::dense_hash_map<PEID, VertexID> largest_component; 
@@ -276,24 +294,22 @@ class CAGBuilder {
 
     // Send ghost vertex updates O(cut size) (communication)
     exchange_timer.Restart();
-    comm_timer_.Restart();
-    CommunicationUtility::SparseAllToAll(send_buffers_, receive_buffers_, rank_, size_, CAGTag);
-    comm_time_ += comm_timer_.Elapsed();
-    CommunicationUtility::ClearBuffers(send_buffers_);
+    comm_time_ += CommunicationUtility::SparseAllToAll(send_buffers_, receive_buffers_, rank_, size_, CAGTag);
+    send_volume_ += CommunicationUtility::ClearBuffers(send_buffers_);
 
-    std::cout << "[STATUS] |--- Sparse exchange took " 
-              << "[TIME] " << exchange_timer.Elapsed() << std::endl;
+    // std::cout << "[STATUS] |--- Sparse exchange took " 
+    //           << "[TIME] " << exchange_timer.Elapsed() << std::endl;
 
     exchange_timer.Restart();
     HandleMessages(largest_component, vertex_message);
-    CommunicationUtility::ClearBuffers(receive_buffers_);
-    std::cout << "[STATUS] |--- Message handling took " 
-              << "[TIME] " << exchange_timer.Elapsed() << std::endl;
+    recv_volume_ += CommunicationUtility::ClearBuffers(receive_buffers_);
+    // std::cout << "[STATUS] |--- Message handling took " 
+    //           << "[TIME] " << exchange_timer.Elapsed() << std::endl;
 
     exchange_timer.Restart();
     ApplyUpdatesToGhostVertices(largest_component, vertex_message);
-    std::cout << "[STATUS] |--- R" << rank_ << " Local updates took " 
-              << "[TIME] " << exchange_timer.Elapsed() << std::endl;
+    // std::cout << "[STATUS] |--- R" << rank_ << " Local updates took " 
+    //           << "[TIME] " << exchange_timer.Elapsed() << std::endl;
   }
 
   void IdentifyLargestInterfaceComponents() {
