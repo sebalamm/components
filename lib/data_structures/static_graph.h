@@ -94,15 +94,17 @@ class StaticGraph {
     if (local_n > 0) vertices_[0].first_edge_ = 0;
     edges_.resize(number_of_edges_);
 
-    local_vertices_data_.resize(number_of_vertices_);
+    local_vertices_data_.resize(local_n);
     ghost_vertices_data_.resize(ghost_n);
 
     local_offset_ = local_offset;
     ghost_offset_ = local_n;
 
     // Temp counter for properly counting new ghost vertices
-    vertex_counter_ = local_n; 
+    vertex_counter_ = local_n;
     ghost_counter_ = local_n;
+
+    is_active_.resize(number_of_vertices_, true);
   }
 
   void FinishConstruct() { 
@@ -110,6 +112,10 @@ class StaticGraph {
     edges_.resize(edge_counter_ + 1);
 
     number_of_vertices_ = vertex_counter_;
+    // std::cout << "R" << rank_ << " finish construct vc " << vertex_counter_ << " gc " << ghost_counter_ << std::endl;;
+    number_of_local_vertices_ = vertex_counter_ - (ghost_counter_ - ghost_offset_);
+    // std::cout << "R" << rank_ << " final nc " << number_of_local_vertices_ << std::endl;
+    number_of_edges_ = edge_counter_;
     for (VertexID v = 1; v <= vertex_counter_; v++) {
       if (vertices_[v].first_edge_ == std::numeric_limits<EdgeID>::max()) {
         vertices_[v].first_edge_ = vertices_[v - 1].first_edge_;
@@ -122,23 +128,22 @@ class StaticGraph {
   //////////////////////////////////////////////
   template<typename F>
   void ForallLocalVertices(F &&callback) {
-    for (VertexID v = 0; v < GetNumberOfLocalVertices(); ++v) {
-      callback(v);
+    for (VertexID v = 0; v < GetLocalVertexVectorSize(); ++v) {
+      if (IsActive(v)) callback(v);
     }
   }
 
   template<typename F>
   void ForallGhostVertices(F &&callback) {
-    for (VertexID v = GetNumberOfLocalVertices(); v < GetNumberOfVertices(); ++v) {
-      callback(v);
+    for (VertexID v = 0; v < GetGhostVertexVectorSize(); ++v) {
+      if (IsActive(v + ghost_offset_)) callback(v + ghost_offset_);
     }
   }
 
   template<typename F>
   void ForallVertices(F &&callback) {
-    for (VertexID v = 0; v < GetNumberOfVertices(); ++v) {
-      callback(v);
-    }
+    ForallLocalVertices(callback);
+    ForallGhostVertices(callback);
   }
 
   template<typename F>
@@ -163,11 +168,26 @@ class StaticGraph {
     return adj;
   }
 
+  inline bool IsActive(const VertexID v) const {
+    return is_active_[v];
+  }
+
+  void SetActive(VertexID v, bool is_active) {
+    if (is_active_[v] && !is_active) {
+      if (IsLocal(v)) number_of_local_vertices_--;
+      number_of_vertices_--;
+    } else if (!is_active_[v] && is_active) {
+      if (IsLocal(v)) number_of_local_vertices_++;
+      number_of_vertices_++;
+    }
+    is_active_[v] = is_active;
+  }
+
   //////////////////////////////////////////////
   // Graph contraction
   //////////////////////////////////////////////
   inline void AllocateContractionVertices() {
-    contraction_vertices_.resize(GetNumberOfVertices());
+    contraction_vertices_.resize(vertices_.size());
   }
 
   inline void SetContractionVertex(VertexID v, VertexID cv) {
@@ -182,12 +202,12 @@ class StaticGraph {
   // Vertex mappings
   //////////////////////////////////////////////
   inline bool IsLocal(VertexID v) const {
-    return v < number_of_local_vertices_;
+    return v < GetLocalVertexVectorSize();
   }
 
   inline bool IsLocalFromGlobal(VertexID v) const {
     return v == global_duplicate_id_ 
-            || (v != original_duplicate_id_ && local_offset_ <= v && v < local_offset_ + number_of_local_vertices_);
+            || (v != original_duplicate_id_ && local_offset_ <= v && v < local_offset_ + GetLocalVertexVectorSize());
   }
 
   inline bool IsGhost(VertexID v) const {
@@ -222,7 +242,6 @@ class StaticGraph {
   }
 
   inline VertexID GetGlobalID(VertexID v) const {
-    // TODO This says 0 is local (even tough its 63)
     if (IsLocal(v)) {
       if (local_duplicate_id_ < std::numeric_limits<VertexID>::max()
           && local_duplicate_id_ == v) {
@@ -248,20 +267,19 @@ class StaticGraph {
   // Manage local vertices/edges
   //////////////////////////////////////////////
   inline VertexID GetNumberOfVertices() const { return number_of_vertices_; }
+  inline VertexID GetVertexVectorSize() const { return GetLocalVertexVectorSize() + GetGhostVertexVectorSize(); }
 
   inline VertexID GetNumberOfGlobalVertices() const { return number_of_global_vertices_; }
 
   inline VertexID GetNumberOfGlobalEdges() const { return number_of_global_edges_; }
 
-  inline VertexID GetLocalOffset() const {
-    return local_offset_;
-  }
+  inline VertexID GetLocalOffset() const { return local_offset_; }
 
-  inline VertexID GetNumberOfLocalVertices() const {
-    return number_of_local_vertices_;
-  }
+  inline VertexID GetNumberOfLocalVertices() const { return number_of_local_vertices_; }
+  inline VertexID GetLocalVertexVectorSize() const { return local_vertices_data_.size(); }
 
   inline VertexID GetNumberOfGhostVertices() const { return number_of_vertices_ - number_of_local_vertices_; }
+  inline VertexID GetGhostVertexVectorSize() const { return ghost_vertices_data_.size(); }
 
   inline EdgeID GetNumberOfEdges() const { return number_of_edges_; }
 
@@ -277,59 +295,69 @@ class StaticGraph {
     return vertices_[v + 1].first_edge_;
   }
 
-  VertexID GatherNumberOfGlobalVertices() {
-    VertexID local_vertices = 0;
-    ForallLocalVertices([&](const VertexID v) { 
-        local_vertices++; 
-    });
-    // Check if all PEs are done
-    comm_timer_.Restart();
-    MPI_Allreduce(&local_vertices,
-                  &number_of_global_vertices_,
-                  1,
-                  MPI_VERTEX,
-                  MPI_SUM,
-                  MPI_COMM_WORLD);
-    comm_time_ += comm_timer_.Elapsed();
+  VertexID GatherNumberOfGlobalVertices(bool force=true) {
+    if (number_of_global_vertices_ == 0 || force) {
+      number_of_global_vertices_ = 0;
+      VertexID local_vertices = 0;
+      ForallLocalVertices([&](const VertexID v) { local_vertices++; });
+      if (local_vertices != number_of_local_vertices_) {
+        std::cout << "This shouldn't happen (different number of vertices local=" << local_vertices << ", counter=" << number_of_local_vertices_ << ", datasize=" << GetLocalVertexVectorSize() << ")" << std::endl;
+        exit(1);
+      }
+      // Check if all PEs are done
+      comm_timer_.Restart();
+      MPI_Allreduce(&local_vertices,
+                    &number_of_global_vertices_,
+                    1,
+                    MPI_VERTEX,
+                    MPI_SUM,
+                    MPI_COMM_WORLD);
+      comm_time_ += comm_timer_.Elapsed();
+    }
     return number_of_global_vertices_;
   }
 
-  VertexID GatherNumberOfGlobalEdges() {
-    VertexID local_edges = 0;
-    ForallLocalVertices([&](const VertexID v) { 
-        ForallNeighbors(v, [&](const VertexID w) { local_edges++; });
-    });
-    // Check if all PEs are done
-    comm_timer_.Restart();
-    MPI_Allreduce(&local_edges,
-                  &number_of_global_edges_,
-                  1,
-                  MPI_VERTEX,
-                  MPI_SUM,
-                  MPI_COMM_WORLD);
-    comm_time_ += comm_timer_.Elapsed();
-    number_of_global_edges_ /= 2;
+  VertexID GatherNumberOfGlobalEdges(bool force=true) {
+    if (number_of_global_edges_ == 0 || force) {
+      number_of_global_edges_ = 0;
+      VertexID local_edges = 0;
+      ForallVertices([&](const VertexID v) { 
+          ForallNeighbors(v, [&](const VertexID w) { local_edges++; });
+      });
+      if (local_edges != number_of_edges_) {
+        std::cout << "This shouldn't happen (different number of edges local=" << local_edges << ", counter=" << number_of_edges_ << ")" << std::endl;
+        exit(1);
+      }
+      // Check if all PEs are done
+      comm_timer_.Restart();
+      MPI_Allreduce(&local_edges,
+                    &number_of_global_edges_,
+                    1,
+                    MPI_VERTEX,
+                    MPI_SUM,
+                    MPI_COMM_WORLD);
+      comm_time_ += comm_timer_.Elapsed();
+      number_of_global_edges_ /= 2;
+    }
     return number_of_global_edges_;
   }
 
-  inline VertexID AddVertex() {
-    return vertex_counter_++;
-  }
+  inline VertexID AddVertex() { return vertex_counter_++; }
 
   inline VertexID AddGhostVertex(VertexID v, PEID pe) {
     global_to_local_map_[v] = ghost_counter_;
 
-    if (vertex_counter_ >= local_vertices_data_.size()) {
-      local_vertices_data_.resize(vertex_counter_ + 1);
+    if (vertex_counter_ >= is_active_.size()) {
+      is_active_.resize(vertex_counter_ + 1);
     }
-    if (ghost_counter_ >= ghost_vertices_data_.size()) {
+    if (ghost_counter_ - ghost_offset_ >= GetGhostVertexVectorSize()) {
       ghost_vertices_data_.resize(ghost_counter_ + 1);
     }
 
     // Update data
-    local_vertices_data_[vertex_counter_].is_interface_vertex_ = false;
     ghost_vertices_data_[ghost_counter_ - ghost_offset_].rank_ = pe;
     ghost_vertices_data_[ghost_counter_ - ghost_offset_].global_id_ = v;
+    is_active_[vertex_counter_] = true;
 
     vertex_counter_++;
     return ghost_counter_++;
@@ -338,8 +366,10 @@ class StaticGraph {
   inline void AddDuplicateVertex(VertexID original_id, VertexID global_id) {
     // "Remap" duplicate
     original_duplicate_id_ = original_id;
-    local_duplicate_id_ = original_id - local_offset_;
+    // TODO: Local duplicate is now the last before ghosts?
+    local_duplicate_id_ = ghost_offset_ - 1;
     global_duplicate_id_ = global_id;
+    // std::cout << "R" << rank_ << " insert duplicate orig=" << original_id << " gid=" << global_duplicate_id_ << " lid=" << local_duplicate_id_ << std::endl;
   }
 
   EdgeID AddEdge(VertexID from, VertexID to, PEID rank) {
@@ -373,7 +403,6 @@ class StaticGraph {
     if (from + 1 >= vertices_.size()) {
       vertices_.resize(from + 2);
     }
-    // std::cout << "R" << rank_ << " add edge (" << GetGlobalID(from) << "," << to << ") local (" << from << "," << GetLocalID(to) << ")" << std::endl;
     vertices_[from + 1].first_edge_ = edge_counter_;
   }
 
@@ -523,10 +552,15 @@ class StaticGraph {
         components.emplace_back(kv.first, kv.second);
       std::sort(begin(components), end(components));
 
-      std::cout << "COMPONENTS [ ";
+      // std::cout << "COMPONENTS [ ";
+      // for (auto &comp : components)
+      //   std::cout << "size=" << comp.first << " (num=" << comp.second << ") ";
+      // std::cout << "]" << std::endl;
+
+      VertexID total_num_no_isolated = 0;
       for (auto &comp : components)
-        std::cout << "size=" << comp.first << " (num=" << comp.second << ") ";
-      std::cout << "]" << std::endl;
+        if (comp.first != 1) total_num_no_isolated += comp.second;
+      std::cout << "NUM COMPONENTS " << total_num_no_isolated << std::endl;
     }
 
   }
@@ -605,6 +639,7 @@ class StaticGraph {
 
   // Contraction
   std::vector<VertexID> contraction_vertices_;
+  std::vector<bool> is_active_;
 
   // Duplicates
   // google::dense_hash_set<VertexID> duplicates_;

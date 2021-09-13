@@ -86,14 +86,14 @@ class DynamicGraph {
   //////////////////////////////////////////////
   template<typename F>
   void ForallLocalVertices(F &&callback) {
-    for (VertexID v = 0; v < GetNumberOfLocalVertices(); ++v) {
+    for (VertexID v = 0; v < GetLocalVertexVectorSize(); ++v) {
       if (IsActive(v)) callback(v);
     }
   }
 
   template<typename F>
   void ForallGhostVertices(F &&callback) {
-    for (VertexID v = 0; v < GetNumberOfGhostVertices(); ++v) {
+    for (VertexID v = 0; v < GetGhostVertexVectorSize(); ++v) {
       if (IsActive(v + ghost_offset_)) callback(v + ghost_offset_);
     }
   }
@@ -138,8 +138,23 @@ class DynamicGraph {
   }
 
   void SetActive(VertexID v, bool is_active) {
-    if (IsLocal(v)) local_active_[v] = is_active;
-    else ghost_active_[v - ghost_offset_] = is_active;
+    if (IsLocal(v)) {
+      if (local_active_[v] && !is_active) {
+        number_of_vertices_--;
+        number_of_local_vertices_--;
+      } else if (!local_active_[v] && is_active) {
+        number_of_vertices_++;
+        number_of_local_vertices_++;
+      }
+      local_active_[v] = is_active;
+    } else {
+      if (ghost_active_[v - ghost_offset_] && !is_active) {
+        number_of_vertices_--;
+      } else if (!ghost_active_[v - ghost_offset_] && is_active) {
+        number_of_vertices_++;
+      }
+      ghost_active_[v - ghost_offset_] = is_active;
+    }
   }
 
 
@@ -147,8 +162,8 @@ class DynamicGraph {
   // Graph contraction
   //////////////////////////////////////////////
   inline void AllocateContractionVertices() {
-    local_contraction_vertices_.resize(GetNumberOfLocalVertices());
-    ghost_contraction_vertices_.resize(GetNumberOfGhostVertices());
+    local_contraction_vertices_.resize(GetLocalVertexVectorSize());
+    ghost_contraction_vertices_.resize(GetGhostVertexVectorSize());
   }
 
   inline void SetContractionVertex(VertexID v, VertexID cv) {
@@ -222,16 +237,17 @@ class DynamicGraph {
   // Manage local vertices/edges
   //////////////////////////////////////////////
   inline VertexID GetNumberOfVertices() const { return number_of_vertices_; }
+  inline VertexID GetVertexVectorSize() const { return GetLocalVertexVectorSize() + GetGhostVertexVectorSize(); }
 
   inline VertexID GetNumberOfGlobalVertices() const { return number_of_global_vertices_; }
 
   inline VertexID GetNumberOfGlobalEdges() const { return number_of_global_edges_; }
 
-  inline VertexID GetNumberOfLocalVertices() const {
-    return number_of_local_vertices_;
-  }
+  inline VertexID GetNumberOfLocalVertices() const { return number_of_local_vertices_; }
+  inline VertexID GetLocalVertexVectorSize() const { return local_vertices_data_.size(); }
 
   inline VertexID GetNumberOfGhostVertices() const { return number_of_vertices_ - number_of_local_vertices_; }
+  inline VertexID GetGhostVertexVectorSize() const { return ghost_vertices_data_.size(); }
 
   inline EdgeID GetNumberOfEdges() const { return number_of_edges_; }
 
@@ -239,38 +255,50 @@ class DynamicGraph {
 
   inline void ResetNumberOfCutEdges() { number_of_cut_edges_ = 0; }
 
-  VertexID GatherNumberOfGlobalVertices() {
-    VertexID local_vertices = 0;
-    ForallLocalVertices([&](const VertexID v) { 
-        local_vertices++; 
-    });
-    // Check if all PEs are done
-    comm_timer_.Restart();
-    MPI_Allreduce(&local_vertices,
-                  &number_of_global_vertices_,
-                  1,
-                  MPI_VERTEX,
-                  MPI_SUM,
-                  MPI_COMM_WORLD);
-    comm_time_ += comm_timer_.Elapsed();
+  VertexID GatherNumberOfGlobalVertices(bool force=true) {
+    if (number_of_global_vertices_ == 0 || force) {
+      number_of_global_vertices_ = 0;
+      VertexID local_vertices = 0;
+      ForallLocalVertices([&](const VertexID v) { local_vertices++; });
+      if (local_vertices != number_of_local_vertices_) {
+        std::cout << "This shouldn't happen (different number of vertices local=" << local_vertices << ", counter=" << number_of_local_vertices_ << ", datasize=" << GetLocalVertexVectorSize() << ")" << std::endl;
+        exit(1);
+      }
+      // Check if all PEs are done
+      comm_timer_.Restart();
+      MPI_Allreduce(&local_vertices,
+                    &number_of_global_vertices_,
+                    1,
+                    MPI_VERTEX,
+                    MPI_SUM,
+                    MPI_COMM_WORLD);
+      comm_time_ += comm_timer_.Elapsed();
+    }
     return number_of_global_vertices_;
   }
 
-  VertexID GatherNumberOfGlobalEdges() {
-    VertexID local_edges = 0;
-    ForallLocalVertices([&](const VertexID v) { 
-        ForallNeighbors(v, [&](const VertexID w) { local_edges++; });
-    });
-    // Check if all PEs are done
-    comm_timer_.Restart();
-    MPI_Allreduce(&local_edges,
-                  &number_of_global_edges_,
-                  1,
-                  MPI_VERTEX,
-                  MPI_SUM,
-                  MPI_COMM_WORLD);
-    comm_time_ += comm_timer_.Elapsed();
-    number_of_global_edges_ /= 2;
+  VertexID GatherNumberOfGlobalEdges(bool force=true) {
+    if (number_of_global_edges_ == 0 || force) {
+      number_of_global_edges_ = 0;
+      VertexID local_edges = 0;
+      ForallVertices([&](const VertexID v) { 
+          ForallNeighbors(v, [&](const VertexID w) { local_edges++; });
+      });
+      if (local_edges != number_of_edges_) {
+        std::cout << "This shouldn't happen (different number of edges local=" << local_edges << ", counter=" << number_of_edges_ << ")" << std::endl;
+        exit(1);
+      }
+      // Check if all PEs are done
+      comm_timer_.Restart();
+      MPI_Allreduce(&local_edges,
+                    &number_of_global_edges_,
+                    1,
+                    MPI_VERTEX,
+                    MPI_SUM,
+                    MPI_COMM_WORLD);
+      comm_time_ += comm_timer_.Elapsed();
+      number_of_global_edges_ /= 2;
+    }
     return number_of_global_edges_;
   }
 
@@ -344,8 +372,8 @@ class DynamicGraph {
         exit(1);
       }
     }
-    edge_counter_++;
-    return edge_counter_;
+    number_of_edges_++;
+    return edge_counter_++;
   }
 
   void AddLocalEdge(VertexID from, VertexID to) {
@@ -382,6 +410,7 @@ class DynamicGraph {
       if (delete_pos != ghost_offset_) {
         local_adjacent_edges_[from].erase(local_adjacent_edges_[from].begin() + delete_pos);
         if (IsGhost(to)) number_of_cut_edges_--;
+        number_of_edges_--;
       } else {
         std::cout << "R" << rank_ << " This shouldn't happen (illegal remove edge (" << GetGlobalID(from) << "," << GetGlobalID(to) << "))" << std::endl;
         exit(1);
@@ -429,6 +458,7 @@ class DynamicGraph {
   void RemoveAllEdges(VertexID from) {
     ForallNeighbors(from, [&](const VertexID w) {
       if (IsGhost(w)) number_of_cut_edges_--;
+      number_of_edges_--;
     });
     if (IsLocal(from)) local_adjacent_edges_[from].clear();
     else ghost_adjacent_edges_[from - ghost_offset_].clear();
@@ -611,10 +641,15 @@ class DynamicGraph {
         components.emplace_back(kv.first, kv.second);
       std::sort(begin(components), end(components));
 
-      std::cout << "COMPONENTS [ ";
+      // std::cout << "COMPONENTS [ ";
+      // for (auto &comp : components)
+      //   std::cout << "size=" << comp.first << " (num=" << comp.second << ") ";
+      // std::cout << "]" << std::endl;
+
+      VertexID total_num_no_isolated = 0;
       for (auto &comp : components)
-        std::cout << "size=" << comp.first << " (num=" << comp.second << ") ";
-      std::cout << "]" << std::endl;
+        if (comp.first != 1) total_num_no_isolated += comp.second;
+      std::cout << "NUM COMPONENTS " << total_num_no_isolated << std::endl;
     }
   }
 

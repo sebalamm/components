@@ -415,45 +415,7 @@ class GraphIO {
     ghost_vertices.set_empty_key(EmptyKey);
     ghost_vertices.set_deleted_key(DeleteKey);
 
-    VertexID number_of_ghost_vertices 
-      = DetermineGhostVertices(edge_list, first_vertex, last_vertex, ghost_vertices);
-
-    VertexID number_of_local_vertices = last_vertex - first_vertex + 1;
-
-    if constexpr (std::is_same<GraphType, StaticGraphCommunicator>::value
-                  || std::is_same<GraphType, StaticGraph>::value) {
-      g.StartConstruct(number_of_local_vertices,
-                       ghost_vertices.size(),
-                       edge_list.size(),
-                       first_vertex); 
-    } else if constexpr (std::is_same<GraphType, DynamicGraphCommunicator>::value
-                  || std::is_same<GraphType, DynamicGraph>::value) {
-      g.StartConstruct(number_of_local_vertices, 
-                       ghost_vertices.size(), 
-                       number_of_global_vertices);
-    } else {
-      g.StartConstruct(number_of_local_vertices, 
-                       ghost_vertices.size(), 
-                       first_vertex); 
-    }
-
-    // Add vertices for dynamic graphs
-    if constexpr (std::is_same<GraphType, DynamicGraphCommunicator>::value
-                  || std::is_same<GraphType, DynamicGraph>::value) {
-      for (VertexID v = 0; v < number_of_local_vertices; v++) {
-          g.AddVertex(first_vertex + v);
-      }
-    }
-
-    // Initialize payloads for graphs with communicator 
-    if constexpr (std::is_same<GraphType, StaticGraphCommunicator>::value
-                  || std::is_same<GraphType, DynamicGraphCommunicator>::value
-                  || std::is_same<GraphType, SemidynamicGraphCommunicator>::value) {
-      for (VertexID v = 0; v < number_of_local_vertices; v++) {
-          g.SetVertexLabel(v, first_vertex + v);
-          g.SetVertexRoot(v, rank);
-      }
-    }
+    DetermineGhostVertices(edge_list, first_vertex, last_vertex, ghost_vertices);
 
     // Add datatype
     MPI_Datatype MPI_COMP;
@@ -469,8 +431,6 @@ class GraphIO {
     MPI_Allgather(&local_dist, 1, MPI_COMP,
                   &vertex_dist[0], 1, MPI_COMP, comm);
 
-    // std::cout << "R" << rank << " V(R)=[" << first_vertex << "," << last_vertex << "]" << std::endl;
-
     // Resulting mapping
     google::dense_hash_map<VertexID, 
                           std::vector<std::tuple<VertexID, 
@@ -484,6 +444,8 @@ class GraphIO {
     VertexID prev_vertex_range_first = std::get<2>(vertex_dist[0]);
     VertexID prev_vertex_range_last = std::get<3>(vertex_dist[0]);
     VertexID prev_last_pe = 0;
+    std::vector<std::pair<VertexID, PEID>> duplicate_ghosts;
+    std::vector<std::pair<VertexID, VertexID>> duplicate_locals;
     for (PEID i = 1; i < vertex_dist.size(); ++i) {
       VertexID current_range_first = std::get<0>(vertex_dist[i]);
       VertexID current_range_last = std::get<1>(vertex_dist[i]);
@@ -496,15 +458,15 @@ class GraphIO {
           vertex_ranges[prev_range_last].emplace_back(0, current_vertex_range_first - 1, prev_range_last, prev_last_pe);
           if (prev_last_pe != rank) {
             ghost_vertices.erase(prev_range_last);
-            // std::cout << "R" << rank << " add ghost (dist gen init) v " << prev_range_last << " pe(v)=" << prev_last_pe << std::endl;
-            g.AddGhostVertex(prev_range_last, prev_last_pe);
+            // g.AddGhostVertex(prev_range_last, prev_last_pe);
+            duplicate_ghosts.emplace_back(prev_range_last, prev_last_pe);
           }
         }
         VertexID duplicate_id = (4 * number_of_global_vertices) * (i + size);
         vertex_ranges[prev_range_last].emplace_back(current_vertex_range_first, current_vertex_range_last, duplicate_id, i);
         if (i != rank) {
-          // std::cout << "R" << rank << " add ghost (dist gen) v " << duplicate_id << " pe(v)=" << i << std::endl;
-          g.AddGhostVertex(duplicate_id, i);
+          // g.AddGhostVertex(duplicate_id, i);
+          duplicate_ghosts.emplace_back(duplicate_id, i);
           if (prev_last_pe == rank) {
             edge_list.emplace_back(duplicate_id, prev_range_last);
             edge_list.emplace_back(prev_range_last, duplicate_id);
@@ -514,11 +476,11 @@ class GraphIO {
                         || std::is_same<GraphType, StaticGraph>::value
                         || std::is_same<GraphType, SemidynamicGraphCommunicator>::value
                         || std::is_same<GraphType, SemidynamicGraph>::value) {
-            // std::cout << "R" << rank << " add dupl v " << duplicate_id << " of " << prev_range_last << std::endl;
-            g.AddDuplicateVertex(prev_range_last, duplicate_id);
+            // g.AddDuplicateVertex(prev_range_last, duplicate_id);
+            duplicate_locals.emplace_back(prev_range_last, duplicate_id);
           } else {
-            // std::cout << "R" << rank << " add local v " << duplicate_id << std::endl;
-            g.AddVertex(duplicate_id);
+            // g.AddVertex(duplicate_id);
+            duplicate_locals.emplace_back(prev_range_last, duplicate_id);
           }
           edge_list.emplace_back(duplicate_id, prev_range_last);
           edge_list.emplace_back(prev_range_last, duplicate_id);
@@ -530,19 +492,6 @@ class GraphIO {
         prev_vertex_range_last = current_vertex_range_last;
         prev_last_pe = i;
       }
-    }
-
-    // Initialize ghost vertices
-    for (auto &v : ghost_vertices) {
-      // Get PE for ghost
-      PEID pe = rank;
-      for (PEID i = 0; i < vertex_dist.size(); ++i) {
-        if (v >= std::get<0>(vertex_dist[i]) && v <= std::get<1>(vertex_dist[i])) {
-          pe = i;
-        }
-      }
-      // std::cout << "R" << rank << " add ghost (regular) v " << v << " pe(v)=" << pe << std::endl;
-      g.AddGhostVertex(v, pe);
     }
 
     // Update edges with data from duplicates
@@ -590,6 +539,76 @@ class GraphIO {
       edge.second = target;
     }
 
+    VertexID number_of_local_vertices = last_vertex - first_vertex + 1;
+    VertexID number_of_ghost_vertices = ghost_vertices.size();
+    if constexpr (std::is_same<GraphType, StaticGraphCommunicator>::value
+                  || std::is_same<GraphType, StaticGraph>::value) {
+      g.StartConstruct(number_of_local_vertices + duplicate_locals.size(),
+                       number_of_ghost_vertices + duplicate_ghosts.size(),
+                       edge_list.size(),
+                       first_vertex); 
+    } else if constexpr (std::is_same<GraphType, DynamicGraphCommunicator>::value
+                  || std::is_same<GraphType, DynamicGraph>::value) {
+      g.StartConstruct(number_of_local_vertices + duplicate_locals.size(), 
+                       number_of_ghost_vertices + duplicate_ghosts.size(), 
+                       number_of_global_vertices);
+    } else {
+      g.StartConstruct(number_of_local_vertices + duplicate_locals.size(), 
+                       number_of_ghost_vertices + duplicate_ghosts.size(), 
+                       first_vertex); 
+    }
+
+    // Add vertices for dynamic graphs
+    if constexpr (std::is_same<GraphType, DynamicGraphCommunicator>::value
+                  || std::is_same<GraphType, DynamicGraph>::value) {
+      for (VertexID v = 0; v < number_of_local_vertices; v++) {
+          g.AddVertex(first_vertex + v);
+      }
+      // Add duplicate locals
+      for (VertexID v = 0; v < duplicate_locals.size(); v++) {
+          g.AddVertex(duplicate_locals[v].second);
+      }
+    } else {
+      // Set duplicate locals
+      for (VertexID v = 0; v < duplicate_locals.size(); v++) {
+        // std::cout << "R" << rank << " add duplicate local " << duplicate_locals[v].first << " " << duplicate_locals[v].second << std::endl;
+        g.AddDuplicateVertex(duplicate_locals[v].first, duplicate_locals[v].second);
+      }
+    }
+
+    // Initialize payloads for graphs with communicator 
+    if constexpr (std::is_same<GraphType, StaticGraphCommunicator>::value
+                  || std::is_same<GraphType, DynamicGraphCommunicator>::value
+                  || std::is_same<GraphType, SemidynamicGraphCommunicator>::value) {
+      for (VertexID v = 0; v < number_of_local_vertices; v++) {
+          g.SetVertexLabel(v, first_vertex + v);
+          g.SetVertexRoot(v, rank);
+      }
+      for (VertexID v = 0; v < duplicate_locals.size(); v++) {
+          g.SetVertexLabel(number_of_local_vertices + 1 + v, duplicate_locals[v].first);
+          g.SetVertexRoot(number_of_local_vertices + 1 + v, rank);
+      }
+    }
+
+
+    // Initialize ghost vertices
+    for (auto &v : ghost_vertices) {
+      // Get PE for ghost
+      PEID pe = rank;
+      for (PEID i = 0; i < vertex_dist.size(); ++i) {
+        if (v >= std::get<0>(vertex_dist[i]) && v <= std::get<1>(vertex_dist[i])) {
+          pe = i;
+        }
+      }
+      g.AddGhostVertex(v, pe);
+    }
+
+    // Add duplicate ghosts
+    for (VertexID v = 0; v < duplicate_ghosts.size(); v++) {
+      // std::cout << "R" << rank << " add duplicate ghost " << duplicate_ghosts[v].first << " " << duplicate_ghosts[v].second << std::endl;
+      g.AddGhostVertex(duplicate_ghosts[v].first, duplicate_ghosts[v].second);
+    }
+
     // Sort edges for static graphs
     if constexpr (std::is_same<GraphType, StaticGraphCommunicator>::value
                   || std::is_same<GraphType, StaticGraph>::value) {
@@ -602,9 +621,6 @@ class GraphIO {
     }
 
     g.FinishConstruct();
-    // g.OutputLocal();
-    // MPI_Barrier(MPI_COMM_WORLD);
-    // exit(1);
   }
 
   template<typename GraphType>

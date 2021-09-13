@@ -130,7 +130,7 @@ class ExponentialContraction {
 
         // Keep contraction labeling for later
         contraction_timer_.Restart();
-        std::vector<VertexID> cag_labels(cag.GetNumberOfVertices(), 0);
+        std::vector<VertexID> cag_labels(cag.GetVertexVectorSize(), 0);
         FindLocalComponents<StaticGraph>(cag, cag_labels);
         if (rank_ == ROOT) {
           std::cout << "[STATUS] |- Finding local components on cag took " 
@@ -345,8 +345,8 @@ class ExponentialContraction {
 
   template <typename GraphType>
   void FindLocalComponents(GraphType &g, std::vector<VertexID> &label) {
-    std::vector<bool> marked(g.GetNumberOfVertices(), false);
-    std::vector<VertexID> parent(g.GetNumberOfVertices(), 0);
+    std::vector<bool> marked(g.GetVertexVectorSize(), false);
+    std::vector<VertexID> parent(g.GetVertexVectorSize(), 0);
 
     g.ForallVertices([&](const VertexID v) {
       VertexID gid = g.GetGlobalID(v);
@@ -403,7 +403,7 @@ class ExponentialContraction {
     iteration_timer_.Restart();
     
     // std::exponential_distribution<LPFloat> distribution(config_.beta);
-    // std::mt19937
+    // std::default_random_engine
     //     generator(static_cast<unsigned int>(rank_ + config_.seed + iteration_ * rng_offset_));
     g.ForallLocalVertices([&](const VertexID v) {
       // Set preliminary deviate
@@ -419,7 +419,7 @@ class ExponentialContraction {
       // Skip replicated vertices
       if (replicated_vertices_.find(g.GetGlobalID(v)) == replicated_vertices_.end()) {
         std::exponential_distribution<LPFloat> distribution(config_.beta);
-        std::mt19937
+        std::default_random_engine
             generator(static_cast<unsigned int>(g.GetGlobalID(v) + config_.seed + iteration_ * rng_offset_));
         g.SetVertexPayload(v, {static_cast<VertexID>(weight * distribution(generator)),
                                g.GetVertexLabel(v),
@@ -448,7 +448,7 @@ class ExponentialContraction {
         1.0;
 #endif
       std::exponential_distribution<LPFloat> distribution(config_.beta);
-      std::mt19937
+      std::default_random_engine
           generator(static_cast<unsigned int>(kv.second + config_.seed + iteration_ * rng_offset_));
       g.SetVertexPayload(v, {static_cast<VertexID>(weight * distribution(generator)),
                              g.GetVertexLabel(v),
@@ -589,7 +589,7 @@ class ExponentialContraction {
     int active_round = 0;
     int max_round = 0;
     // std::exponential_distribution<LPFloat> distribution(config_.beta);
-    // std::mt19937
+    // std::default_random_engine
     //     generator(static_cast<unsigned int>(rank_ + config_.seed + iteration_ * rng_offset_));
     g.ForallLocalVertices([&](const VertexID v) {
       // Set preliminary deviate
@@ -605,7 +605,7 @@ class ExponentialContraction {
       // Skip replicated vertices
       if (replicated_vertices_.find(g.GetGlobalID(v)) == replicated_vertices_.end()) {
         std::exponential_distribution<LPFloat> distribution(config_.beta);
-        std::mt19937
+        std::default_random_engine
             generator(static_cast<unsigned int>(g.GetGlobalID(v) + config_.seed + iteration_ * rng_offset_));
         VertexID vertex_round = static_cast<VertexID>(weight * distribution(generator));
         if (vertex_round > max_round) max_round = vertex_round;
@@ -639,7 +639,7 @@ class ExponentialContraction {
         1.0;
 #endif
       std::exponential_distribution<LPFloat> distribution(config_.beta);
-      std::mt19937
+      std::default_random_engine
           generator(static_cast<unsigned int>(kv.second + config_.seed + iteration_ * rng_offset_));
       g.SetVertexPayload(v, {static_cast<VertexID>(weight * distribution(generator)),
                              g.GetVertexLabel(v),
@@ -831,7 +831,7 @@ class ExponentialContraction {
     google::dense_hash_map<VertexID, int> vertex_map; 
     vertex_map.set_empty_key(EmptyKey);
     vertex_map.set_deleted_key(DeleteKey);
-    std::vector<VertexID> reverse_vertex_map(g.GetNumberOfLocalVertices());
+    std::vector<VertexID> reverse_vertex_map(g.GetLocalVertexVectorSize());
     int current_vertex = 0;
     g.ForallLocalVertices([&](const VertexID v) {
       vertex_map[v] = current_vertex;
@@ -839,7 +839,7 @@ class ExponentialContraction {
     });
 
     // Init labels
-    std::vector<VertexID> labels(g.GetNumberOfLocalVertices());
+    std::vector<VertexID> labels(g.GetLocalVertexVectorSize());
     for (VertexID i = 0; i < labels.size(); ++i) {
       labels[i] = g.GetVertexLabel(reverse_vertex_map[i]);
     }
@@ -974,7 +974,7 @@ class ExponentialContraction {
       // Associate a unique replicate with each target
       // We have to initialize a mersenne twister (or something similar) for each vertex
       // so that a neighboring PE can reproduce this set without communication
-      std::mt19937 gen(vertex_seed);
+      std::default_random_engine gen(vertex_seed);
       google::dense_hash_map<PEID, VertexID> pes_for_replication;
       pes_for_replication.set_empty_key(EmptyKey);
       pes_for_replication.set_deleted_key(DeleteKey);
@@ -997,7 +997,7 @@ class ExponentialContraction {
           // Create a unique seed for the current edge
           VertexID edge_seed = config_.seed + g.GetGlobalID(v) * num_global_vertices + g.GetGlobalID(w);
           // Select the (random) target PE
-          std::mt19937 gen(edge_seed);
+          std::default_random_engine gen(edge_seed);
           PEID index = dist(gen);
           // Get the associated elements from the sampling vector
           PEID target_pe = sampling_vector[index].first;
@@ -1220,8 +1220,8 @@ class ExponentialContraction {
 
   template <typename GraphType>
   void OutputStats(GraphType &g) {
-    VertexID n_local = g.GetNumberOfVertices();
-    EdgeID m_local = g.GetNumberOfEdges();
+    VertexID n_local = g.GetNumberOfLocalVertices();
+    EdgeID m_local = g.GetNumberOfEdges()/2;
     VertexID n_global = g.GatherNumberOfGlobalVertices();
     EdgeID m_global = g.GatherNumberOfGlobalEdges();
 
@@ -1242,14 +1242,14 @@ class ExponentialContraction {
                MPI_COMM_WORLD);
     comm_time_ += comm_timer_.Elapsed();
 
-    std::cout << "LOCAL TEMP IMPUT"
+    std::cout << "LOCAL TEMP INPUT"
               << " rank=" << rank_
               << " n=" << n_local 
               << " m=" << m_local 
               << " c=" << cut_local 
               << " max_d=" << highest_degree << std::endl;
     if (rank_ == ROOT) {
-      std::cout << "GLOBAL TEMP IMPUT"
+      std::cout << "GLOBAL TEMP INPUT"
                 << " s=" << config_.seed 
                 << " p=" << size_ 
                 << " n=" << n_global

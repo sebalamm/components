@@ -84,7 +84,7 @@ class SemidynamicGraph {
     number_of_vertices_ = local_n + ghost_n;
 
     adjacent_edges_.resize(number_of_vertices_);
-    local_vertices_data_.resize(number_of_vertices_);
+    local_vertices_data_.resize(local_n);
     ghost_vertices_data_.resize(ghost_n);
 
     local_offset_ = local_offset;
@@ -104,23 +104,22 @@ class SemidynamicGraph {
   //////////////////////////////////////////////
   template<typename F>
   void ForallLocalVertices(F &&callback) {
-    for (VertexID v = 0; v < GetNumberOfLocalVertices(); ++v) {
+    for (VertexID v = 0; v < GetLocalVertexVectorSize(); ++v) {
       if (IsActive(v)) callback(v);
     }
   }
 
   template<typename F>
   void ForallGhostVertices(F &&callback) {
-    for (VertexID v = GetNumberOfLocalVertices(); v < GetNumberOfVertices(); ++v) {
-      if (IsActive(v)) callback(v);
+    for (VertexID v = 0; v < GetGhostVertexVectorSize(); ++v) {
+      if (IsActive(v + ghost_offset_)) callback(v + ghost_offset_);
     }
   }
 
   template<typename F>
   void ForallVertices(F &&callback) {
-    for (VertexID v = 0; v < GetNumberOfVertices(); ++v) {
-      if (IsActive(v)) callback(v);
-    }
+    ForallLocalVertices(callback);
+    ForallGhostVertices(callback);
   }
 
   template<typename F>
@@ -148,6 +147,13 @@ class SemidynamicGraph {
   }
 
   void SetActive(VertexID v, bool is_active) {
+    if (is_active_[v] && !is_active) {
+      if (IsLocal(v)) number_of_local_vertices_--;
+      number_of_vertices_--;
+    } else if (!is_active_[v] && is_active) {
+      if (IsLocal(v)) number_of_local_vertices_++;
+      number_of_vertices_++;
+    }
     is_active_[v] = is_active;
   }
 
@@ -170,12 +176,12 @@ class SemidynamicGraph {
   // Vertex mappings
   //////////////////////////////////////////////
   inline bool IsLocal(VertexID v) const {
-    return v < number_of_local_vertices_;
+    return v < GetLocalVertexVectorSize();
   }
 
   inline bool IsLocalFromGlobal(VertexID v) const {
     return v == global_duplicate_id_ 
-            || (local_offset_ <= v && v < local_offset_ + number_of_local_vertices_);
+            || (local_offset_ <= v && v < local_offset_ + GetLocalVertexVectorSize());
   }
 
   inline bool IsGhost(VertexID v) const {
@@ -230,6 +236,7 @@ class SemidynamicGraph {
   // Manage local vertices/edges
   //////////////////////////////////////////////
   inline VertexID GetNumberOfVertices() const { return number_of_vertices_; }
+  inline VertexID GetVertexVectorSize() const { return GetLocalVertexVectorSize() + GetGhostVertexVectorSize(); }
 
   inline VertexID GetNumberOfGlobalVertices() const { return number_of_global_vertices_; }
 
@@ -239,11 +246,11 @@ class SemidynamicGraph {
     return local_offset_;
   }
 
-  inline VertexID GetNumberOfLocalVertices() const {
-    return number_of_local_vertices_;
-  }
+  inline VertexID GetNumberOfLocalVertices() const { return number_of_local_vertices_; }
+  inline VertexID GetLocalVertexVectorSize() const { return local_vertices_data_.size(); }
 
   inline VertexID GetNumberOfGhostVertices() const { return number_of_vertices_ - number_of_local_vertices_; }
+  inline VertexID GetGhostVertexVectorSize() const { return ghost_vertices_data_.size(); }
 
   inline EdgeID GetNumberOfEdges() const { return number_of_edges_; }
 
@@ -251,36 +258,50 @@ class SemidynamicGraph {
 
   inline void ResetNumberOfCutEdges() { number_of_cut_edges_ = 0; }
 
-  VertexID GatherNumberOfGlobalVertices() {
-    VertexID local_vertices = 0;
-    ForallLocalVertices([&](const VertexID v) { local_vertices++; });
-    // Check if all PEs are done
-    comm_timer_.Restart();
-    MPI_Allreduce(&local_vertices,
-                  &number_of_global_vertices_,
-                  1,
-                  MPI_VERTEX,
-                  MPI_SUM,
-                  MPI_COMM_WORLD);
-    comm_time_ += comm_timer_.Elapsed();
+  VertexID GatherNumberOfGlobalVertices(bool force=true) {
+    if (number_of_global_vertices_ == 0 || force) {
+      number_of_global_vertices_ = 0;
+      VertexID local_vertices = 0;
+      ForallLocalVertices([&](const VertexID v) { local_vertices++; });
+      if (local_vertices != number_of_local_vertices_) {
+        std::cout << "This shouldn't happen (different number of vertices local=" << local_vertices << ", counter=" << number_of_local_vertices_ << ", datasize=" << GetLocalVertexVectorSize() << ")" << std::endl;
+        exit(1);
+      }
+      // Check if all PEs are done
+      comm_timer_.Restart();
+      MPI_Allreduce(&local_vertices,
+                    &number_of_global_vertices_,
+                    1,
+                    MPI_VERTEX,
+                    MPI_SUM,
+                    MPI_COMM_WORLD);
+      comm_time_ += comm_timer_.Elapsed();
+    }
     return number_of_global_vertices_;
   }
 
-  VertexID GatherNumberOfGlobalEdges() {
-    VertexID local_edges = 0;
-    ForallLocalVertices([&](const VertexID v) { 
-        ForallNeighbors(v, [&](const VertexID w) { local_edges++; });
-    });
-    // Check if all PEs are done
-    comm_timer_.Restart();
-    MPI_Allreduce(&local_edges,
-                  &number_of_global_edges_,
-                  1,
-                  MPI_VERTEX,
-                  MPI_SUM,
-                  MPI_COMM_WORLD);
-    comm_time_ += comm_timer_.Elapsed();
-    number_of_global_edges_ /= 2;
+  VertexID GatherNumberOfGlobalEdges(bool force=true) {
+    if (number_of_global_edges_ == 0 || force) {
+      number_of_global_edges_ = 0;
+      VertexID local_edges = 0;
+      ForallVertices([&](const VertexID v) { 
+          ForallNeighbors(v, [&](const VertexID w) { local_edges++; });
+      });
+      if (local_edges != number_of_edges_) {
+        std::cout << "This shouldn't happen (different number of edges local=" << local_edges << ", counter=" << number_of_edges_ << ")" << std::endl;
+        exit(1);
+      }
+      // Check if all PEs are done
+      comm_timer_.Restart();
+      MPI_Allreduce(&local_edges,
+                    &number_of_global_edges_,
+                    1,
+                    MPI_VERTEX,
+                    MPI_SUM,
+                    MPI_COMM_WORLD);
+      comm_time_ += comm_timer_.Elapsed();
+      number_of_global_edges_ /= 2;
+    }
     return number_of_global_edges_;
   }
 
@@ -292,24 +313,20 @@ class SemidynamicGraph {
     return parent_[v];
   }
 
-  inline VertexID AddVertex() {
-    return vertex_counter_++;
-  }
+  inline VertexID AddVertex() { return vertex_counter_++; }
 
   VertexID AddGhostVertex(VertexID v, PEID pe) {
     global_to_local_map_[v] = ghost_counter_;
 
     // Fix overflows
-    if (vertex_counter_ >= local_vertices_data_.size()) {
-      local_vertices_data_.resize(vertex_counter_ + 1);
+    if (vertex_counter_ >= is_active_.size()) {
       is_active_.resize(vertex_counter_ + 1);
     }
-    if (ghost_counter_ >= ghost_vertices_data_.size()) {
+    if (ghost_counter_ - ghost_offset_ >= ghost_vertices_data_.size()) {
       ghost_vertices_data_.resize(ghost_counter_ + 1);
     }
 
     // Update data
-    local_vertices_data_[vertex_counter_].is_interface_vertex_ = false;
     ghost_vertices_data_[ghost_counter_ - ghost_offset_].rank_ = pe;
     ghost_vertices_data_[ghost_counter_ - ghost_offset_].global_id_ = v;
     is_active_[vertex_counter_] = true;
@@ -318,6 +335,7 @@ class SemidynamicGraph {
     return ghost_counter_++;
   }
 
+  // TODO: Not sure if this works
   inline void AddDuplicateVertex(VertexID global_id) {
     local_duplicate_id_ = AddVertex();
     global_duplicate_id_ = global_id;
@@ -367,6 +385,7 @@ class SemidynamicGraph {
   void RemoveAllEdges(VertexID from) {
     ForallNeighbors(from, [&](const VertexID w) {
       if (IsGhost(w)) number_of_cut_edges_--;
+      number_of_edges_--;
     });
     adjacent_edges_[from].clear();
   }
@@ -545,10 +564,15 @@ class SemidynamicGraph {
         components.emplace_back(kv.first, kv.second);
       std::sort(begin(components), end(components));
 
-      std::cout << "COMPONENTS [ ";
+      // std::cout << "COMPONENTS [ ";
+      // for (auto &comp : components)
+      //   std::cout << "size=" << comp.first << " (num=" << comp.second << ") ";
+      // std::cout << "]" << std::endl;
+
+      VertexID total_num_no_isolated = 0;
       for (auto &comp : components)
-        std::cout << "size=" << comp.first << " (num=" << comp.second << ") ";
-      std::cout << "]" << std::endl;
+        if (comp.first != 1) total_num_no_isolated += comp.second;
+      std::cout << "NUM COMPONENTS " << total_num_no_isolated << std::endl;
     }
   }
 

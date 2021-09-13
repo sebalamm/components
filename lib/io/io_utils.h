@@ -86,8 +86,8 @@ class IOUtility {
   static void PrintGraphParams(GraphType &g,
                                Config &config,
                                PEID rank, PEID size) {
-    VertexID n_local = g.GetNumberOfVertices();
-    EdgeID m_local = g.GetNumberOfEdges();
+    VertexID n_local = g.GetNumberOfLocalVertices();
+    EdgeID m_local = g.GetNumberOfEdges()/2;
     VertexID n_global = g.GatherNumberOfGlobalVertices();
     EdgeID m_global = g.GatherNumberOfGlobalEdges();
 

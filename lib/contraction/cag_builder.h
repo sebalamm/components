@@ -564,6 +564,11 @@ class CAGBuilder {
     }
 
     cg.FinishConstruct();
+
+    // Disable vertices that have no neighbors
+    cg.ForallLocalVertices([&](const VertexID v) {
+      cg.SetActive(v, cg.GetVertexDegree(v) > 0);
+    });
     return cg;
   }
 
@@ -644,6 +649,11 @@ class CAGBuilder {
     }
 
     cg.FinishConstruct();
+
+    // Disable vertices that have no neighbors
+    cg.ForallLocalVertices([&](const VertexID v) {
+      cg.SetActive(v, cg.GetVertexDegree(v) > 0);
+    });
     return cg;
   }
 
