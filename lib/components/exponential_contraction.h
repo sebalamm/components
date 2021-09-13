@@ -301,6 +301,7 @@ class ExponentialContraction {
   // Algorithm state
   unsigned int iteration_;
   VertexID rng_offset_;
+  VertexID sequential_limit_;
 
   // Statistics
   Timer comm_timer_;
@@ -320,11 +321,13 @@ class ExponentialContraction {
   void PerformDecomposition(DynamicGraphCommunicator &g) {
     contraction_timer_.Restart(); 
     VertexID global_vertices = g.GatherNumberOfGlobalVertices();
+    VertexID global_edges = g.GatherNumberOfGlobalEdges();
+    sequential_limit_ = ComputeSequentialLimit(global_vertices);
     rng_offset_ = global_vertices;
-    if (global_vertices > 0) {
+    if (global_edges > 0) {
       iteration_timer_.Restart();
       iteration_++;
-      if (global_vertices <= config_.sequential_limit) 
+      if (global_edges <= sequential_limit_) 
         RunSequentialCC(g);
       else 
         if (config_.use_bfs) RunContractionBFS(g);
@@ -562,10 +565,10 @@ class ExponentialContraction {
     OutputStats<DynamicGraphCommunicator>(g);
 
     // Count remaining number of vertices
-    VertexID global_vertices = g.GatherNumberOfGlobalVertices();
-    if (global_vertices > 0) {
+    VertexID global_edges = g.GatherNumberOfGlobalEdges();
+    if (global_edges > 0) {
       iteration_++;
-      if (global_vertices <= config_.sequential_limit) 
+      if (global_edges <= sequential_limit_) 
         RunSequentialCC(g);
       else 
         RunContractionLP(g);
@@ -790,10 +793,10 @@ class ExponentialContraction {
     OutputStats<DynamicGraphCommunicator>(g);
 
     // Count remaining number of vertices
-    VertexID global_vertices = g.GatherNumberOfGlobalVertices();
-    if (global_vertices > 0) {
+    VertexID global_edges = g.GatherNumberOfGlobalEdges();
+    if (global_edges > 0) {
       iteration_++;
-      if (global_vertices <= config_.sequential_limit) 
+      if (global_edges <= sequential_limit_) 
         RunSequentialCC(g);
       else 
         RunContractionBFS(g);
@@ -1237,6 +1240,13 @@ class ExponentialContraction {
         g.SetActive(v, false);
       }
     });
+  }
+
+  VertexID ComputeSequentialLimit(VertexID &global_edges) {
+    // Fixed limit, i.e. < 1024
+    if (config_.fixed_limit) return config_.sequential_limit;
+    // Relative limit, i.e. < 4 * m/P
+    else return (global_edges/size_) * config_.sequential_limit;
   }
 
   template <typename GraphType>

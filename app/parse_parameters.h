@@ -59,7 +59,8 @@ void ParseParameters(int argn, char **argv,
   conf.single_level_contraction = args.IsSet("single");
 
   // Sequential computation
-  conf.sequential_limit = args.Get<unsigned int>("seq", 1000);
+  conf.sequential_limit = args.Get<unsigned int>("seq", 1);
+  conf.fixed_limit = args.IsSet("fixed-seq");
 
   // High-degree vertices
   conf.degree_limit = args.Get<unsigned int>("deg", 100);

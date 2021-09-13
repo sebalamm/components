@@ -49,6 +49,8 @@ struct Config {
   bool replicate_high_degree;
   // Sequential computations
   VertexID sequential_limit{};
+  // Sequential limit is fixed number of vertices
+  bool fixed_limit;
   // Benchmarks
   unsigned int iterations{};
   // Label propagation
