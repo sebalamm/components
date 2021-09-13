@@ -157,6 +157,14 @@ class DynamicGraph {
     }
   }
 
+  void SetAllVerticesActive(bool is_active) {
+    for (VertexID v = 0; v < local_active_.size(); ++v) {
+      SetActive(v, is_active);
+    }
+    for (VertexID v = 0; v < ghost_active_.size(); ++v) {
+      SetActive(v + ghost_offset_, is_active);
+    }
+  }
 
   //////////////////////////////////////////////
   // Graph contraction

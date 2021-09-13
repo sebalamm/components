@@ -802,17 +802,31 @@ class ExponentialContraction {
 
   void ApplyToLocalComponents(DynamicGraphCommunicator &cag, 
                               DynamicGraphCommunicator &g) {
+    std::vector<bool> resolved(g.GetLocalVertexVectorSize(), false);
     g.ForallLocalVertices([&](const VertexID v) {
       VertexID cv = cag.GetLocalID(g.GetContractionVertex(v));
       g.SetVertexLabel(v, cag.GetVertexLabel(cv));
+      resolved[v] = true;
+    });
+    // Turn on remaining vertices and set their labels
+    g.SetAllVerticesActive(true);
+    g.ForallLocalVertices([&](const VertexID v) {
+      if (!resolved[v]) g.SetVertexLabel(v, g.GetGlobalID(v));
     });
   }
 
   void ApplyToLocalComponents(DynamicGraphCommunicator &cag, 
                               StaticGraph &g, std::vector<VertexID> &g_label) {
+    std::vector<bool> resolved(g.GetLocalVertexVectorSize(), false);
     g.ForallLocalVertices([&](const VertexID v) {
       VertexID cv = cag.GetLocalID(g.GetContractionVertex(v));
       g_label[v] = cag.GetVertexLabel(cv);
+      resolved[v] = true;
+    });
+    // Turn on remaining vertices and set their labels
+    g.SetAllVerticesActive(true);
+    g.ForallLocalVertices([&](const VertexID v) {
+      if (!resolved[v]) g_label[v] = g.GetGlobalID(v);
     });
   }
 
@@ -820,9 +834,16 @@ class ExponentialContraction {
                               std::vector<VertexID> &cag_label, 
                               StaticGraph &g, 
                               std::vector<VertexID> &g_label) {
+    std::vector<bool> resolved(g.GetLocalVertexVectorSize(), false);
     g.ForallLocalVertices([&](const VertexID v) {
       VertexID cv = cag.GetLocalID(g.GetContractionVertex(v));
       g_label[v] = cag_label[cv];
+      resolved[v] = true;
+    });
+    // Turn on remaining vertices and set their labels
+    g.SetAllVerticesActive(true);
+    g.ForallLocalVertices([&](const VertexID v) {
+      if (!resolved[v]) g_label[v] = g.GetGlobalID(v);
     });
   }
 

@@ -157,6 +157,12 @@ class SemidynamicGraph {
     is_active_[v] = is_active;
   }
 
+  void SetAllVerticesActive(bool is_active) {
+    for (VertexID v = 0; v < is_active_.size(); ++v) {
+      SetActive(v, is_active);
+    }
+  }
+
   //////////////////////////////////////////////
   // Graph contraction
   //////////////////////////////////////////////
