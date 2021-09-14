@@ -115,6 +115,64 @@ class CommunicationUtility {
     return comm_timer.Elapsed();
   }
 
+  static float RegularAllToAll(google::dense_hash_map<PEID, VertexBuffer> &send_buffers,
+                               google::dense_hash_map<PEID, VertexBuffer> &receive_buffers,
+                               PEID rank, PEID size, PEID message_tag = 0) {
+    Timer comm_timer;
+    comm_timer.Restart();
+
+    std::vector<int> send_counts(size, 0);
+    std::vector<int> recv_counts(size, 0);
+    std::vector<int> send_displs(size, 0);
+    std::vector<int> recv_displs(size, 0);
+
+    // Compute number of elements send to each PE and their displacement
+    VertexID send_total = 0;
+    for (PEID pe = 0; pe < size; pe++) {
+      send_displs[pe] = send_total;
+      send_counts[pe] = send_buffers.find(pe) != send_buffers.end() ? send_buffers[pe].size() : 0;
+      send_total += send_counts[pe];
+    }
+
+    // Get receive counts from other PEs
+    MPI_Alltoall(send_counts.data(), 1, MPI_INT, 
+                 recv_counts.data(), 1, MPI_INT, MPI_COMM_WORLD);
+
+    // Compute receive displacements
+    VertexID recv_total = 0;
+    for (PEID pe = 0; pe < size; pe++) {
+      recv_displs[pe] = recv_total;
+      recv_total += recv_counts[pe];
+    }
+
+    // Construct send and receive buffers
+    // TODO: can we use hashmaps as the buffers?
+    std::vector<VertexID> send_buffer(send_total);
+    std::vector<VertexID> recv_buffer(recv_total);
+
+    // Fill the send buffer
+    // TODO: Use moves for this?
+    for (PEID pe = 0; pe < size; pe++) {
+      VertexID displ = send_displs[pe];
+      VertexID count = send_counts[pe];
+      send_buffer.insert(send_buffer.begin() + displ, send_buffers[pe].begin(), send_buffers[pe].begin() + count);
+    }
+    
+    // Perform the exchange
+    MPI_Alltoallv(send_buffer.data(), send_counts.data(), send_displs.data(), MPI_VERTEX,
+                  recv_buffer.data(), recv_counts.data(), recv_displs.data(), MPI_VERTEX, MPI_COMM_WORLD);
+
+    // Fill the receive buffers
+    // TODO: Use moves for this?
+    for (PEID pe = 0; pe < size; pe++) {
+      VertexID displ = recv_displs[pe];
+      VertexID count = recv_counts[pe];
+      receive_buffers[pe].insert(receive_buffers[pe].begin(), recv_buffer.begin() + displ, recv_buffer.begin() + displ + count);
+    }
+
+    return comm_timer.Elapsed();
+  }
+
   static VertexID ClearBuffers(google::dense_hash_map<PEID, VertexBuffer> &buffers) {
     VertexID messages = 0;
     for (auto &kv: buffers) {

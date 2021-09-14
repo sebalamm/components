@@ -294,7 +294,8 @@ class CAGBuilder {
 
     // Send ghost vertex updates O(cut size) (communication)
     exchange_timer.Restart();
-    comm_time_ += CommunicationUtility::SparseAllToAll(send_buffers_, receive_buffers_, rank_, size_, CAGTag);
+    // comm_time_ += CommunicationUtility::SparseAllToAll(send_buffers_, receive_buffers_, rank_, size_, CAGTag);
+    comm_time_ += CommunicationUtility::RegularAllToAll(send_buffers_, receive_buffers_, rank_, size_, CAGTag);
     send_volume_ += CommunicationUtility::ClearBuffers(send_buffers_);
 
     // std::cout << "[STATUS] |--- Sparse exchange took " 

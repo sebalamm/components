@@ -58,6 +58,12 @@ class ExponentialContraction {
 
   template <typename GraphType>
   void FindComponents(GraphType &g, std::vector<VertexID> &g_labels) {
+    // Compute limit etc.
+    VertexID global_vertices = g.GatherNumberOfGlobalVertices();
+    VertexID global_edges = g.GatherNumberOfGlobalEdges();
+    sequential_limit_ = ComputeSequentialLimit(global_edges);
+    rng_offset_ = global_vertices;
+
     contraction_timer_.Restart();
     if constexpr (std::is_same<GraphType, StaticGraph>::value) {
       FindLocalComponents<StaticGraph>(g, g_labels);
@@ -320,10 +326,7 @@ class ExponentialContraction {
 
   void PerformDecomposition(DynamicGraphCommunicator &g) {
     contraction_timer_.Restart(); 
-    VertexID global_vertices = g.GatherNumberOfGlobalVertices();
     VertexID global_edges = g.GatherNumberOfGlobalEdges();
-    sequential_limit_ = ComputeSequentialLimit(global_vertices);
-    rng_offset_ = global_vertices;
     if (global_edges > 0) {
       iteration_timer_.Restart();
       iteration_++;
@@ -903,8 +906,8 @@ class ExponentialContraction {
                 << " [TIME] " << contraction_timer_.Elapsed() << std::endl;
     }
     Utility::SelectHighDegreeVertices(g, config_.degree_threshold, high_degree_vertices);
-    std::cout << "[STATUS] |- R" << rank_ << " Num high degree to distributed " 
-              << high_degree_vertices.size() << std::endl;
+    // std::cout << "[STATUS] |- R" << rank_ << " Num high degree to distributed " 
+    //           << high_degree_vertices.size() << std::endl;
     // Split high degree vertices into one layer of proxies with degree sqrt(n)
     SplitHighDegreeVerticesSqrtEdge(g, avg_max_deg, high_degree_vertices);
   }
@@ -1242,7 +1245,7 @@ class ExponentialContraction {
     });
   }
 
-  VertexID ComputeSequentialLimit(VertexID &global_edges) {
+  VertexID ComputeSequentialLimit(const VertexID &global_edges) {
     // Fixed limit, i.e. < 1024
     if (config_.fixed_limit) return config_.sequential_limit;
     // Relative limit, i.e. < 4 * m/P
