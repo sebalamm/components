@@ -43,6 +43,7 @@ void SemidynamicGraphCommunicator::SetVertexPayload(const VertexID v,
                                           VertexPayload &&msg,
                                           bool propagate) {
   if (GetVertexMessage(v) != msg
+      && IsLocal(v)
       && local_vertices_data_[v].is_interface_vertex_
       && propagate)
     ghost_comm_->AddMessage(v, msg);
@@ -60,26 +61,30 @@ VertexID SemidynamicGraphCommunicator::AddGhostVertex(VertexID v, PEID pe) {
   global_to_local_map_[v] = ghost_counter_;
 
   // Fix overflows
-  if (ghost_counter_ > local_vertices_data_.size()) {
-    local_vertices_data_.resize(ghost_counter_ + 1);
-    ghost_vertices_data_.resize(ghost_counter_ + 1);
-    is_active_.resize(ghost_counter_ + 1);
-    vertex_payload_.resize(ghost_counter_ + 1);
+  if (vertex_counter_ >= is_active_.size()) {
+    is_active_.resize(vertex_counter_ + 1);
+  }
+  if (vertex_counter_ >= vertex_payload_.size()) {
+    vertex_payload_.resize(vertex_counter_ + 1);
+  }
+  if (ghost_counter_ - ghost_offset_ >= GetGhostVertexVectorSize()) {
+    ghost_vertices_data_.resize(ghost_counter_ - ghost_offset_ + 1);
   }
 
   // Update data
-  local_vertices_data_[ghost_counter_].is_interface_vertex_ = false;
   ghost_vertices_data_[ghost_counter_ - ghost_offset_].rank_ = pe;
   ghost_vertices_data_[ghost_counter_ - ghost_offset_].global_id_ = v;
+  is_active_[vertex_counter_] = true;
 
   // Set payload
-  vertex_payload_[ghost_counter_] = {MaxDeviate,
-                               v, 
+  vertex_payload_[vertex_counter_] = {MaxDeviate,
+                                     v, 
 #ifdef TIEBREAK_DEGREE
-                               0,
+                                     0,
 #endif
-                               pe};
+                                     pe};
 
+  vertex_counter_++;
   return ghost_counter_++;
 }
 

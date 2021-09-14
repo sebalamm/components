@@ -113,6 +113,10 @@ class SemidynamicGraphCommunicator : public SemidynamicGraph {
   //////////////////////////////////////////////
   void SampleVertexNeighborhood(const VertexID &v, const float sampling_factor);
 
+  void AllocatePayloads() {
+    vertex_payload_.resize(vertex_counter_);
+  }
+
   void SetVertexPayload(VertexID v, VertexPayload &&msg, bool propagate = true);
 
   void ForceVertexPayload(VertexID v, VertexPayload &&msg);

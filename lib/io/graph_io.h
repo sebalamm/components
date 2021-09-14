@@ -580,13 +580,14 @@ class GraphIO {
     if constexpr (std::is_same<GraphType, StaticGraphCommunicator>::value
                   || std::is_same<GraphType, DynamicGraphCommunicator>::value
                   || std::is_same<GraphType, SemidynamicGraphCommunicator>::value) {
+      g.AllocatePayloads();
       for (VertexID v = 0; v < number_of_local_vertices; v++) {
           g.SetVertexLabel(v, first_vertex + v);
           g.SetVertexRoot(v, rank);
       }
       for (VertexID v = 0; v < duplicate_locals.size(); v++) {
-          g.SetVertexLabel(number_of_local_vertices + 1 + v, duplicate_locals[v].first);
-          g.SetVertexRoot(number_of_local_vertices + 1 + v, rank);
+          g.SetVertexLabel(g.GetLocalID(duplicate_locals[v].second), duplicate_locals[v].first);
+          g.SetVertexRoot(g.GetLocalID(duplicate_locals[v].second), rank);
       }
     }
 

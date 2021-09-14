@@ -111,6 +111,9 @@ class DynamicGraphCommunicator : public DynamicGraph {
   //////////////////////////////////////////////
   void SampleVertexNeighborhood(const VertexID &v, const float sampling_factor);
 
+  // TODO: Should this allocate something?
+  void AllocatePayloads() { };
+
   void SetVertexPayload(VertexID v, VertexPayload &&msg, bool propagate = true);
 
   void ForceVertexPayload(VertexID v, VertexPayload &&msg);

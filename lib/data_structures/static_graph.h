@@ -357,7 +357,7 @@ class StaticGraph {
       is_active_.resize(vertex_counter_ + 1);
     }
     if (ghost_counter_ - ghost_offset_ >= GetGhostVertexVectorSize()) {
-      ghost_vertices_data_.resize(ghost_counter_ + 1);
+      ghost_vertices_data_.resize(ghost_counter_ - ghost_offset_ + 1);
     }
 
     // Update data
