@@ -27,9 +27,18 @@
 class CommunicationUtility {
  public:
 
+  static float AllToAll(google::dense_hash_map<PEID, VertexBuffer> &send_buffers,
+                        google::dense_hash_map<PEID, VertexBuffer> &receive_buffers,
+                        PEID rank, PEID size, PEID message_tag, bool use_regular) {
+    if (use_regular)
+      return RegularAllToAll(send_buffers, receive_buffers, rank, size, message_tag);
+    else 
+      return SparseAllToAll(send_buffers, receive_buffers, rank, size, message_tag);
+  }
+
   static float SparseAllToAll(google::dense_hash_map<PEID, VertexBuffer> &send_buffers,
                               google::dense_hash_map<PEID, VertexBuffer> &receive_buffers,
-                              PEID rank, PEID size, PEID message_tag = 0) {
+                              PEID rank, PEID size, PEID message_tag) {
     Timer comm_timer;
     comm_timer.Restart();
     PEID num_requests = 0;
@@ -117,7 +126,7 @@ class CommunicationUtility {
 
   static float RegularAllToAll(google::dense_hash_map<PEID, VertexBuffer> &send_buffers,
                                google::dense_hash_map<PEID, VertexBuffer> &receive_buffers,
-                               PEID rank, PEID size, PEID message_tag = 0) {
+                               PEID rank, PEID size, PEID message_tag) {
     Timer comm_timer;
     comm_timer.Restart();
 

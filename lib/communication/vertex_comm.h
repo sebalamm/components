@@ -34,12 +34,12 @@
 template<typename GraphType>
 class VertexCommunicator {
  public:
-  VertexCommunicator(const PEID rank,
-                     const PEID size)
+  VertexCommunicator(const Config &conf, const PEID rank, const PEID size)
       : g_(nullptr),
         use_sampling_(false),
         rank_(rank),
         size_(size),
+        config_(conf),
         comm_time_(0.0),
         send_volume_(0),
         recv_volume_(0) {
@@ -84,8 +84,8 @@ class VertexCommunicator {
   void UpdateGhostVertices();
 
   void SendAndReceiveGhostVertices() {
-    comm_time_ += CommunicationUtility::SparseAllToAll(send_buffers_, receive_buffers_, 
-                                                       rank_, size_, message_tag_);
+    comm_time_ += CommunicationUtility::AllToAll(send_buffers_, receive_buffers_, 
+                                                 rank_, size_, message_tag_, config_.use_regular);
     message_tag_++;
     send_volume_ += CommunicationUtility::ClearBuffers(send_buffers_);
     UpdateGhostVertices();
@@ -112,6 +112,9 @@ class VertexCommunicator {
   google::dense_hash_set<PEID> packed_pes_;
   google::dense_hash_map<PEID, VertexBuffer> send_buffers_;
   google::dense_hash_map<PEID, VertexBuffer> receive_buffers_;
+
+  // Configuration
+  Config config_;
 
   // Neighborhood sampling
   bool use_sampling_;

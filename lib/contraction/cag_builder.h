@@ -37,8 +37,12 @@
 template <typename GraphType, typename LabelType = std::vector<VertexID>>
 class CAGBuilder {
  public:
-  CAGBuilder(GraphType &g, LabelType &vertex_labels, const PEID rank, const PEID size)
-      : g_(g), vertex_labels_(vertex_labels), rank_(rank), size_(size),
+  CAGBuilder(GraphType &g, LabelType &vertex_labels, const Config &conf, const PEID rank, const PEID size)
+      : g_(g), 
+        vertex_labels_(vertex_labels), 
+        rank_(rank), 
+        size_(size),
+        config_(conf),
         num_smaller_components_(0),
         num_local_components_(0),
         num_global_components_(0),
@@ -88,6 +92,9 @@ class CAGBuilder {
   // Network information
   PEID rank_, size_;
 
+  // Configuration
+  Config config_;
+
   // Offset for pairing
   VertexID offset_;
 
@@ -119,31 +126,27 @@ class CAGBuilder {
   void PerformContraction() {
     contraction_timer_.Restart();
     ComputeComponentPrefixSum();
-    if (rank_ == ROOT) {
-      std::cout << "[STATUS] |-- Computing component prefix sum took " 
+    if (rank_ == ROOT || config_.print_verbose) 
+      std::cout << "[STATUS] |-- R" << rank_ << " Computing component prefix sum took " 
                 << "[TIME] " << contraction_timer_.Elapsed() << std::endl;
-    }
 
     contraction_timer_.Restart();
     ComputeLocalContractionMapping();
-    if (rank_ == ROOT) {
-      std::cout << "[STATUS] |-- Computing local contraction mapping took " 
+    if (rank_ == ROOT || config_.print_verbose)
+      std::cout << "[STATUS] |-- R" << rank_ << " Computing local contraction mapping took " 
                 << "[TIME] " << contraction_timer_.Elapsed() << std::endl;
-    }
 
     contraction_timer_.Restart();
     ExchangeGhostContractionMapping();
-    if (rank_ == ROOT) {
+    if (rank_ == ROOT || config_.print_verbose)
       std::cout << "[STATUS] |-- R" << rank_ << " Exchanging ghost contraction mapping took " 
                 << "[TIME] " << contraction_timer_.Elapsed() << std::endl;
-    }
     
     contraction_timer_.Restart();
     GenerateLocalContractionEdges();
-    if (rank_ == ROOT) {
-      std::cout << "[STATUS] |-- Generating contraction edges took " 
+    if (rank_ == ROOT || config_.print_verbose)
+      std::cout << "[STATUS] |-- R" << rank_ << " Generating contraction edges took " 
                 << "[TIME] " << contraction_timer_.Elapsed() << std::endl;
-    }
   }
 
   void PerformLocalContraction() {
@@ -262,6 +265,7 @@ class CAGBuilder {
     google::dense_hash_map<VertexID, VertexID> label_map; 
     label_map.set_empty_key(EmptyKey);
     label_map.set_deleted_key(DeleteKey);
+    // std::vector<VertexID> label_map;
     VertexID current_component = num_smaller_components_;
     for (const VertexID c : local_components_) {
       label_map[c] = current_component++;
@@ -294,8 +298,7 @@ class CAGBuilder {
 
     // Send ghost vertex updates O(cut size) (communication)
     exchange_timer.Restart();
-    // comm_time_ += CommunicationUtility::SparseAllToAll(send_buffers_, receive_buffers_, rank_, size_, CAGTag);
-    comm_time_ += CommunicationUtility::RegularAllToAll(send_buffers_, receive_buffers_, rank_, size_, CAGTag);
+    comm_time_ += CommunicationUtility::AllToAll(send_buffers_, receive_buffers_, rank_, size_, CAGTag, config_.use_regular);
     send_volume_ += CommunicationUtility::ClearBuffers(send_buffers_);
 
     // std::cout << "[STATUS] |--- Sparse exchange took " 
@@ -509,7 +512,7 @@ class CAGBuilder {
     VertexID number_of_ghost_vertices = ghost_pe.size();
     VertexID number_of_edges = edges_.size();
 
-    GraphOutputType cg(rank_, size_);
+    GraphOutputType cg(config_, rank_, size_);
 
     // Build graph
     // Static graphs also take the number of edges
@@ -593,7 +596,7 @@ class CAGBuilder {
     VertexID number_of_edges = edges_.size();
     VertexID number_of_local_vertices = local_components_.size();
 
-    GraphOutputType cg(rank_, size_);
+    GraphOutputType cg(config_, rank_, size_);
 
     // Build graph
     // Static graphs also take the number of edges

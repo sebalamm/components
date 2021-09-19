@@ -41,7 +41,7 @@ int main(int argn, char **argv) {
   ParseParameters(argn, argv, conf);
   int initial_seed = conf.seed;
 
-  StaticGraph SG(rank, size);
+  StaticGraph SG(conf, rank, size);
   // DynamicGraph SG(rank, size);
   // DynamicGraphCommunicator DG(rank, size);
   MPI_Barrier(MPI_COMM_WORLD);

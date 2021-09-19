@@ -67,45 +67,41 @@ class ExponentialContraction {
     contraction_timer_.Restart();
     if constexpr (std::is_same<GraphType, StaticGraph>::value) {
       FindLocalComponents<StaticGraph>(g, g_labels);
-      if (rank_ == ROOT) {
-        std::cout << "[STATUS] |- Finding local components on input took " 
+      if (rank_ == ROOT || config_.print_verbose) 
+        std::cout << "[STATUS] |- R" << rank_ << " Finding local components on input took " 
                   << "[TIME] " << contraction_timer_.Elapsed() << std::endl;
-      }
       
       if (config_.single_level_contraction) {
         contraction_timer_.Restart();
         CAGBuilder<StaticGraph> 
-          contraction(g, g_labels, rank_, size_);
+          contraction(g, g_labels, config_, rank_, size_);
         auto cag 
           = contraction.BuildComponentAdjacencyGraph<DynamicGraphCommunicator>();
         cag.ResetCommunicator();
         OutputStats<DynamicGraphCommunicator>(cag);
-        if (rank_ == ROOT) {
-          std::cout << "[STATUS] |- Building cag took " 
+        if (rank_ == ROOT || config_.print_verbose) 
+          std::cout << "[STATUS] |- R" << rank_ << " Building cag took " 
                     << "[TIME] " << contraction_timer_.Elapsed() << std::endl;
-        }
 
         if (config_.replicate_high_degree) {
           contraction_timer_.Restart();
           DistributeHighDegreeVertices(cag);
           OutputStats<DynamicGraphCommunicator>(cag);
-          if (rank_ == ROOT) {
-            std::cout << "[STATUS] |- Distributing high degree vertices took " 
+          if (rank_ == ROOT || config_.print_verbose) 
+            std::cout << "[STATUS] |- R" << rank_ << " Distributing high degree vertices took " 
                       << "[TIME] " << contraction_timer_.Elapsed() << std::endl;
-          }
           IOUtility::PrintGraphParams(cag, config_, rank_, size_);
         }
 
         // Keep contraction labeling for later
-        exp_contraction_ = new DynamicContraction(cag, rank_, size_);
+        exp_contraction_ = new DynamicContraction(cag, config_, rank_, size_);
 
         // Main decomposition algorithm
         contraction_timer_.Restart(); 
         PerformDecomposition(cag);
-        if (rank_ == ROOT) {
-          std::cout << "[STATUS] |- Resolving connectivity took " 
+        if (rank_ == ROOT || config_.print_verbose) 
+          std::cout << "[STATUS] |- R" << rank_ << " Resolving connectivity took " 
                     << "[TIME] " << contraction_timer_.Elapsed() << std::endl;
-        }
 
         if (config_.replicate_high_degree) {
           RemoveReplicatedVertices(cag);
@@ -125,58 +121,53 @@ class ExponentialContraction {
         // First round of contraction
         contraction_timer_.Restart();
         CAGBuilder<StaticGraph> 
-          first_contraction(g, g_labels, rank_, size_);
+          first_contraction(g, g_labels, config_, rank_, size_);
         auto cag 
           = first_contraction.BuildComponentAdjacencyGraph<StaticGraph>();
         OutputStats<StaticGraph>(cag);
-        if (rank_ == ROOT) {
-          std::cout << "[STATUS] |- Building first cag took " 
+        if (rank_ == ROOT || config_.print_verbose)
+          std::cout << "[STATUS] |- R" << rank_ << " Building first cag took " 
                     << "[TIME] " << contraction_timer_.Elapsed() << std::endl;
-        }
 
         // Keep contraction labeling for later
         contraction_timer_.Restart();
         std::vector<VertexID> cag_labels(cag.GetVertexVectorSize(), 0);
         FindLocalComponents<StaticGraph>(cag, cag_labels);
-        if (rank_ == ROOT) {
-          std::cout << "[STATUS] |- Finding local components on cag took " 
+        if (rank_ == ROOT || config_.print_verbose)
+          std::cout << "[STATUS] |- R" << rank_ << " Finding local components on cag took " 
                     << "[TIME] " << contraction_timer_.Elapsed() << std::endl;
-        }
 
         // Second round of contraction
         contraction_timer_.Restart();
         CAGBuilder<StaticGraph> 
-          second_contraction(cag, cag_labels, rank_, size_);
+          second_contraction(cag, cag_labels, config_, rank_, size_);
         auto ccag 
           = second_contraction.BuildComponentAdjacencyGraph<DynamicGraphCommunicator>();
         ccag.ResetCommunicator();
         OutputStats<DynamicGraphCommunicator>(ccag);
-        if (rank_ == ROOT) {
-          std::cout << "[STATUS] |- Building second cag took " 
+        if (rank_ == ROOT || config_.print_verbose)
+          std::cout << "[STATUS] |- R" << rank_ << " Building second cag took " 
                     << "[TIME] " << contraction_timer_.Elapsed() << std::endl;
-        }
 
         if (config_.replicate_high_degree) {
           contraction_timer_.Restart();
           DistributeHighDegreeVertices(ccag);
           OutputStats<DynamicGraphCommunicator>(ccag);
-          if (rank_ == ROOT) {
-            std::cout << "[STATUS] |- Distributing high degree vertices took " 
+          if (rank_ == ROOT || config_.print_verbose)
+            std::cout << "[STATUS] |- R" << rank_ << " Distributing high degree vertices took " 
                       << "[TIME] " << contraction_timer_.Elapsed() << std::endl;
-          }
           IOUtility::PrintGraphParams(ccag, config_, rank_, size_);
         }
 
         // Keep contraction labeling for later
-        exp_contraction_ = new DynamicContraction(ccag, rank_, size_);
+        exp_contraction_ = new DynamicContraction(ccag, config_, rank_, size_);
 
         // Main decomposition algorithm
         contraction_timer_.Restart(); 
         PerformDecomposition(ccag);
-        if (rank_ == ROOT) {
-          std::cout << "[STATUS] |- Resolving connectivity took " 
+        if (rank_ == ROOT || config_.print_verbose)
+          std::cout << "[STATUS] |- R" << rank_ << " Resolving connectivity took " 
                     << "[TIME] " << contraction_timer_.Elapsed() << std::endl;
-        }
 
         if (config_.replicate_high_degree) {
           RemoveReplicatedVertices(ccag);
@@ -197,25 +188,23 @@ class ExponentialContraction {
         // At least contract locally
         contraction_timer_.Restart();
         CAGBuilder<StaticGraph> 
-          local_contraction(g, g_labels, rank_, size_);
+          local_contraction(g, g_labels, config_, rank_, size_);
         auto lcag 
           = local_contraction.BuildLocalComponentGraph<DynamicGraphCommunicator>();
         lcag.ResetCommunicator();
         OutputStats<DynamicGraphCommunicator>(lcag);
-        if (rank_ == ROOT) {
-          std::cout << "[STATUS] |- Building local cag took " 
+        if (rank_ == ROOT || config_.print_verbose)
+          std::cout << "[STATUS] |- R" << rank_ << " Building local cag took " 
                     << "[TIME] " << contraction_timer_.Elapsed() << std::endl;
-        }
 
         if (config_.replicate_high_degree) {
           contraction_timer_.Restart();
           DistributeHighDegreeVertices(lcag);
           // SampleHighDegreeNeighborhoods(lcag);
           OutputStats<DynamicGraphCommunicator>(lcag);
-          if (rank_ == ROOT) {
-            std::cout << "[STATUS] |- Distributing high degree vertices took " 
+          if (rank_ == ROOT || config_.print_verbose)
+            std::cout << "[STATUS] |- R" << rank_ << " Distributing high degree vertices took " 
                       << "[TIME] " << contraction_timer_.Elapsed() << std::endl;
-          }
           IOUtility::PrintGraphParams(lcag, config_, rank_, size_);
 
           contraction_timer_.Restart();
@@ -223,48 +212,44 @@ class ExponentialContraction {
           lcag_labels.set_empty_key(EmptyKey);
           lcag_labels.set_deleted_key(DeleteKey);
           FindLocalComponents<DynamicGraphCommunicator>(lcag, lcag_labels);
-          if (rank_ == ROOT) {
-            std::cout << "[STATUS] |- Finding local components on lcag took " 
+          if (rank_ == ROOT || config_.print_verbose)
+            std::cout << "[STATUS] |- R" << rank_ << " Finding local components on lcag took " 
                       << "[TIME] " << contraction_timer_.Elapsed() << std::endl;
-          }
 
           // Contract again
           contraction_timer_.Restart();
           CAGBuilder<DynamicGraphCommunicator, google::dense_hash_map<VertexID, VertexID>> 
-            local_contraction(lcag, lcag_labels, rank_, size_);
+            local_contraction(lcag, lcag_labels, config_, rank_, size_);
           auto hd_lcag 
             = local_contraction.BuildLocalComponentGraph<DynamicGraphCommunicator>();
           hd_lcag.ResetCommunicator();
           OutputStats<DynamicGraphCommunicator>(lcag);
-          if (rank_ == ROOT) {
-            std::cout << "[STATUS] |- Building high degree local cag took " 
+          if (rank_ == ROOT || config_.print_verbose)
+            std::cout << "[STATUS] |- R" << rank_ << " Building high degree local cag took " 
                       << "[TIME] " << contraction_timer_.Elapsed() << std::endl;
-          }
 
           // Keep contraction labeling for later
-          exp_contraction_ = new DynamicContraction(hd_lcag, rank_, size_);
+          exp_contraction_ = new DynamicContraction(hd_lcag, config_, rank_, size_);
 
           // Main decomposition algorithm
           contraction_timer_.Restart(); 
           PerformDecomposition(hd_lcag);
-          if (rank_ == ROOT) {
-            std::cout << "[STATUS] |- Resolving connectivity took " 
+          if (rank_ == ROOT || config_.print_verbose)
+            std::cout << "[STATUS] |- R" << rank_ << " Resolving connectivity took " 
                       << "[TIME] " << contraction_timer_.Elapsed() << std::endl;
-          }
 
           ApplyToLocalComponents(hd_lcag, lcag);
           RemoveReplicatedVertices(lcag);
         } else {
           // Keep contraction labeling for later
-          exp_contraction_ = new DynamicContraction(lcag, rank_, size_);
+          exp_contraction_ = new DynamicContraction(lcag, config_, rank_, size_);
 
           // Main decomposition algorithm
           contraction_timer_.Restart(); 
           PerformDecomposition(lcag);
-          if (rank_ == ROOT) {
-            std::cout << "[STATUS] |- Resolving connectivity took " 
+          if (rank_ == ROOT || config_.print_verbose)
+            std::cout << "[STATUS] |- R" << rank_ << " Resolving connectivity took " 
                       << "[TIME] " << contraction_timer_.Elapsed() << std::endl;
-          }
         }
         ApplyToLocalComponents(lcag, g, g_labels);
         // Get stats
@@ -336,17 +321,15 @@ class ExponentialContraction {
         if (config_.use_bfs) RunContractionBFS(g);
         else RunContractionLP(g);
     }
-    if (rank_ == ROOT) {
-      std::cout << "[STATUS] |- Running contraction took " 
+    if (rank_ == ROOT || config_.print_verbose)
+      std::cout << "[STATUS] |- R" << rank_ << " Running contraction took " 
                 << "[TIME] " << contraction_timer_.Elapsed() << std::endl;
-    }
 
     contraction_timer_.Restart(); 
     exp_contraction_->UndoContraction();
-    if (rank_ == ROOT) {
-      std::cout << "[STATUS] |- Undoing contraction took " 
+    if (rank_ == ROOT || config_.print_verbose)
+      std::cout << "[STATUS] |- R" << rank_ << " Undoing contraction took " 
                 << "[TIME] " << contraction_timer_.Elapsed() << std::endl;
-    }
   }
 
   template <typename GraphType>
@@ -398,12 +381,12 @@ class ExponentialContraction {
 
   void RunContractionLP(DynamicGraphCommunicator &g) {
     contraction_timer_.Restart();
-    if (rank_ == ROOT) {
+    if (rank_ == ROOT || config_.print_verbose) {
       if (iteration_ == 1)
-        std::cout << "[STATUS] |-- Iteration " << iteration_ 
+        std::cout << "[STATUS] |-- R" << rank_ << " Iteration " << iteration_ 
                   << " [TIME] " << "-" << std::endl;
       else
-        std::cout << "[STATUS] |-- Iteration " << iteration_ 
+        std::cout << "[STATUS] |-- R" << rank_ << " Iteration " << iteration_ 
                   << " [TIME] " << iteration_timer_.Elapsed() << std::endl;
     }
     iteration_timer_.Restart();
@@ -466,14 +449,9 @@ class ExponentialContraction {
     }
     
     g.SendAndReceiveGhostVertices();
-    if (rank_ == ROOT) {
-      std::cout << "[STATUS] |-- Computing and exchanging deviates took " 
+    if (rank_ == ROOT || config_.print_verbose)
+      std::cout << "[STATUS] |-- R" << rank_ << " Computing and exchanging deviates took " 
                 << "[TIME] " << contraction_timer_.Elapsed() << std::endl;
-    }
-
-    if (rank_ == ROOT)
-      std::cout << "[STATUS] |-- Pick deviates " 
-                << "[TIME] " << iteration_timer_.Elapsed() << std::endl;
 
     VertexID exchange_rounds = 0;
     int converged_globally = 0;
@@ -508,10 +486,9 @@ class ExponentialContraction {
         });
         g.SetVertexPayload(v, std::move(smallest_payload));
       });
-      if (rank_ == ROOT) {
-        std::cout << "[STATUS] |--- Updating payloads took " 
+      if (rank_ == ROOT || config_.print_verbose)
+        std::cout << "[STATUS] |--- R" << rank_ << " Updating payloads took " 
                   << "[TIME] " << contraction_timer_.Elapsed() << std::endl;
-      }
 
       contraction_timer_.Restart();
       comm_timer_.Restart();
@@ -523,35 +500,34 @@ class ExponentialContraction {
                     MPI_COMM_WORLD);
       comm_time_ += comm_timer_.Elapsed();
       exchange_rounds++;
-      if (rank_ == ROOT) {
-        std::cout << "[STATUS] |--- Convergence test took " 
+      if (rank_ == ROOT || config_.print_verbose)
+        std::cout << "[STATUS] |--- R" << rank_ << " Convergence test took " 
                   << "[TIME] " << contraction_timer_.Elapsed() << std::endl;
-      }
 
       contraction_timer_.Restart();
       // Receive variates
       g.SendAndReceiveGhostVertices();
-      if (rank_ == ROOT) {
-        std::cout << "[STATUS] |--- Exchanging payloads took " 
+      if (rank_ == ROOT || config_.print_verbose)
+        std::cout << "[STATUS] |--- R" << rank_ << " Exchanging payloads took " 
                   << "[TIME] " << contraction_timer_.Elapsed() << std::endl;
-      }
 
-      if (rank_ == ROOT) 
-        std::cout << "[STATUS] |--- Round finished " 
+      if (rank_ == ROOT || config_.print_verbose) 
+        std::cout << "[STATUS] |--- R" << rank_ << " Round finished " 
                   << "[TIME] " << round_timer.Elapsed() << std::endl;
     }
 
-    if (rank_ == ROOT) std::cout << "done propagating... mem " << Utility::GetFreePhysMem() << std::endl;
+    // if (rank_ == ROOT) 
+    //   std::cout << "done propagating... mem " << Utility::GetFreePhysMem() << std::endl;
 
     contraction_timer_.Restart();
     // Determine remaining active vertices
     g.BuildLabelShortcuts();
-    if (rank_ == ROOT) {
-      std::cout << "[STATUS] |-- Building shortcuts took " 
+    if (rank_ == ROOT || config_.print_verbose)
+      std::cout << "[STATUS] |-- R" << rank_ << " Building shortcuts took " 
                 << "[TIME] " << contraction_timer_.Elapsed() << std::endl;
-    }
 
-    if (rank_ == ROOT) std::cout << "done shortcutting... mem " << Utility::GetFreePhysMem() << std::endl;
+    // if (rank_ == ROOT) 
+    //   std::cout << "done shortcutting... mem " << Utility::GetFreePhysMem() << std::endl;
 
     contraction_timer_.Restart();
     if (config_.direct_contraction) {
@@ -559,12 +535,12 @@ class ExponentialContraction {
     } else {
       exp_contraction_->ExponentialContraction();
     }
-    if (rank_ == ROOT) {
-      std::cout << "[STATUS] |-- Exponential contraction took " 
+    if (rank_ == ROOT || config_.print_verbose)
+      std::cout << "[STATUS] |-- R" << rank_ << " Exponential contraction took " 
                 << "[TIME] " << contraction_timer_.Elapsed() << std::endl;
-    }
 
-    if (rank_ == ROOT) std::cout << "done contraction... mem " << Utility::GetFreePhysMem() << std::endl;
+    // if (rank_ == ROOT) 
+    //   std::cout << "done contraction... mem " << Utility::GetFreePhysMem() << std::endl;
     OutputStats<DynamicGraphCommunicator>(g);
 
     // Count remaining number of vertices
@@ -580,12 +556,12 @@ class ExponentialContraction {
 
   void RunContractionBFS(DynamicGraphCommunicator &g) {
     contraction_timer_.Restart();
-    if (rank_ == ROOT) {
+    if (rank_ == ROOT || config_.print_verbose) {
       if (iteration_ == 1)
-        std::cout << "[STATUS] |-- Iteration " << iteration_ 
+        std::cout << "[STATUS] |-- R" << rank_ << " Iteration " << iteration_ 
                   << " [TIME] " << "-" << std::endl;
       else
-        std::cout << "[STATUS] |-- Iteration " << iteration_ 
+        std::cout << "[STATUS] |-- R" << rank_ << " Iteration " << iteration_ 
                   << " [TIME] " << iteration_timer_.Elapsed() << std::endl;
     }
     iteration_timer_.Restart();
@@ -656,14 +632,9 @@ class ExponentialContraction {
                          true);
     }
     g.SendAndReceiveGhostVertices();
-    if (rank_ == ROOT) {
-      std::cout << "[STATUS] |-- Computing deviates and starting BFS took " 
+    if (rank_ == ROOT || config_.print_verbose)
+      std::cout << "[STATUS] |-- R" << rank_ << " Computing deviates and starting BFS took " 
                 << "[TIME] " << contraction_timer_.Elapsed() << std::endl;
-    }
-
-    if (rank_ == ROOT)
-      std::cout << "[STATUS] |-- Pick deviates " 
-                << "[TIME] " << iteration_timer_.Elapsed() << std::endl;
 
     VertexID exchange_rounds = 0;
     int converged_globally = 0;
@@ -734,10 +705,9 @@ class ExponentialContraction {
         });
       }
 
-      if (rank_ == ROOT) {
-        std::cout << "[STATUS] |--- Updating payloads took " 
+      if (rank_ == ROOT || config_.print_verbose)
+        std::cout << "[STATUS] |--- R" << rank_ << " Updating payloads took " 
                   << "[TIME] " << contraction_timer_.Elapsed() << std::endl;
-      }
 
       contraction_timer_.Restart();
       comm_timer_.Restart();
@@ -749,37 +719,36 @@ class ExponentialContraction {
                     MPI_COMM_WORLD);
       comm_time_ += comm_timer_.Elapsed();
       exchange_rounds++;
-      if (rank_ == ROOT) {
-        std::cout << "[STATUS] |--- Convergence test took " 
+      if (rank_ == ROOT || config_.print_verbose)
+        std::cout << "[STATUS] |--- R" << rank_ << " Convergence test took " 
                   << "[TIME] " << contraction_timer_.Elapsed() << std::endl;
-      }
 
       contraction_timer_.Restart();
       // Receive variates
       g.SendAndReceiveGhostVertices();
-      if (rank_ == ROOT) {
-        std::cout << "[STATUS] |--- Exchanging payloads took " 
+      if (rank_ == ROOT || config_.print_verbose)
+        std::cout << "[STATUS] |--- R" << rank_ << " Exchanging payloads took " 
                   << "[TIME] " << contraction_timer_.Elapsed() << std::endl;
-      }
 
       active_round++;
       active_vertices.clear();
-      if (rank_ == ROOT) 
-        std::cout << "[STATUS] |--- Round finished " 
+      if (rank_ == ROOT || config_.print_verbose) 
+        std::cout << "[STATUS] |--- R" << rank_ << " Round finished " 
                   << "[TIME] " << round_timer.Elapsed() << std::endl;
     }
 
-    if (rank_ == ROOT) std::cout << "done propagating... mem " << Utility::GetFreePhysMem() << std::endl;
+    // if (rank_ == ROOT) 
+    //   std::cout << "done propagating... mem " << Utility::GetFreePhysMem() << std::endl;
 
     contraction_timer_.Restart();
     // Determine remaining active vertices
     g.BuildLabelShortcuts();
-    if (rank_ == ROOT) {
-      std::cout << "[STATUS] |-- Building shortcuts took " 
+    if (rank_ == ROOT || config_.print_verbose)
+      std::cout << "[STATUS] |-- R" << rank_ << " Building shortcuts took " 
                 << "[TIME] " << contraction_timer_.Elapsed() << std::endl;
-    }
 
-    if (rank_ == ROOT) std::cout << "done shortcutting... mem " << Utility::GetFreePhysMem() << std::endl;
+    // if (rank_ == ROOT) 
+    //   std::cout << "done shortcutting... mem " << Utility::GetFreePhysMem() << std::endl;
 
     contraction_timer_.Restart();
     if (config_.direct_contraction) {
@@ -787,12 +756,12 @@ class ExponentialContraction {
     } else {
       exp_contraction_->ExponentialContraction();
     }
-    if (rank_ == ROOT) {
-      std::cout << "[STATUS] |-- Exponential contraction took " 
+    if (rank_ == ROOT || config_.print_verbose) 
+      std::cout << "[STATUS] |-- R" << rank_ << " Exponential contraction took " 
                 << "[TIME] " << contraction_timer_.Elapsed() << std::endl;
-    }
 
-    if (rank_ == ROOT) std::cout << "done contraction... mem " << Utility::GetFreePhysMem() << std::endl;
+    // if (rank_ == ROOT) 
+    //   std::cout << "done contraction... mem " << Utility::GetFreePhysMem() << std::endl;
     OutputStats<DynamicGraphCommunicator>(g);
 
     // Count remaining number of vertices
@@ -889,7 +858,7 @@ class ExponentialContraction {
     Utility::SelectHighDegreeVertices(g, avg_max_deg, high_degree_vertices);
 
     for (const auto &vd : high_degree_vertices) {
-      std::cout << "R" << rank_ << " sample neighborhood v " << vd.first << " d " << vd.second << " (ad " << avg_max_deg << ") s " << vd.second * config_.neighborhood_sampling_factor << std::endl;
+      // std::cout << "R" << rank_ << " sample neighborhood v " << vd.first << " d " << vd.second << " (ad " << avg_max_deg << ") s " << vd.second * config_.neighborhood_sampling_factor << std::endl;
       g.SampleVertexNeighborhood(vd.first, config_.neighborhood_sampling_factor);
     }
   }
@@ -901,10 +870,9 @@ class ExponentialContraction {
     VertexID avg_max_deg = Utility::ComputeAverageMaxDegree(g, rank_, size_, comm_time_);
     // Use sqrt(n) as a degree threshold
     config_.degree_threshold = static_cast<VertexID>(config_.degree_threshold*sqrt(global_vertices));
-    if (rank_ == ROOT) {
-      std::cout << "[STATUS] |- High degree threshold " << config_.degree_threshold
+    if (rank_ == ROOT || config_.print_verbose) 
+      std::cout << "[STATUS] |- R" << rank_ << " High degree threshold " << config_.degree_threshold
                 << " [TIME] " << contraction_timer_.Elapsed() << std::endl;
-    }
     Utility::SelectHighDegreeVertices(g, config_.degree_threshold, high_degree_vertices);
     // std::cout << "[STATUS] |- R" << rank_ << " Num high degree to distributed " 
     //           << high_degree_vertices.size() << std::endl;
@@ -964,7 +932,7 @@ class ExponentialContraction {
     receive_buffers[rank_] = send_buffers[rank_];
     send_buffers[rank_].clear();
 
-    comm_time_ += CommunicationUtility::SparseAllToAll(send_buffers, receive_buffers, rank_, size_, 993);
+    comm_time_ += CommunicationUtility::AllToAll(send_buffers, receive_buffers, rank_, size_, 993, config_.use_regular);
     send_volume_ += CommunicationUtility::ClearBuffers(send_buffers);
 
     //////////////////////////////////////////
@@ -1152,7 +1120,7 @@ class ExponentialContraction {
     receive_buffers[rank_] = send_buffers[rank_];
     send_buffers[rank_].clear();
 
-    comm_time_ += CommunicationUtility::SparseAllToAll(send_buffers, receive_buffers, rank_, size_, 993);
+    comm_time_ += CommunicationUtility::AllToAll(send_buffers, receive_buffers, rank_, size_, 993, config_.use_regular);
     send_volume_ += CommunicationUtility::ClearBuffers(send_buffers);
 
     //////////////////////////////////////////

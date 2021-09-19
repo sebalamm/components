@@ -41,8 +41,8 @@ int main(int argn, char **argv) {
   ParseParameters(argn, argv, conf);
   int initial_seed = conf.seed;
 
-  StaticGraph SG(rank, size);
-  StaticGraphCommunicator SGC(rank, size);
+  StaticGraph SG(conf, rank, size);
+  StaticGraphCommunicator SGC(conf, rank, size);
   MPI_Barrier(MPI_COMM_WORLD);
   if (conf.use_contraction) {
       IOUtility::LoadGraph(SG, conf, rank, size);
@@ -82,6 +82,7 @@ int main(int argn, char **argv) {
   if (rank == ROOT) std::cout << "BENCH RUN" << std::endl;
 
   Statistics stats;
+  Statistics global_stats;
   
   for (int i = 0; i < conf.iterations; ++i) {
     int round_seed = initial_seed + i + 1000;
@@ -127,12 +128,16 @@ int main(int argn, char **argv) {
     // Gather total time
     MPI_Reduce(&local_time, &total_time, 1, MPI_DOUBLE, MPI_MAX, ROOT,
                MPI_COMM_WORLD);
-    if (rank == ROOT) stats.Push(total_time);
+    stats.Push(local_time);
+    if (rank == ROOT) global_stats.Push(total_time);
   }
 
+  std::cout << "LOCAL RESULT rank=" << rank << " runner=exp"
+            << " time=" << stats.Avg() << " stddev=" << stats.Stddev()
+            << " iterations=" << conf.iterations << std::endl;
   if (rank == ROOT) {
-    std::cout << "RESULT runner=short"
-              << " time=" << stats.Avg() << " stddev=" << stats.Stddev()
+    std::cout << "GLOBAL RESULT runner=exp"
+              << " time=" << global_stats.Avg() << " stddev=" << global_stats.Stddev()
               << " iterations=" << conf.iterations << std::endl;
   }
 

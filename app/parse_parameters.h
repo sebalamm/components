@@ -40,6 +40,7 @@ void ParseParameters(int argn, char **argv,
   conf.input_file = args.Get<std::string>("in", "null");
   conf.output_file = args.Get<std::string>("out", "out");
   conf.debug_output_file = args.Get<std::string>("debug_out", "tmp");
+  conf.print_verbose = args.IsSet("verbose");
 
   // Benchmarks
   conf.iterations = args.Get<unsigned int>("i", 10);
@@ -72,6 +73,9 @@ void ParseParameters(int argn, char **argv,
 
   // BFS
   conf.use_bfs = args.IsSet("bfs");
+
+  // Communication
+  conf.use_regular = args.IsSet("regular");
 
   // Generator
   conf.gen = args.Get<std::string>("gen", "null");

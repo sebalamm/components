@@ -51,25 +51,22 @@ class AllReduce {
 
     // Perform gather of graph on root 
     GatherGraphOnRoot(g);
-    if (rank_ == ROOT) {
+    if (rank_ == ROOT || config_.print_verbose)
       std::cout << "[STATUS] |-- Gather on root took " 
                 << "[TIME] " << contraction_timer_.Elapsed() << std::endl;
-    }
     
     contraction_timer_.Restart();
     FindComponentsOnRoot();
-    if (rank_ == ROOT) {
+    if (rank_ == ROOT || config_.print_verbose)
       std::cout << "[STATUS] |-- Local computation on root took " 
                 << "[TIME] " << contraction_timer_.Elapsed() << std::endl;
-    }
 
     contraction_timer_.Restart();
     // Distribute labels to other PEs
     DistributeLabelsFromRoot(g, g_labels);
-    if (rank_ == ROOT) {
+    if (rank_ == ROOT || config_.print_verbose)
       std::cout << "[STATUS] |-- Distributing graph from root took " 
                 << "[TIME] " << contraction_timer_.Elapsed() << std::endl;
-    }
   }
 
   void Output(GraphType &g) {
@@ -123,7 +120,7 @@ class AllReduce {
       }
 
       // Construct temporary graph
-      StaticGraph sg(ROOT, 1);
+      StaticGraph sg(config_, ROOT, 1);
 
       sg.StartConstruct(global_vertices_.size(), 0, global_edges_.size(), ROOT);
       for (int v = 0; v < global_vertices_.size(); ++v) {

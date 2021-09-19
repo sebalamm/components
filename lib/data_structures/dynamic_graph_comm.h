@@ -51,7 +51,7 @@ class VertexCommunicator;
 
 class DynamicGraphCommunicator : public DynamicGraph {
  public:
-  DynamicGraphCommunicator(const PEID rank, const PEID size);
+  DynamicGraphCommunicator(const Config& conf, const PEID rank, const PEID size);
 
   virtual ~DynamicGraphCommunicator();
 

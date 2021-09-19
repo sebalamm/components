@@ -46,7 +46,7 @@ int main(int argn, char **argv) {
   if (rank == ROOT) std::cout << "WARMUP RUN" << std::endl;
 
   {
-    StaticGraphCommunicator G(rank, size);
+    StaticGraphCommunicator G(conf, rank, size);
     IOUtility::LoadGraph(G, conf, rank, size);
     IOUtility::PrintGraphParams(G, conf, rank, size);
 

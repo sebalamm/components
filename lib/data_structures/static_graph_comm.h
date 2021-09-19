@@ -51,7 +51,7 @@ class VertexCommunicator;
 
 class StaticGraphCommunicator : public StaticGraph {
  public:
-  StaticGraphCommunicator(const PEID rank, const PEID size);
+  StaticGraphCommunicator(const Config& conf, const PEID rank, const PEID size);
 
   virtual ~StaticGraphCommunicator();
 

@@ -51,7 +51,7 @@ class VertexCommunicator;
 
 class SemidynamicGraphCommunicator : public SemidynamicGraph {
  public:
-  SemidynamicGraphCommunicator(const PEID rank, const PEID size);
+  SemidynamicGraphCommunicator(const Config& conf, const PEID rank, const PEID size);
 
   virtual ~SemidynamicGraphCommunicator();
 

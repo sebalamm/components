@@ -4,10 +4,10 @@
 #include "static_graph_comm.h"
 #include "vertex_comm.h"
   
-StaticGraphCommunicator::StaticGraphCommunicator(const PEID rank, const PEID size) 
-    : StaticGraph(rank, size),
+StaticGraphCommunicator::StaticGraphCommunicator(const Config& conf, const PEID rank, const PEID size) 
+    : StaticGraph(conf, rank, size),
       ghost_comm_(nullptr) {
-  ghost_comm_ = new VertexCommunicator<StaticGraphCommunicator>(rank_, size_);
+  ghost_comm_ = new VertexCommunicator<StaticGraphCommunicator>(config_, rank_, size_);
   ghost_comm_->SetGraph(this);
 }
 
@@ -17,7 +17,7 @@ StaticGraphCommunicator::~StaticGraphCommunicator() {
 }
 
 void StaticGraphCommunicator::ResetCommunicator() {
-  ghost_comm_ = new VertexCommunicator<StaticGraphCommunicator>(rank_, size_);
+  ghost_comm_ = new VertexCommunicator<StaticGraphCommunicator>(config_, rank_, size_);
   ghost_comm_->SetGraph(this);
 }
 

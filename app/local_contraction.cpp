@@ -47,7 +47,7 @@ int main(int argn, char **argv) {
   {
     LocalContraction comp(conf, rank, size);
     if (conf.use_contraction) {
-      StaticGraph G(rank, size);
+      StaticGraph G(conf, rank, size);
       IOUtility::LoadGraph(G, conf, rank, size);
       IOUtility::PrintGraphParams(G, conf, rank, size);
 
@@ -58,7 +58,7 @@ int main(int argn, char **argv) {
       });
       comp.FindComponents(G, labels);
     } else {
-      DynamicGraphCommunicator G(rank, size);
+      DynamicGraphCommunicator G(conf, rank, size);
       IOUtility::LoadGraph(G, conf, rank, size);
       IOUtility::PrintGraphParams(G, conf, rank, size);
 
@@ -85,7 +85,7 @@ int main(int argn, char **argv) {
 
     LocalContraction comp(conf, rank, size);
     if (conf.use_contraction) {
-      StaticGraph G(rank, size);
+      StaticGraph G(conf, rank, size);
       IOUtility::LoadGraph(G, conf, rank, size);
       IOUtility::PrintGraphParams(G, conf, rank, size);
 
@@ -101,7 +101,7 @@ int main(int argn, char **argv) {
       // Print labels
       G.OutputComponents(labels);
     } else {
-      DynamicGraphCommunicator G(rank, size);
+      DynamicGraphCommunicator G(conf, rank, size);
       IOUtility::LoadGraph(G, conf, rank, size);
       IOUtility::PrintGraphParams(G, conf, rank, size);
 

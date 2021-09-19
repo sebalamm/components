@@ -4,12 +4,12 @@
 #include "semidynamic_graph_comm.h"
 #include "vertex_comm.h"
   
-SemidynamicGraphCommunicator::SemidynamicGraphCommunicator(const PEID rank, const PEID size) 
-    : SemidynamicGraph(rank, size),
+SemidynamicGraphCommunicator::SemidynamicGraphCommunicator(const Config& conf, const PEID rank, const PEID size) 
+    : SemidynamicGraph(conf, rank, size),
       max_degree_(0),
       max_degree_computed_(false),
       ghost_comm_(nullptr) {
-  ghost_comm_ = new VertexCommunicator<SemidynamicGraphCommunicator>(rank_, size_);
+  ghost_comm_ = new VertexCommunicator<SemidynamicGraphCommunicator>(config_, rank_, size_);
   ghost_comm_->SetGraph(this);
 }
 
@@ -20,7 +20,7 @@ SemidynamicGraphCommunicator::~SemidynamicGraphCommunicator() {
 
 void SemidynamicGraphCommunicator::ResetCommunicator() {
   delete ghost_comm_;
-  ghost_comm_ = new VertexCommunicator<SemidynamicGraphCommunicator>(rank_, size_);
+  ghost_comm_ = new VertexCommunicator<SemidynamicGraphCommunicator>(config_, rank_, size_);
   ghost_comm_->SetGraph(this);
 }
 

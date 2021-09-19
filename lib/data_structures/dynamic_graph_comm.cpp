@@ -4,10 +4,10 @@
 #include "dynamic_graph_comm.h"
 #include "vertex_comm.h"
   
-DynamicGraphCommunicator::DynamicGraphCommunicator(const PEID rank, const PEID size) 
-    : DynamicGraph(rank, size), 
+DynamicGraphCommunicator::DynamicGraphCommunicator(const Config& conf, const PEID rank, const PEID size) 
+    : DynamicGraph(conf, rank, size), 
       ghost_comm_(nullptr) {
-  ghost_comm_ = new VertexCommunicator<DynamicGraphCommunicator>(rank_, size_);
+  ghost_comm_ = new VertexCommunicator<DynamicGraphCommunicator>(config_, rank_, size_);
   ghost_comm_->SetGraph(this);
 }
 
@@ -17,7 +17,7 @@ DynamicGraphCommunicator::~DynamicGraphCommunicator() {
 }
 
 void DynamicGraphCommunicator::ResetCommunicator() {
-  ghost_comm_ = new VertexCommunicator<DynamicGraphCommunicator>(rank_, size_);
+  ghost_comm_ = new VertexCommunicator<DynamicGraphCommunicator>(config_, rank_, size_);
   ghost_comm_->SetGraph(this);
 }
 

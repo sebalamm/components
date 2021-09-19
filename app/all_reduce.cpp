@@ -41,7 +41,7 @@ int main(int argn, char **argv) {
   ParseParameters(argn, argv, conf);
   int initial_seed = conf.seed;
 
-  StaticGraph G(rank, size);
+  StaticGraph G(conf, rank, size);
   IOUtility::LoadGraph(G, conf, rank, size);
   IOUtility::PrintGraphParams(G, conf, rank, size);
 

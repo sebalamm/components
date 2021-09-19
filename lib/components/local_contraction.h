@@ -56,7 +56,7 @@ class LocalContraction {
       FindLocalComponents(g, g_labels);
 
       CAGBuilder<StaticGraph> 
-        first_contraction(g, g_labels, rank_, size_);
+        first_contraction(g, g_labels, config_, rank_, size_);
       auto cag = first_contraction.BuildComponentAdjacencyGraph<StaticGraph>();
       OutputStats<StaticGraph>(cag);
 
@@ -64,19 +64,19 @@ class LocalContraction {
       FindLocalComponents(cag, cag_labels);
 
       CAGBuilder<StaticGraph>
-        second_contraction(cag, cag_labels, rank_, size_);
+        second_contraction(cag, cag_labels, config_, rank_, size_);
       auto ccag = second_contraction.BuildComponentAdjacencyGraph<DynamicGraphCommunicator>();
       OutputStats<DynamicGraphCommunicator>(ccag);
 
       // Keep contraction labeling for later
-      local_contraction_ = new DynamicContraction(ccag, rank_, size_);
+      local_contraction_ = new DynamicContraction(ccag, config_, rank_, size_);
 
       PerformDecomposition(ccag);
 
       ApplyToLocalComponents(ccag, cag, cag_labels);
       ApplyToLocalComponents(cag, cag_labels, g, g_labels);
     } else if constexpr (std::is_same<GraphType, DynamicGraphCommunicator>::value) {
-      local_contraction_ = new DynamicContraction(g, rank_, size_);
+      local_contraction_ = new DynamicContraction(g, config_, rank_, size_);
 
       PerformDecomposition(g);
 
@@ -117,13 +117,13 @@ class LocalContraction {
       else 
         RunContraction(g);
     }
-    if (rank_ == ROOT) {
-      std::cout << "[STATUS] |- Running contraction done" << std::endl;
+    if (rank_ == ROOT || config_.print_verbose) {
+      std::cout << "[STATUS] |- R" << rank_ << " Running contraction done" << std::endl;
     }
 
     local_contraction_->UndoContraction();
-    if (rank_ == ROOT) {
-      std::cout << "[STATUS] |- Undoing contraction done" << std::endl;
+    if (rank_ == ROOT || config_.print_verbose) {
+      std::cout << "[STATUS] |- R" << rank_ << " Undoing contraction done" << std::endl;
     }
   }
 
@@ -148,13 +148,13 @@ class LocalContraction {
 
   void RunContraction(DynamicGraphCommunicator &g) {
     VertexID global_vertices = g.GatherNumberOfGlobalVertices();
-    if (rank_ == ROOT) {
+    if (rank_ == ROOT || config_.print_verbose) {
       if (iteration_ == 1)
-        std::cout << "[STATUS] |-- Iteration " << iteration_ 
+        std::cout << "[STATUS] |-- R" << rank_ << " Iteration " << iteration_ 
                   << " [TIME] " << "-" 
                   << " [ADD] " << global_vertices << std::endl;
       else
-        std::cout << "[STATUS] |-- Iteration " << iteration_ 
+        std::cout << "[STATUS] |-- R" << rank_ << " Iteration " << iteration_ 
                   << " [TIME] " << iteration_timer_.Elapsed() 
                   << " [ADD] " << global_vertices << std::endl;
     }
@@ -181,8 +181,8 @@ class LocalContraction {
 #endif
     });
     g.SendAndReceiveGhostVertices();
-    if (rank_ == ROOT) {
-      std::cout << "[STATUS] |-- Computing and exchanging deviates done" << std::endl;
+    if (rank_ == ROOT || config_.print_verbose) {
+      std::cout << "[STATUS] |-- R" << rank_ << " Computing and exchanging deviates done" << std::endl;
     }
 
     // Perform update for local vertices
@@ -261,13 +261,13 @@ class LocalContraction {
     // Receive variates
     g.SendAndReceiveGhostVertices();
 
-    if (rank_ == ROOT) std::cout << "done propagating... mem " << Utility::GetFreePhysMem() << std::endl;
+    // if (rank_ == ROOT) std::cout << "done propagating... mem " << Utility::GetFreePhysMem() << std::endl;
 
     // Determine remaining active vertices
     local_contraction_->LocalContraction(initial_parents);
 
-    if (rank_ == ROOT) {
-      std::cout << "[STATUS] |-- Local contraction done" << std::endl;
+    if (rank_ == ROOT || config_.print_verbose) {
+      std::cout << "[STATUS] |-- R" << rank_ << " Local contraction done" << std::endl;
     }
 
     OutputStats<DynamicGraphCommunicator>(g);

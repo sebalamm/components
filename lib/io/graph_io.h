@@ -80,7 +80,7 @@ class GraphIO {
     ghost_vertices.set_deleted_key(DeleteKey);
     VertexID number_of_ghost_vertices 
       = DetermineGhostVertices(edge_list, from, to, ghost_vertices);
-    if (rank == ROOT) std::cout << "done finding ghosts... mem " << Utility::GetFreePhysMem() << std::endl;
+    // if (rank == ROOT) std::cout << "done finding ghosts... mem " << Utility::GetFreePhysMem() << std::endl;
 
     // Gather number of global vertices
     VertexID number_of_global_vertices = 0;
@@ -109,7 +109,7 @@ class GraphIO {
                        number_of_ghost_vertices, 
                        from);
     }
-    if (rank == ROOT) std::cout << "done start construct... mem " << Utility::GetFreePhysMem() << std::endl;
+    // if (rank == ROOT) std::cout << "done start construct... mem " << Utility::GetFreePhysMem() << std::endl;
 
     // Add vertices for dynamic graphs
     if constexpr (std::is_same<GraphType, DynamicGraphCommunicator>::value
@@ -136,7 +136,7 @@ class GraphIO {
     for (auto &v : ghost_vertices) {
       g.AddGhostVertex(v, GetPEFromOffset(v, vertex_dist, rank));
     }
-    if (rank == ROOT) std::cout << "done adding ghosts... mem " << Utility::GetFreePhysMem() << std::endl;
+    // if (rank == ROOT) std::cout << "done adding ghosts... mem " << Utility::GetFreePhysMem() << std::endl;
 
     // Sort edges for static graphs
     if constexpr (std::is_same<GraphType, StaticGraphCommunicator>::value
@@ -147,7 +147,7 @@ class GraphIO {
     for (auto &edge : edge_list) {
       g.AddEdge(g.GetLocalID(edge.first), edge.second, GetPEFromOffset(edge.second, vertex_dist, rank));
     }
-    if (rank == ROOT) std::cout << "done adding edges... mem " << Utility::GetFreePhysMem() << std::endl;
+    // if (rank == ROOT) std::cout << "done adding edges... mem " << Utility::GetFreePhysMem() << std::endl;
 
     g.FinishConstruct();
   }

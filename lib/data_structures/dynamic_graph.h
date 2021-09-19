@@ -46,9 +46,10 @@
 
 class DynamicGraph {
  public:
-  DynamicGraph(const PEID rank, const PEID size)
+  DynamicGraph(const Config& conf, const PEID rank, const PEID size)
     : rank_(rank),
       size_(size),
+      config_(conf),
       number_of_vertices_(0),
       number_of_local_vertices_(0),
       number_of_global_vertices_(0),
@@ -713,6 +714,9 @@ class DynamicGraph {
 
   // Network information
   PEID rank_, size_;
+
+  // Configuration
+  Config config_;
 
   // Vertices and edges
   std::vector<std::vector<Edge>> local_adjacent_edges_;

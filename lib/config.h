@@ -40,6 +40,7 @@ struct Config {
   std::string output_file;
   // Debug output
   std::string debug_output_file;
+  bool print_verbose;
   // Number of vertices/edges
   VertexID n{};
   EdgeID m{};
@@ -59,6 +60,8 @@ struct Config {
   double beta{};
   // BFS
   bool use_bfs;
+  // Communication
+  bool use_regular;
   // Contraction
   bool use_contraction;
   bool direct_contraction;

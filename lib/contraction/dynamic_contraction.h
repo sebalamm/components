@@ -33,10 +33,11 @@
 
 class DynamicContraction {
  public:
-  DynamicContraction(DynamicGraphCommunicator &g, const PEID rank, const PEID size)
+  DynamicContraction(DynamicGraphCommunicator &g, const Config &conf, const PEID rank, const PEID size)
       : g_(g), 
         rank_(rank), 
         size_(size),
+        config_(conf),
         global_num_vertices_(0),
         contraction_level_(0),
         comm_time_(0.0),
@@ -80,7 +81,7 @@ class DynamicContraction {
     while (converged_globally == 0) {
 
       contraction_timer_.Restart();
-      comm_time_ += CommunicationUtility::SparseAllToAll(send_buffers_, receive_buffers_, rank_, size_, ContractionTag + local_iterations);
+      comm_time_ += CommunicationUtility::AllToAll(send_buffers_, receive_buffers_, rank_, size_, ContractionTag + local_iterations, config_.use_regular);
       // std::cout << "[STATUS] |---- R" << rank_ << " Message exchange took " 
       //           << "[TIME] " << contraction_timer_.Elapsed() << std::endl;
       send_volume_ += CommunicationUtility::ClearBuffers(send_buffers_);
@@ -154,7 +155,7 @@ class DynamicContraction {
     // Propagate edge buffers until all vertices are converged
     int num_requests = 0;
 
-    comm_time_ += CommunicationUtility::SparseAllToAll(send_buffers_, receive_buffers_, rank_, size_, ContractionTag);
+    comm_time_ += CommunicationUtility::AllToAll(send_buffers_, receive_buffers_, rank_, size_, ContractionTag, config_.use_regular);
     send_volume_ += CommunicationUtility::ClearBuffers(send_buffers_);
     ProcessDirectMessages();
     recv_volume_ += CommunicationUtility::ClearBuffers(receive_buffers_);
@@ -198,7 +199,7 @@ class DynamicContraction {
     int converged_globally = 0;
     int local_iterations = 0;
     while (converged_globally == 0) {
-      comm_time_ += CommunicationUtility::SparseAllToAll(send_buffers_, receive_buffers_, rank_, size_, ContractionTag + local_iterations);
+      comm_time_ += CommunicationUtility::AllToAll(send_buffers_, receive_buffers_, rank_, size_, ContractionTag + local_iterations, config_.use_regular);
       send_volume_ += CommunicationUtility::ClearBuffers(send_buffers_);
 
       int converged_locally = ProcessLocalMessages(initial_parents);
@@ -216,13 +217,12 @@ class DynamicContraction {
                     MPI_COMM_WORLD);
       comm_time_ += comm_timer_.Elapsed();
       local_iterations++;
-      if (rank_ == ROOT) {
-        std::cout << "[STATUS] |--- Convergence test took " 
+      if (rank_ == ROOT || config_.print_verbose)
+        std::cout << "[STATUS] |--- R" << rank_ << " Convergence test took " 
                   << "[TIME] " << contraction_timer_.Elapsed() << std::endl;
-      }
     }
-    if (rank_ == ROOT) 
-      std::cout << "[STATUS] |---- Propagation done " 
+    if (rank_ == ROOT || config_.print_verbose) 
+      std::cout << "[STATUS] |---- R" << rank_ << " Propagation done " 
                 << "[TIME] " << propagation_timer.Elapsed() << std::endl;
 
     inserted_edges_.clear();
@@ -581,10 +581,9 @@ class DynamicContraction {
       // Update active graph portion
       AddRemovedEdges();
       UpdateGraphVertices();
-      if (rank_ == ROOT) {
-        std::cout << "[STATUS] |-- Updating edges took " 
+      if (rank_ == ROOT || config_.print_verbose)
+        std::cout << "[STATUS] |-- R" << rank_ << " Updating edges took " 
                   << "[TIME] " << contraction_timer_.Elapsed() << std::endl;
-      }
 
       contraction_timer_.Restart();
       // Update local labels
@@ -596,10 +595,9 @@ class DynamicContraction {
 #endif
                                rank_});
       });
-      if (rank_ == ROOT) {
-        std::cout << "[STATUS] |-- Updating payloads took " 
+      if (rank_ == ROOT || config_.print_verbose)
+        std::cout << "[STATUS] |-- R" << rank_ << " Updating payloads took " 
                   << "[TIME] " << contraction_timer_.Elapsed() << std::endl;
-      }
 
       // Propagate labels
       int converged_globally = 0;
@@ -622,10 +620,9 @@ class DynamicContraction {
             converged_locally = 0;
           }
         });
-        if (rank_ == ROOT) {
-          std::cout << "[STATUS] |--- Message exchange took " 
+        if (rank_ == ROOT || config_.print_verbose) 
+          std::cout << "[STATUS] |--- R" << rank_ << " Message exchange took " 
                     << "[TIME] " << contraction_timer_.Elapsed() << std::endl;
-        }
 
         // Check if all PEs are done
         contraction_timer_.Restart();
@@ -637,10 +634,9 @@ class DynamicContraction {
                       MPI_MIN,
                       MPI_COMM_WORLD);
         comm_time_ += comm_timer_.Elapsed();
-        if (rank_ == ROOT) {
-          std::cout << "[STATUS] |--- Convergence test took " 
+        if (rank_ == ROOT || config_.print_verbose)
+          std::cout << "[STATUS] |--- R" << rank_ << " Convergence test took " 
                     << "[TIME] " << contraction_timer_.Elapsed() << std::endl;
-        }
       }
       // Vertices at current level are roots at previous one
       g_.ForallLocalVertices([&](VertexID v) {
@@ -680,6 +676,9 @@ class DynamicContraction {
 
   // Network information
   PEID rank_, size_;
+
+  // Configuration
+  Config config_;
 
   // Variables
   VertexID contraction_level_;

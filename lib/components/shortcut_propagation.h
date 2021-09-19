@@ -55,7 +55,7 @@ class ShortcutPropagation {
       FindLocalComponents(g, g_labels);
 
       CAGBuilder<StaticGraph> 
-        first_contraction(g, g_labels, rank_, size_);
+        first_contraction(g, g_labels, config_, rank_, size_);
       auto cag = first_contraction.BuildComponentAdjacencyGraph<StaticGraph>();
       OutputStats<StaticGraph>(cag);
 
@@ -64,7 +64,7 @@ class ShortcutPropagation {
       FindLocalComponents(cag, cag_labels);
 
       CAGBuilder<StaticGraph> 
-        second_contraction(cag, cag_labels, rank_, size_);
+        second_contraction(cag, cag_labels, config_, rank_, size_);
       auto ccag = second_contraction.BuildComponentAdjacencyGraph<StaticGraphCommunicator>();
       OutputStats<StaticGraphCommunicator>(ccag);
 
@@ -115,16 +115,19 @@ class ShortcutPropagation {
     // Iterate until converged
     do {
       iteration_timer_.Restart();
-      if (rank_ == ROOT) std::cout << "[STATUS] Starting iteration " << iteration_ << std::endl;
+      if (rank_ == ROOT || config_.print_verbose) 
+        std::cout << "[STATUS] R" << rank_ << " Starting iteration " << iteration_ << std::endl;
       PropagateLabels(g);
       FindMinLabels(g);
       if (number_of_hitters_ > 0) 
         FindHeavyHitters(g);
-      if (rank_ == ROOT) std::cout << "[STATUS] |- Propagating labels took " 
+      if (rank_ == ROOT || config_.print_verbose) 
+        std::cout << "[STATUS] |- R" << rank_ << " Propagating labels took " 
                                    << "[TIME] " << iteration_timer_.Elapsed() << std::endl;
       Shortcut(g);
-      if (rank_ == ROOT) std::cout << "[STATUS] |- Building shortcuts took " 
-                                   << "[TIME] " << iteration_timer_.Elapsed() << std::endl;
+      if (rank_ == ROOT || config_.print_verbose) 
+        std::cout << "[STATUS] |- R" << rank_ << " Building shortcuts took " 
+                  << "[TIME] " << iteration_timer_.Elapsed() << std::endl;
       OutputStats<StaticGraphCommunicator>(g);
 
       iteration_++;
@@ -230,8 +233,9 @@ class ShortcutPropagation {
       update_lists[labels_[v]].emplace_back(v);
     });
 
-    if (rank_ == ROOT) std::cout << "[STATUS] |-- Filling buffers took " 
-                                 << "[TIME] " << shortcut_timer_.Elapsed() << std::endl;
+    if (rank_ == ROOT || config_.print_verbose) 
+      std::cout << "[STATUS] |-- R" << rank_ << " Filling buffers took " 
+                << "[TIME] " << shortcut_timer_.Elapsed() << std::endl;
 
     // Send updates and requests
     int num_requests = 0;
@@ -253,8 +257,9 @@ class ShortcutPropagation {
       }
     }
 
-    if (rank_ == ROOT) std::cout << "[STATUS] |-- Sending buffers took " 
-                                 << "[TIME] " << shortcut_timer_.Elapsed() << std::endl;
+    if (rank_ == ROOT || config_.print_verbose) 
+      std::cout << "[STATUS] |-- R" << rank_ << " Sending buffers took " 
+                << "[TIME] " << shortcut_timer_.Elapsed() << std::endl;
 
     // Process local requests
     shortcut_timer_.Restart();
@@ -266,8 +271,9 @@ class ShortcutPropagation {
       }
     }
 
-    if (rank_ == ROOT) std::cout << "[STATUS] |-- Resolving local requests took " 
-                                 << "[TIME] " << shortcut_timer_.Elapsed() << std::endl;
+    if (rank_ == ROOT || config_.print_verbose) 
+      std::cout << "[STATUS] |-- R" << rank_ << " Resolving local requests took " 
+                << "[TIME] " << shortcut_timer_.Elapsed() << std::endl;
 
     shortcut_timer_.Restart();
     std::vector<MPI_Status> statuses(num_requests);
@@ -338,8 +344,9 @@ class ShortcutPropagation {
       MPI_Test(&barrier_request, &ibarrier_done, &tst);
     }
 
-    if (rank_ == ROOT) std::cout << "[STATUS] |-- Resolving remote requests took " 
-                                 << "[TIME] " << shortcut_timer_.Elapsed() << std::endl;
+    if (rank_ == ROOT || config_.print_verbose) 
+      std::cout << "[STATUS] |-- R" << rank_ << " Resolving remote requests took " 
+                << "[TIME] " << shortcut_timer_.Elapsed() << std::endl;
 
     num_requests = 0;
     for (const auto &kv : request_buffers) {
@@ -361,8 +368,9 @@ class ShortcutPropagation {
       }
     }
 
-    if (rank_ == ROOT) std::cout << "[STATUS] |-- Sending updates/answers took " 
-                                 << "[TIME] " << shortcut_timer_.Elapsed() << std::endl;
+    if (rank_ == ROOT || config_.print_verbose) 
+      std::cout << "[STATUS] |-- R" << rank_ << " Sending updates/answers took " 
+                << "[TIME] " << shortcut_timer_.Elapsed() << std::endl;
 
     // Process request answers
     // Process local answers
@@ -381,8 +389,9 @@ class ShortcutPropagation {
       }
     }
 
-    if (rank_ == ROOT) std::cout << "[STATUS] |-- Resolving local answers took " 
-                                 << "[TIME] " << shortcut_timer_.Elapsed() << std::endl;
+    if (rank_ == ROOT || config_.print_verbose) 
+      std::cout << "[STATUS] |-- R" << rank_ << " Resolving local answers took " 
+                << "[TIME] " << shortcut_timer_.Elapsed() << std::endl;
 
     // Process remote answers
     shortcut_timer_.Restart();
@@ -461,8 +470,9 @@ class ShortcutPropagation {
       }
     }
 
-    if (rank_ == ROOT) std::cout << "[STATUS] |-- Resolving remote answers took " 
-                                 << "[TIME] " << shortcut_timer_.Elapsed() << std::endl;
+    if (rank_ == ROOT || config_.print_verbose) 
+      std::cout << "[STATUS] |-- R" << rank_ << " Resolving remote answers took " 
+                << "[TIME] " << shortcut_timer_.Elapsed() << std::endl;
 
     CheckRequests(answer_requests);
     CheckRequests(update_requests);
