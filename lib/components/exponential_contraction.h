@@ -78,7 +78,8 @@ class ExponentialContraction {
         auto cag 
           = contraction.BuildComponentAdjacencyGraph<DynamicGraphCommunicator>();
         cag.ResetCommunicator();
-        OutputStats<DynamicGraphCommunicator>(cag);
+        if (config_.output_stats) 
+          OutputStats<DynamicGraphCommunicator>(cag);
         if (rank_ == ROOT || config_.print_verbose) 
           std::cout << "[STATUS] |- R" << rank_ << " Building cag took " 
                     << "[TIME] " << contraction_timer_.Elapsed() << std::endl;
@@ -86,11 +87,13 @@ class ExponentialContraction {
         if (config_.replicate_high_degree) {
           contraction_timer_.Restart();
           DistributeHighDegreeVertices(cag);
-          OutputStats<DynamicGraphCommunicator>(cag);
+          if (config_.output_stats) 
+            OutputStats<DynamicGraphCommunicator>(cag);
           if (rank_ == ROOT || config_.print_verbose) 
             std::cout << "[STATUS] |- R" << rank_ << " Distributing high degree vertices took " 
                       << "[TIME] " << contraction_timer_.Elapsed() << std::endl;
-          IOUtility::PrintGraphParams(cag, config_, rank_, size_);
+          if (config_.output_stats) 
+            IOUtility::PrintGraphParams(cag, config_, rank_, size_);
         }
 
         // Keep contraction labeling for later
@@ -124,7 +127,8 @@ class ExponentialContraction {
           first_contraction(g, g_labels, config_, rank_, size_);
         auto cag 
           = first_contraction.BuildComponentAdjacencyGraph<StaticGraph>();
-        OutputStats<StaticGraph>(cag);
+        if (config_.output_stats) 
+          OutputStats<StaticGraph>(cag);
         if (rank_ == ROOT || config_.print_verbose)
           std::cout << "[STATUS] |- R" << rank_ << " Building first cag took " 
                     << "[TIME] " << contraction_timer_.Elapsed() << std::endl;
@@ -144,7 +148,8 @@ class ExponentialContraction {
         auto ccag 
           = second_contraction.BuildComponentAdjacencyGraph<DynamicGraphCommunicator>();
         ccag.ResetCommunicator();
-        OutputStats<DynamicGraphCommunicator>(ccag);
+        if (config_.output_stats) 
+          OutputStats<DynamicGraphCommunicator>(ccag);
         if (rank_ == ROOT || config_.print_verbose)
           std::cout << "[STATUS] |- R" << rank_ << " Building second cag took " 
                     << "[TIME] " << contraction_timer_.Elapsed() << std::endl;
@@ -152,11 +157,13 @@ class ExponentialContraction {
         if (config_.replicate_high_degree) {
           contraction_timer_.Restart();
           DistributeHighDegreeVertices(ccag);
-          OutputStats<DynamicGraphCommunicator>(ccag);
+          if (config_.output_stats) 
+            OutputStats<DynamicGraphCommunicator>(ccag);
           if (rank_ == ROOT || config_.print_verbose)
             std::cout << "[STATUS] |- R" << rank_ << " Distributing high degree vertices took " 
                       << "[TIME] " << contraction_timer_.Elapsed() << std::endl;
-          IOUtility::PrintGraphParams(ccag, config_, rank_, size_);
+          if (config_.output_stats) 
+            IOUtility::PrintGraphParams(ccag, config_, rank_, size_);
         }
 
         // Keep contraction labeling for later
@@ -192,7 +199,8 @@ class ExponentialContraction {
         auto lcag 
           = local_contraction.BuildLocalComponentGraph<DynamicGraphCommunicator>();
         lcag.ResetCommunicator();
-        OutputStats<DynamicGraphCommunicator>(lcag);
+        if (config_.output_stats) 
+          OutputStats<DynamicGraphCommunicator>(lcag);
         if (rank_ == ROOT || config_.print_verbose)
           std::cout << "[STATUS] |- R" << rank_ << " Building local cag took " 
                     << "[TIME] " << contraction_timer_.Elapsed() << std::endl;
@@ -201,11 +209,13 @@ class ExponentialContraction {
           contraction_timer_.Restart();
           DistributeHighDegreeVertices(lcag);
           // SampleHighDegreeNeighborhoods(lcag);
-          OutputStats<DynamicGraphCommunicator>(lcag);
+          if (config_.output_stats) 
+            OutputStats<DynamicGraphCommunicator>(lcag);
           if (rank_ == ROOT || config_.print_verbose)
             std::cout << "[STATUS] |- R" << rank_ << " Distributing high degree vertices took " 
                       << "[TIME] " << contraction_timer_.Elapsed() << std::endl;
-          IOUtility::PrintGraphParams(lcag, config_, rank_, size_);
+          if (config_.output_stats) 
+            IOUtility::PrintGraphParams(lcag, config_, rank_, size_);
 
           contraction_timer_.Restart();
           google::dense_hash_map<VertexID, VertexID> lcag_labels;
@@ -224,7 +234,8 @@ class ExponentialContraction {
           auto hd_lcag 
             = local_contraction.BuildLocalComponentGraph<DynamicGraphCommunicator>();
           hd_lcag.ResetCommunicator();
-          OutputStats<DynamicGraphCommunicator>(lcag);
+          if (config_.output_stats) 
+            OutputStats<DynamicGraphCommunicator>(lcag);
           if (rank_ == ROOT || config_.print_verbose)
             std::cout << "[STATUS] |- R" << rank_ << " Building high degree local cag took " 
                       << "[TIME] " << contraction_timer_.Elapsed() << std::endl;
@@ -544,9 +555,8 @@ class ExponentialContraction {
       std::cout << "[STATUS] |-- R" << rank_ << " Exponential contraction took " 
                 << "[TIME] " << contraction_timer_.Elapsed() << std::endl;
 
-    // if (rank_ == ROOT) 
-    //   std::cout << "done contraction... mem " << Utility::GetFreePhysMem() << std::endl;
-    OutputStats<DynamicGraphCommunicator>(g);
+    if (config_.output_stats) 
+      OutputStats<DynamicGraphCommunicator>(g);
 
     // Count remaining number of vertices
     VertexID global_edges = g.GatherNumberOfGlobalEdges();
@@ -765,9 +775,8 @@ class ExponentialContraction {
       std::cout << "[STATUS] |-- R" << rank_ << " Exponential contraction took " 
                 << "[TIME] " << contraction_timer_.Elapsed() << std::endl;
 
-    // if (rank_ == ROOT) 
-    //   std::cout << "done contraction... mem " << Utility::GetFreePhysMem() << std::endl;
-    OutputStats<DynamicGraphCommunicator>(g);
+    if (config_.output_stats) 
+      OutputStats<DynamicGraphCommunicator>(g);
 
     // Count remaining number of vertices
     VertexID global_edges = g.GatherNumberOfGlobalEdges();
@@ -889,7 +898,7 @@ class ExponentialContraction {
                                          const VertexID &avg_max_deg,
                                          std::vector<std::pair<VertexID, VertexID>> &high_degree_vertices) {
     // Compute offset for IDs of replicated vertices
-    VertexID num_global_vertices = g.GatherNumberOfGlobalVertices();
+    VertexID num_global_vertices = g.GatherNumberOfGlobalVertices(false);
     global_repl_offset_ = num_global_vertices;
 
     // Default buffers for message exchange

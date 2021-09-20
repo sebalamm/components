@@ -57,7 +57,8 @@ class ShortcutPropagation {
       CAGBuilder<StaticGraph> 
         first_contraction(g, g_labels, config_, rank_, size_);
       auto cag = first_contraction.BuildComponentAdjacencyGraph<StaticGraph>();
-      OutputStats<StaticGraph>(cag);
+      if (config_.output_stats) 
+        OutputStats<StaticGraph>(cag);
 
       // Keep contraction labeling for later
       std::vector<VertexID> cag_labels(cag.GetNumberOfVertices(), 0);
@@ -66,7 +67,8 @@ class ShortcutPropagation {
       CAGBuilder<StaticGraph> 
         second_contraction(cag, cag_labels, config_, rank_, size_);
       auto ccag = second_contraction.BuildComponentAdjacencyGraph<StaticGraphCommunicator>();
-      OutputStats<StaticGraphCommunicator>(ccag);
+      if (config_.output_stats) 
+        OutputStats<StaticGraphCommunicator>(ccag);
 
       PerformShortcutting(ccag);
 
