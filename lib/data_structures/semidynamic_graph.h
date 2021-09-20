@@ -344,7 +344,7 @@ class SemidynamicGraph {
 
   // TODO: Not sure if this works
   inline void AddDuplicateVertex(VertexID global_id) {
-    local_duplicate_id_ = AddVertex();
+    local_duplicate_id_ = 0;
     global_duplicate_id_ = global_id;
   }
 
@@ -595,6 +595,18 @@ class SemidynamicGraph {
 
   inline VertexID GetReceiveVolume() {
     return recv_volume_;
+  }
+
+  inline void ResetCommTime() {
+    comm_time_ = 0.0;
+  }
+
+  inline void ResetSendVolume() {
+    send_volume_ = 0;
+  }
+
+  inline void ResetReceiveVolume() {
+    recv_volume_ = 0;
   }
 
  protected:

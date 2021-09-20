@@ -211,6 +211,7 @@ class ExponentialContraction {
           google::dense_hash_map<VertexID, VertexID> lcag_labels;
           lcag_labels.set_empty_key(EmptyKey);
           lcag_labels.set_deleted_key(DeleteKey);
+          // TODO: This doesn't work since the vector is too small
           FindLocalComponents<DynamicGraphCommunicator>(lcag, lcag_labels);
           if (rank_ == ROOT || config_.print_verbose)
             std::cout << "[STATUS] |- R" << rank_ << " Finding local components on lcag took " 
@@ -447,10 +448,14 @@ class ExponentialContraction {
                              g.GetVertexRoot(v)},
                          true);
     }
+    if (rank_ == ROOT || config_.print_verbose)
+      std::cout << "[STATUS] |-- R" << rank_ << " Computing deviates took " 
+                << "[TIME] " << contraction_timer_.Elapsed() << std::endl;
     
+    contraction_timer_.Restart();
     g.SendAndReceiveGhostVertices();
     if (rank_ == ROOT || config_.print_verbose)
-      std::cout << "[STATUS] |-- R" << rank_ << " Computing and exchanging deviates took " 
+      std::cout << "[STATUS] |-- R" << rank_ << " Exchanging deviates took " 
                 << "[TIME] " << contraction_timer_.Elapsed() << std::endl;
 
     VertexID exchange_rounds = 0;

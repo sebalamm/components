@@ -369,47 +369,30 @@ class CAGBuilder {
     google::dense_hash_map<PEID, google::sparse_hash_set<VertexID>> unique_neighbors;
     unique_neighbors.set_empty_key(EmptyKey);
     unique_neighbors.set_deleted_key(DeleteKey);
-    google::dense_hash_set<VertexID> targets;
-    targets.set_empty_key(EmptyKey);
-    targets.set_deleted_key(DeleteKey);
-    VertexID buffer_size = 0;
-    VertexID num_checks = 0;
-    VertexID num_edges = 0;
-    VertexID messages_for_vertex = 0;
-    VertexID max_messages = 0;
     g_.ForallLocalVertices([&](const VertexID v) {
       if (g_.IsInterface(v)) {
         google::dense_hash_set<PEID> receiving_pes;
         receiving_pes.set_empty_key(EmptyKey);
         receiving_pes.set_deleted_key(DeleteKey);
-        messages_for_vertex = 0;
         g_.ForallNeighbors(v, [&](const VertexID w) {
           if (!g_.IsLocal(w)) {
             PEID target_pe = g_.GetPE(w);
             VertexID contraction_vertex = g_.GetContractionVertex(v);
             VertexID largest_component = send_buffers_[target_pe][1];
-            num_edges++;
             // Only send message if not part of largest component
             if (contraction_vertex != largest_component) {
               // Avoid duplicates by hashing the message
               VertexID comp_pair = pair(w, contraction_vertex);
-              num_checks++;
-              if (targets.find(w) == targets.end()) {
-                targets.insert(w);
-              }
               if (unique_neighbors[target_pe].find(comp_pair) == end(unique_neighbors[target_pe]) 
                 && receiving_pes.find(target_pe) == end(receiving_pes)) {
                 unique_neighbors[target_pe].insert(comp_pair);
                 receiving_pes.insert(target_pe);
                 send_buffers_[target_pe].push_back(g_.GetGlobalID(v));
                 send_buffers_[target_pe].push_back(contraction_vertex);
-                messages_for_vertex++;
-                buffer_size++;
               }
             }
           }
         });
-        if (messages_for_vertex > max_messages) max_messages = messages_for_vertex;
       }
     });
   }

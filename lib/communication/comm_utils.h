@@ -185,8 +185,8 @@ class CommunicationUtility {
   static VertexID ClearBuffers(google::dense_hash_map<PEID, VertexBuffer> &buffers) {
     VertexID messages = 0;
     for (auto &kv: buffers) {
-      kv.second.clear();
       messages += kv.second.size();
+      kv.second.clear();
     }
     buffers.clear();
     return messages;

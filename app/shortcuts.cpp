@@ -97,6 +97,11 @@ int main(int argn, char **argv) {
     if (conf.use_contraction) {
       StaticGraph CG = SG;
 
+      // Reset timers
+      CG.ResetCommTime();
+      CG.ResetSendVolume();
+      CG.ResetReceiveVolume();
+
       // Determine labels
       std::vector<VertexID> labels(CG.GetNumberOfVertices(), 0);
       CG.ForallLocalVertices([&](const VertexID v) {
@@ -111,6 +116,11 @@ int main(int argn, char **argv) {
     } else {
       StaticGraphCommunicator CG = SGC;
       CG.ResetCommunicator();
+
+      // Reset timers
+      CG.ResetCommTime();
+      CG.ResetSendVolume();
+      CG.ResetReceiveVolume();
 
       // Determine labels
       std::vector<VertexID> labels(CG.GetNumberOfVertices(), 0);

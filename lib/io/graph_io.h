@@ -462,7 +462,8 @@ class GraphIO {
             duplicate_ghosts.emplace_back(prev_range_last, prev_last_pe);
           }
         }
-        VertexID duplicate_id = (4 * number_of_global_vertices) * (i + size);
+        // VertexID duplicate_id = (4 * number_of_global_vertices) * (i + size);
+        VertexID duplicate_id = number_of_global_vertices * (i + size);
         vertex_ranges[prev_range_last].emplace_back(current_vertex_range_first, current_vertex_range_last, duplicate_id, i);
         if (i != rank) {
           // g.AddGhostVertex(duplicate_id, i);
@@ -543,7 +544,7 @@ class GraphIO {
     VertexID number_of_ghost_vertices = ghost_vertices.size();
     if constexpr (std::is_same<GraphType, StaticGraphCommunicator>::value
                   || std::is_same<GraphType, StaticGraph>::value) {
-      g.StartConstruct(number_of_local_vertices + duplicate_locals.size(),
+      g.StartConstruct(number_of_local_vertices,
                        number_of_ghost_vertices + duplicate_ghosts.size(),
                        edge_list.size(),
                        first_vertex); 

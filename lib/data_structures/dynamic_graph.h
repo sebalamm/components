@@ -676,6 +676,18 @@ class DynamicGraph {
     return recv_volume_;
   }
 
+  inline void ResetCommTime() {
+    comm_time_ = 0.0;
+  }
+
+  inline void ResetSendVolume() {
+    send_volume_ = 0;
+  }
+
+  inline void ResetReceiveVolume() {
+    recv_volume_ = 0;
+  }
+
  protected:
   // Structs
   struct Vertex {

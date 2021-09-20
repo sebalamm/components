@@ -373,8 +373,7 @@ class StaticGraph {
   inline void AddDuplicateVertex(VertexID original_id, VertexID global_id) {
     // "Remap" duplicate
     original_duplicate_id_ = original_id;
-    // TODO: Local duplicate is now the last before ghosts?
-    local_duplicate_id_ = ghost_offset_ - 1;
+    local_duplicate_id_ = 0;
     global_duplicate_id_ = global_id;
     // std::cout << "R" << rank_ << " insert duplicate orig=" << original_id << " gid=" << global_duplicate_id_ << " lid=" << local_duplicate_id_ << std::endl;
   }
@@ -584,6 +583,18 @@ class StaticGraph {
 
   inline VertexID GetReceiveVolume() {
     return recv_volume_;
+  }
+
+  inline void ResetCommTime() {
+    comm_time_ = 0.0;
+  }
+
+  inline void ResetSendVolume() {
+    send_volume_ = 0;
+  }
+
+  inline void ResetReceiveVolume() {
+    recv_volume_ = 0;
   }
 
  protected:

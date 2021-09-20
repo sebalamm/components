@@ -85,11 +85,17 @@ int main(int argn, char **argv) {
     ExponentialContraction comp(conf, rank, size);
     StaticGraph CG = SG;
 
+    // Reset timers
+    CG.ResetCommTime();
+    CG.ResetSendVolume();
+    CG.ResetReceiveVolume();
+
     // Determine labels
     std::vector<VertexID> labels(CG.GetNumberOfVertices(), 0);
     CG.ForallLocalVertices([&](const VertexID v) {
       labels[v] = CG.GetGlobalID(v);
     });
+
     t.Restart();
     comp.FindComponents(CG, labels);
     local_time = t.Elapsed();
@@ -115,14 +121,14 @@ int main(int argn, char **argv) {
     VertexID total_send_volume = 0;
     MPI_Reduce(&send_volume, &total_send_volume, 1, MPI_LONG, MPI_SUM, ROOT,
                MPI_COMM_WORLD);
-    send_stats.Push(comm_time);
+    send_stats.Push(send_volume);
     if (rank == ROOT) global_send_stats.Push(total_send_volume);
 
     VertexID recv_volume = comp.GetReceiveVolume();
     VertexID total_recv_volume = 0;
     MPI_Reduce(&recv_volume, &total_recv_volume, 1, MPI_LONG, MPI_SUM, ROOT,
                MPI_COMM_WORLD);
-    recv_stats.Push(comm_time);
+    recv_stats.Push(recv_volume);
     if (rank == ROOT) global_recv_stats.Push(total_recv_volume);
   }
 
