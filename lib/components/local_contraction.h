@@ -58,8 +58,9 @@ class LocalContraction {
       CAGBuilder<StaticGraph> 
         first_contraction(g, g_labels, config_, rank_, size_);
       auto cag = first_contraction.BuildComponentAdjacencyGraph<StaticGraph>();
-      if (config_.output_stats) 
-        OutputStats<StaticGraph>(cag);
+#ifndef NDEBUG
+      OutputStats<StaticGraph>(cag);
+#endif
 
       std::vector<VertexID> cag_labels(cag.GetNumberOfVertices(), 0);
       FindLocalComponents(cag, cag_labels);
@@ -67,8 +68,9 @@ class LocalContraction {
       CAGBuilder<StaticGraph>
         second_contraction(cag, cag_labels, config_, rank_, size_);
       auto ccag = second_contraction.BuildComponentAdjacencyGraph<DynamicGraphCommunicator>();
-      if (config_.output_stats) 
-        OutputStats<DynamicGraphCommunicator>(ccag);
+#ifndef NDEBUG
+      OutputStats<DynamicGraphCommunicator>(ccag);
+#endif
 
       // Keep contraction labeling for later
       local_contraction_ = new DynamicContraction(ccag, config_, rank_, size_);
@@ -272,8 +274,9 @@ class LocalContraction {
       std::cout << "[STATUS] |-- R" << rank_ << " Local contraction done" << std::endl;
     }
 
-    if (config_.output_stats) 
-      OutputStats<DynamicGraphCommunicator>(g);
+#ifndef NDEBUG
+    OutputStats<DynamicGraphCommunicator>(g);
+#endif
 
     // Count remaining number of vertices
     global_vertices = g.GatherNumberOfGlobalVertices();

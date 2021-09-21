@@ -41,7 +41,6 @@ struct Config {
   // Debug output
   std::string debug_output_file;
   bool print_verbose;
-  bool output_stats;
   // Number of vertices/edges
   VertexID n{};
   EdgeID m{};

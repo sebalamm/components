@@ -52,20 +52,20 @@ class AllReduce {
     // Perform gather of graph on root 
     GatherGraphOnRoot(g);
     if (rank_ == ROOT || config_.print_verbose)
-      std::cout << "[STATUS] |-- Gather on root took " 
+      std::cout << "[STATUS] |-- R" << rank_ << " Gather on root took " 
                 << "[TIME] " << contraction_timer_.Elapsed() << std::endl;
     
     contraction_timer_.Restart();
     FindComponentsOnRoot();
     if (rank_ == ROOT || config_.print_verbose)
-      std::cout << "[STATUS] |-- Local computation on root took " 
+      std::cout << "[STATUS] |-- R" << rank_ << " Local computation on root took " 
                 << "[TIME] " << contraction_timer_.Elapsed() << std::endl;
 
     contraction_timer_.Restart();
     // Distribute labels to other PEs
     DistributeLabelsFromRoot(g, g_labels);
     if (rank_ == ROOT || config_.print_verbose)
-      std::cout << "[STATUS] |-- Distributing graph from root took " 
+      std::cout << "[STATUS] |-- R" << rank_ << " Distributing graph from root took " 
                 << "[TIME] " << contraction_timer_.Elapsed() << std::endl;
   }
 

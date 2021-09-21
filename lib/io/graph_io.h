@@ -856,9 +856,6 @@ class GraphIO {
     }
 
     g.FinishConstruct();
-    // g.OutputLocal();
-    // MPI_Barrier(MPI_COMM_WORLD);
-    // exit(1);
   }
 
   template<typename GraphType>
@@ -1122,9 +1119,6 @@ class GraphIO {
     }
 
     g.FinishConstruct();
-    // g.OutputLocal();
-    // MPI_Barrier(MPI_COMM_WORLD);
-    // exit(1);
   }
 
   static PEID GetPEFromOffset(const VertexID v, 

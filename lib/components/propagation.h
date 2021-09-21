@@ -46,33 +46,10 @@ class Propagation {
   virtual ~Propagation() = default;
 
   void FindComponents(StaticGraphCommunicator &g, std::vector<VertexID> &g_labels) {
-    if (config_.use_contraction) {
-      // FindLocalComponents(g, g_labels);
-
-      // CAGBuilder<StaticGraphCommunicator> 
-      //   first_contraction(g, g_labels, rank_, size_);
-      // StaticGraphCommunicator cag = first_contraction.BuildDynamicComponentAdjacencyGraph();
-      // OutputStats<StaticGraphCommunicator>(cag);
-
-      // // Keep contraction labeling for later
-      // std::vector<VertexID> cag_labels(cag.GetNumberOfVertices(), 0);
-      // FindLocalComponents(cag, cag_labels);
-
-      // CAGBuilder<StaticGraphCommunicator> 
-      //   second_contraction(cag, cag_labels, rank_, size_);
-      // StaticGraphCommunicator ccag = second_contraction.BuildDynamicComponentAdjacencyGraph();
-      // OutputStats<StaticGraphCommunicator>(ccag);
-
-      // PerformPropagation(ccag);
-
-      // ApplyToLocalComponents(ccag, cag, cag_labels);
-      // ApplyToLocalComponents(cag, cag_labels, g, g_labels);
-    } else {
-      PerformPropagation(g);
-      g.ForallLocalVertices([&](const VertexID v) {
-          g_labels[v] = g.GetVertexLabel(v);
-      });
-    }
+    PerformPropagation(g);
+    g.ForallLocalVertices([&](const VertexID v) {
+        g_labels[v] = g.GetVertexLabel(v);
+    });
   }
 
   void Output(StaticGraphCommunicator &g) {
@@ -99,7 +76,9 @@ class Propagation {
       PropagateLabels(g);
       FindMinLabels(g);
 
+#ifndef NDEBUG
       OutputStats<StaticGraphCommunicator>(g);
+#endif
 
       iteration_++;
     } while (!CheckConvergence(g));

@@ -107,6 +107,8 @@ int main(int argn, char **argv) {
       CG.ForallLocalVertices([&](const VertexID v) {
         labels[v] = CG.GetGlobalID(v);
       });
+      MPI_Barrier(MPI_COMM_WORLD);
+
       t.Restart();
       comp.FindComponents(CG, labels);
       local_time = t.Elapsed();
@@ -127,6 +129,8 @@ int main(int argn, char **argv) {
       CG.ForallLocalVertices([&](const VertexID v) {
         labels[v] = CG.GetGlobalID(v);
       });
+      MPI_Barrier(MPI_COMM_WORLD);
+
       t.Restart();
       comp.FindComponents(CG, labels);
       local_time = t.Elapsed();

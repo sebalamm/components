@@ -41,7 +41,6 @@ void ParseParameters(int argn, char **argv,
   conf.output_file = args.Get<std::string>("out", "out");
   conf.debug_output_file = args.Get<std::string>("debug_out", "tmp");
   conf.print_verbose = args.IsSet("verbose");
-  conf.output_stats = args.IsSet("stats");
 
   // Benchmarks
   conf.iterations = args.Get<unsigned int>("i", 10);

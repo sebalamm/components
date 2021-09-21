@@ -57,8 +57,9 @@ class ShortcutPropagation {
       CAGBuilder<StaticGraph> 
         first_contraction(g, g_labels, config_, rank_, size_);
       auto cag = first_contraction.BuildComponentAdjacencyGraph<StaticGraph>();
-      if (config_.output_stats) 
-        OutputStats<StaticGraph>(cag);
+#ifndef NDEBUG
+      OutputStats<StaticGraph>(cag);
+#endif
 
       // Keep contraction labeling for later
       std::vector<VertexID> cag_labels(cag.GetNumberOfVertices(), 0);
@@ -67,8 +68,9 @@ class ShortcutPropagation {
       CAGBuilder<StaticGraph> 
         second_contraction(cag, cag_labels, config_, rank_, size_);
       auto ccag = second_contraction.BuildComponentAdjacencyGraph<StaticGraphCommunicator>();
-      if (config_.output_stats) 
-        OutputStats<StaticGraphCommunicator>(ccag);
+#ifndef NDEBUG
+      OutputStats<StaticGraphCommunicator>(ccag);
+#endif
 
       PerformShortcutting(ccag);
 
@@ -130,7 +132,9 @@ class ShortcutPropagation {
       if (rank_ == ROOT || config_.print_verbose) 
         std::cout << "[STATUS] |- R" << rank_ << " Building shortcuts took " 
                   << "[TIME] " << iteration_timer_.Elapsed() << std::endl;
+#ifndef NDEBUG
       OutputStats<StaticGraphCommunicator>(g);
+#endif
 
       iteration_++;
     } while (!CheckConvergence(g));

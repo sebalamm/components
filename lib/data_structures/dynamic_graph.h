@@ -220,11 +220,16 @@ class DynamicGraph {
   }
 
   inline VertexID GetLocalID(VertexID v) {
-    if (global_to_local_map_.find(v) != global_to_local_map_.end()) return global_to_local_map_[v];
+#ifndef NDEBUG
+    if (global_to_local_map_.find(v) != global_to_local_map_.end()) 
+      return global_to_local_map_[v];
     else {
       std::cout << "R" << rank_ << " This shouldn't happen (illegal get local on v=" << v << ")" << std::endl;
       exit(1);
     }
+#else 
+    return global_to_local_map_[v];
+#endif
   }
 
   inline VertexID GetGlobalID(VertexID v) {
@@ -267,15 +272,17 @@ class DynamicGraph {
   VertexID GatherNumberOfGlobalVertices(bool force=true) {
     if (number_of_global_vertices_ == 0 || force) {
       number_of_global_vertices_ = 0;
+#ifndef NDEBUG
       VertexID local_vertices = 0;
       ForallLocalVertices([&](const VertexID v) { local_vertices++; });
       if (local_vertices != number_of_local_vertices_) {
         std::cout << "This shouldn't happen (different number of vertices local=" << local_vertices << ", counter=" << number_of_local_vertices_ << ", datasize=" << GetLocalVertexVectorSize() << ")" << std::endl;
         exit(1);
       }
+#endif
       // Check if all PEs are done
       comm_timer_.Restart();
-      MPI_Allreduce(&local_vertices,
+      MPI_Allreduce(&number_of_local_vertices_,
                     &number_of_global_vertices_,
                     1,
                     MPI_VERTEX,
@@ -289,6 +296,7 @@ class DynamicGraph {
   VertexID GatherNumberOfGlobalEdges(bool force=true) {
     if (number_of_global_edges_ == 0 || force) {
       number_of_global_edges_ = 0;
+#ifndef NDEBUG
       VertexID local_edges = 0;
       ForallVertices([&](const VertexID v) { 
           ForallNeighbors(v, [&](const VertexID w) { local_edges++; });
@@ -297,9 +305,10 @@ class DynamicGraph {
         std::cout << "This shouldn't happen (different number of edges local=" << local_edges << ", counter=" << number_of_edges_ << ")" << std::endl;
         exit(1);
       }
+#endif
       // Check if all PEs are done
       comm_timer_.Restart();
-      MPI_Allreduce(&local_edges,
+      MPI_Allreduce(&number_of_edges_,
                     &number_of_global_edges_,
                     1,
                     MPI_VERTEX,
@@ -366,6 +375,7 @@ class DynamicGraph {
     if (IsLocalFromGlobal(to)) {
       AddLocalEdge(from, to);
     } else {
+#ifndef NDEBUG
       if (rank == size_) {
         std::cout << "This shouldn't happen (illegal add edge)" << std::endl;
         exit(1);
@@ -380,6 +390,12 @@ class DynamicGraph {
         std::cout << "This shouldn't happen (illegal add edge)" << std::endl;
         exit(1);
       }
+#else 
+      local_vertices_data_[from].is_interface_vertex_ = true;
+      number_of_cut_edges_++;
+      AddGhostEdge(from, to);
+      SetAdjacentPE(rank, true);
+#endif
     }
     number_of_edges_++;
     return edge_counter_++;
@@ -392,6 +408,7 @@ class DynamicGraph {
       }
       local_adjacent_edges_[from].emplace_back(global_to_local_map_[to]);
     }
+#ifndef NDEBUG
     else if (IsGhost(from)) {
       if (from - ghost_offset_ >= ghost_adjacent_edges_.size()) {
         ghost_adjacent_edges_.resize(from - ghost_offset_ + 1);
@@ -401,6 +418,14 @@ class DynamicGraph {
       std::cout << "This shouldn't happen (illegal add local edge)" << std::endl;
       exit(1);
     }
+#else 
+    else {
+      if (from - ghost_offset_ >= ghost_adjacent_edges_.size()) {
+        ghost_adjacent_edges_.resize(from - ghost_offset_ + 1);
+      }
+      ghost_adjacent_edges_[from - ghost_offset_].emplace_back(global_to_local_map_[to]);
+    }
+#endif
   }
 
   void AddGhostEdge(VertexID from, VertexID to) {
@@ -409,6 +434,7 @@ class DynamicGraph {
 
   EdgeID RemoveEdge(VertexID from, VertexID to) {
     VertexID delete_pos = ghost_offset_;
+#ifndef NDEBUG
     if (IsLocal(from)) {
       for (VertexID i = 0; i < local_adjacent_edges_[from].size(); i++) {
         if (local_adjacent_edges_[from][i].target_ == to) {
@@ -428,6 +454,17 @@ class DynamicGraph {
       std::cout << "R" << rank_ << " This shouldn't happen (illegal remove edge (ghost source))" << std::endl;
       exit(1);
     }
+#else
+    for (VertexID i = 0; i < local_adjacent_edges_[from].size(); i++) {
+      if (local_adjacent_edges_[from][i].target_ == to) {
+        delete_pos = i;
+        break;
+      }
+    }
+    local_adjacent_edges_[from].erase(local_adjacent_edges_[from].begin() + delete_pos);
+    if (IsGhost(to)) number_of_cut_edges_--;
+    number_of_edges_--;
+#endif
   }
 
   bool RelinkEdge(VertexID from, VertexID old_to, VertexID new_to, PEID rank) {
@@ -439,10 +476,12 @@ class DynamicGraph {
     }
     else {
       if (!IsGhost(old_to_local)) number_of_cut_edges_++;
+#ifndef NDEBUG
       if (rank == size_) {
         std::cout << "This shouldn't happen (illegal relink edge)" << std::endl;
         exit(1);
       }
+#endif
       SetAdjacentPE(rank, true);
     }
 

@@ -76,9 +76,10 @@ int main(int argn, char **argv) {
     G.ForallLocalVertices([&](const VertexID v) {
       labels[v] = G.GetGlobalID(v);
     });
-    t.Restart();
+    MPI_Barrier(MPI_COMM_WORLD);
 
     // Determine labels
+    t.Restart();
     AllReduce<StaticGraph> ar(conf, rank, size);
     ar.FindComponents(G, labels);
 

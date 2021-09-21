@@ -305,15 +305,17 @@ class StaticGraph {
   VertexID GatherNumberOfGlobalVertices(bool force=true) {
     if (number_of_global_vertices_ == 0 || force) {
       number_of_global_vertices_ = 0;
+#ifndef NDEBUG
       VertexID local_vertices = 0;
       ForallLocalVertices([&](const VertexID v) { local_vertices++; });
       if (local_vertices != number_of_local_vertices_) {
         std::cout << "This shouldn't happen (different number of vertices local=" << local_vertices << ", counter=" << number_of_local_vertices_ << ", datasize=" << GetLocalVertexVectorSize() << ")" << std::endl;
         exit(1);
       }
+#endif
       // Check if all PEs are done
       comm_timer_.Restart();
-      MPI_Allreduce(&local_vertices,
+      MPI_Allreduce(&number_of_local_vertices_,
                     &number_of_global_vertices_,
                     1,
                     MPI_VERTEX,
@@ -327,6 +329,7 @@ class StaticGraph {
   VertexID GatherNumberOfGlobalEdges(bool force=true) {
     if (number_of_global_edges_ == 0 || force) {
       number_of_global_edges_ = 0;
+#ifndef NDEBUG
       VertexID local_edges = 0;
       ForallVertices([&](const VertexID v) { 
           ForallNeighbors(v, [&](const VertexID w) { local_edges++; });
@@ -335,9 +338,10 @@ class StaticGraph {
         std::cout << "This shouldn't happen (different number of edges local=" << local_edges << ", counter=" << number_of_edges_ << ")" << std::endl;
         exit(1);
       }
+#endif
       // Check if all PEs are done
       comm_timer_.Restart();
-      MPI_Allreduce(&local_edges,
+      MPI_Allreduce(&number_of_edges_,
                     &number_of_global_edges_,
                     1,
                     MPI_VERTEX,
@@ -382,6 +386,7 @@ class StaticGraph {
     if (IsLocalFromGlobal(to)) {
       AddLocalEdge(from, to);
     } else {
+#ifndef NDEBUG
       if (rank == size_) {
         std::cout << "This shouldn't happen" << std::endl;
         exit(1);
@@ -395,6 +400,12 @@ class StaticGraph {
         std::cout << "This shouldn't happen" << std::endl;
         exit(1);
       }
+#else 
+      local_vertices_data_[from].is_interface_vertex_ = true;
+      number_of_cut_edges_++;
+      AddLocalEdge(from, to);
+      SetAdjacentPE(rank, true);
+#endif
     }
     if (from > last_source_) last_source_ = from;
     return edge_counter_;

@@ -78,8 +78,9 @@ class ExponentialContraction {
         auto cag 
           = contraction.BuildComponentAdjacencyGraph<DynamicGraphCommunicator>();
         cag.ResetCommunicator();
-        if (config_.output_stats) 
-          OutputStats<DynamicGraphCommunicator>(cag);
+#ifndef NDEBUG
+        OutputStats<DynamicGraphCommunicator>(cag);
+#endif
         if (rank_ == ROOT || config_.print_verbose) 
           std::cout << "[STATUS] |- R" << rank_ << " Building cag took " 
                     << "[TIME] " << contraction_timer_.Elapsed() << std::endl;
@@ -87,13 +88,15 @@ class ExponentialContraction {
         if (config_.replicate_high_degree) {
           contraction_timer_.Restart();
           DistributeHighDegreeVertices(cag);
-          if (config_.output_stats) 
-            OutputStats<DynamicGraphCommunicator>(cag);
+#ifndef NDEBUG
+          OutputStats<DynamicGraphCommunicator>(cag);
+#endif
           if (rank_ == ROOT || config_.print_verbose) 
             std::cout << "[STATUS] |- R" << rank_ << " Distributing high degree vertices took " 
                       << "[TIME] " << contraction_timer_.Elapsed() << std::endl;
-          if (config_.output_stats) 
-            IOUtility::PrintGraphParams(cag, config_, rank_, size_);
+#ifndef NDEBUG
+          IOUtility::PrintGraphParams(cag, config_, rank_, size_);
+#endif
         }
 
         // Keep contraction labeling for later
@@ -127,8 +130,9 @@ class ExponentialContraction {
           first_contraction(g, g_labels, config_, rank_, size_);
         auto cag 
           = first_contraction.BuildComponentAdjacencyGraph<StaticGraph>();
-        if (config_.output_stats) 
-          OutputStats<StaticGraph>(cag);
+#ifndef NDEBUG
+        OutputStats<StaticGraph>(cag);
+#endif
         if (rank_ == ROOT || config_.print_verbose)
           std::cout << "[STATUS] |- R" << rank_ << " Building first cag took " 
                     << "[TIME] " << contraction_timer_.Elapsed() << std::endl;
@@ -148,8 +152,9 @@ class ExponentialContraction {
         auto ccag 
           = second_contraction.BuildComponentAdjacencyGraph<DynamicGraphCommunicator>();
         ccag.ResetCommunicator();
-        if (config_.output_stats) 
-          OutputStats<DynamicGraphCommunicator>(ccag);
+#ifndef NDEBUG
+        OutputStats<DynamicGraphCommunicator>(ccag);
+#endif
         if (rank_ == ROOT || config_.print_verbose)
           std::cout << "[STATUS] |- R" << rank_ << " Building second cag took " 
                     << "[TIME] " << contraction_timer_.Elapsed() << std::endl;
@@ -157,13 +162,15 @@ class ExponentialContraction {
         if (config_.replicate_high_degree) {
           contraction_timer_.Restart();
           DistributeHighDegreeVertices(ccag);
-          if (config_.output_stats) 
-            OutputStats<DynamicGraphCommunicator>(ccag);
+#ifndef NDEBUG
+          OutputStats<DynamicGraphCommunicator>(ccag);
+#endif
           if (rank_ == ROOT || config_.print_verbose)
             std::cout << "[STATUS] |- R" << rank_ << " Distributing high degree vertices took " 
                       << "[TIME] " << contraction_timer_.Elapsed() << std::endl;
-          if (config_.output_stats) 
-            IOUtility::PrintGraphParams(ccag, config_, rank_, size_);
+#ifndef NDEBUG
+          IOUtility::PrintGraphParams(ccag, config_, rank_, size_);
+#endif
         }
 
         // Keep contraction labeling for later
@@ -199,8 +206,9 @@ class ExponentialContraction {
         auto lcag 
           = local_contraction.BuildLocalComponentGraph<DynamicGraphCommunicator>();
         lcag.ResetCommunicator();
-        if (config_.output_stats) 
-          OutputStats<DynamicGraphCommunicator>(lcag);
+#ifndef NDEBUG
+        OutputStats<DynamicGraphCommunicator>(lcag);
+#endif
         if (rank_ == ROOT || config_.print_verbose)
           std::cout << "[STATUS] |- R" << rank_ << " Building local cag took " 
                     << "[TIME] " << contraction_timer_.Elapsed() << std::endl;
@@ -209,13 +217,15 @@ class ExponentialContraction {
           contraction_timer_.Restart();
           DistributeHighDegreeVertices(lcag);
           // SampleHighDegreeNeighborhoods(lcag);
-          if (config_.output_stats) 
-            OutputStats<DynamicGraphCommunicator>(lcag);
+#ifndef NDEBUG
+          OutputStats<DynamicGraphCommunicator>(lcag);
+#endif
           if (rank_ == ROOT || config_.print_verbose)
             std::cout << "[STATUS] |- R" << rank_ << " Distributing high degree vertices took " 
                       << "[TIME] " << contraction_timer_.Elapsed() << std::endl;
-          if (config_.output_stats) 
-            IOUtility::PrintGraphParams(lcag, config_, rank_, size_);
+#ifndef NDEBUG
+          IOUtility::PrintGraphParams(lcag, config_, rank_, size_);
+#endif
 
           contraction_timer_.Restart();
           google::dense_hash_map<VertexID, VertexID> lcag_labels;
@@ -234,8 +244,9 @@ class ExponentialContraction {
           auto hd_lcag 
             = local_contraction.BuildLocalComponentGraph<DynamicGraphCommunicator>();
           hd_lcag.ResetCommunicator();
-          if (config_.output_stats) 
-            OutputStats<DynamicGraphCommunicator>(lcag);
+#ifndef NDEBUG
+          OutputStats<DynamicGraphCommunicator>(lcag);
+#endif
           if (rank_ == ROOT || config_.print_verbose)
             std::cout << "[STATUS] |- R" << rank_ << " Building high degree local cag took " 
                       << "[TIME] " << contraction_timer_.Elapsed() << std::endl;
@@ -429,11 +440,6 @@ class ExponentialContraction {
 #endif
                                g.GetVertexRoot(v)},
                            true);
-#ifndef NDEBUG
-        std::cout << "[R" << rank_ << ":" << iteration_ << "] update deviate "
-                  << g.GetGlobalID(v) << " -> " << g.GetVertexDeviate(v)
-                  << std::endl;
-#endif
       }
     });
 
@@ -555,8 +561,9 @@ class ExponentialContraction {
       std::cout << "[STATUS] |-- R" << rank_ << " Exponential contraction took " 
                 << "[TIME] " << contraction_timer_.Elapsed() << std::endl;
 
-    if (config_.output_stats) 
-      OutputStats<DynamicGraphCommunicator>(g);
+#ifndef NDEBUG
+    OutputStats<DynamicGraphCommunicator>(g);
+#endif
 
     // Count remaining number of vertices
     VertexID global_edges = g.GatherNumberOfGlobalEdges();
@@ -616,11 +623,6 @@ class ExponentialContraction {
 #endif
                                g.GetVertexRoot(v)}, 
                            vertex_round == active_round);
-#ifndef NDEBUG
-          std::cout << "[R" << rank_ << ":" << iteration_ << "] update deviate "
-                    << g.GetGlobalID(v) << " -> " << g.GetVertexDeviate(v)
-                    << std::endl;
-#endif
       }
     });
 
@@ -775,8 +777,9 @@ class ExponentialContraction {
       std::cout << "[STATUS] |-- R" << rank_ << " Exponential contraction took " 
                 << "[TIME] " << contraction_timer_.Elapsed() << std::endl;
 
-    if (config_.output_stats) 
-      OutputStats<DynamicGraphCommunicator>(g);
+#ifndef NDEBUG
+    OutputStats<DynamicGraphCommunicator>(g);
+#endif
 
     // Count remaining number of vertices
     VertexID global_edges = g.GatherNumberOfGlobalEdges();
@@ -1106,16 +1109,21 @@ class ExponentialContraction {
                 }
                 // Relink
                 bool relink_success = g.RelinkEdge(g.GetLocalID(edge_target_id), edge_source_id, replicate.first, replicate.second);
+#ifndef NDEBUG
                 if (!relink_success) {
                   std::cout << "R" << rank_ << " This shouldn't happen: Invalid (local) relink (" << edge_target_id << "," << edge_source_id << ") -> (" << edge_target_id << "," << replicate.first << ") from R" << edge_source_pe << " to R" << replicate.second << std::endl;
                   exit(1);
                 }
+#endif
               }
             }
-          } else {
+          } 
+#ifndef NDEBUG
+          else {
             std::cout << "R" << rank_ << " This shouldn't happen: Invalid high degree edge" << std::endl;
             exit(1);
           }
+#endif
         });
       }
       // Replace edges with new edges to replicates
