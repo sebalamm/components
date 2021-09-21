@@ -62,6 +62,8 @@ struct Config {
   bool use_bfs;
   // Communication
   bool use_regular;
+  // Memory
+  bool overallocate;
   // Contraction
   bool use_contraction;
   bool direct_contraction;

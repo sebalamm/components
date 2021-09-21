@@ -78,6 +78,30 @@ class DynamicGraph {
   //////////////////////////////////////////////
   void StartConstruct(VertexID local_n, VertexID ghost_n, VertexID ghost_offset) {
     ghost_offset_ = size_ * ghost_offset;
+
+    // Overallocate
+    if (config_.overallocate) {
+      local_vertices_data_.reserve(1.2 * local_n);
+      local_adjacent_edges_.reserve(1.2 * local_n);
+      local_parent_.reserve(1.2 * local_n);
+      local_active_.reserve(1.2 * local_n);
+
+      ghost_vertices_data_.reserve(1.2 * local_n);
+      ghost_adjacent_edges_.reserve(1.2 * local_n);
+      ghost_parent_.reserve(1.2 * local_n);
+      ghost_active_.reserve(1.2 * local_n);
+    }
+
+    local_vertices_data_.resize(local_n);
+    local_adjacent_edges_.resize(local_n);
+    local_parent_.resize(local_n);
+    local_active_.resize(local_n);
+
+    // Preallocate for ghosts (overallocate)
+    ghost_vertices_data_.resize(local_n);
+    ghost_adjacent_edges_.resize(local_n);
+    ghost_parent_.resize(local_n);
+    ghost_active_.resize(local_n);
   }
 
   void FinishConstruct() { number_of_edges_ = edge_counter_; }

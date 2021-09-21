@@ -77,6 +77,9 @@ void ParseParameters(int argn, char **argv,
   // Communication
   conf.use_regular = args.IsSet("regular");
 
+  // Memory
+  conf.overallocate = args.IsSet("overalloc");
+
   // Generator
   conf.gen = args.Get<std::string>("gen", "null");
   conf.gen_k = args.Get<PEID>("k", 0);

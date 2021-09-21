@@ -84,6 +84,15 @@ class SemidynamicGraph {
     number_of_local_vertices_ = local_n;
     number_of_vertices_ = local_n + ghost_n;
 
+    // Overallocate
+    if (config_.overallocate) {
+      adjacent_edges_.reserve(1.2 * number_of_vertices_);
+      local_vertices_data_.reserve(1.2 * local_n);
+      ghost_vertices_data_.reserve(1.2 * ghost_n);
+      parent_.reserve(1.2 * local_n);
+      is_active_.reserve(1.2 * number_of_vertices_);
+    }
+
     adjacent_edges_.resize(number_of_vertices_);
     local_vertices_data_.resize(local_n);
     ghost_vertices_data_.resize(ghost_n);
@@ -149,10 +158,10 @@ class SemidynamicGraph {
 
   void SetActive(VertexID v, bool is_active) {
     if (is_active_[v] && !is_active) {
-      if (IsLocal(v)) number_of_local_vertices_--;
+      number_of_local_vertices_ -= IsLocal(v);
       number_of_vertices_--;
     } else if (!is_active_[v] && is_active) {
-      if (IsLocal(v)) number_of_local_vertices_++;
+      number_of_local_vertices_ += IsLocal(v);
       number_of_vertices_++;
     }
     is_active_[v] = is_active;

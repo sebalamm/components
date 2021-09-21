@@ -90,6 +90,15 @@ class StaticGraph {
     number_of_vertices_ = local_n + ghost_n;
     number_of_edges_ = total_m;
 
+    // Overallocate
+    if (config_.overallocate) {
+      vertices_.reserve(1.2 * number_of_vertices_);
+      edges_.reserve(1.2 * number_of_edges_);
+      local_vertices_data_.reserve(1.2 * local_n);
+      ghost_vertices_data_.reserve(1.2 * ghost_n);
+      is_active_.reserve(1.2 * number_of_vertices_);
+    }
+    
     vertices_.resize(number_of_vertices_ + 1);
     // Fix first node being isolated
     if (local_n > 0) vertices_[0].first_edge_ = 0;
@@ -175,10 +184,10 @@ class StaticGraph {
 
   void SetActive(VertexID v, bool is_active) {
     if (is_active_[v] && !is_active) {
-      if (IsLocal(v)) number_of_local_vertices_--;
+      number_of_local_vertices_ -= IsLocal(v);
       number_of_vertices_--;
     } else if (!is_active_[v] && is_active) {
-      if (IsLocal(v)) number_of_local_vertices_++;
+      number_of_local_vertices_ += IsLocal(v);
       number_of_vertices_++;
     }
     is_active_[v] = is_active;
