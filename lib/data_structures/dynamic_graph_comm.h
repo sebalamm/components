@@ -94,7 +94,6 @@ class DynamicGraphCommunicator : public DynamicGraph {
 #ifdef TIEBREAK_DEGREE
       VertexID degree = payload.degree_;
 #endif
-      VertexID root = payload.root_;
       if (smallest_deviate[label].first > deviate) {
         smallest_deviate[label].first = deviate;
         smallest_deviate[label].second = GetParent(v);

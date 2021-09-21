@@ -126,27 +126,35 @@ class CAGBuilder {
   void PerformContraction() {
     contraction_timer_.Restart();
     ComputeComponentPrefixSum();
+#ifndef NSTATUS
     if (rank_ == ROOT || config_.print_verbose) 
       std::cout << "[STATUS] |-- R" << rank_ << " Computing component prefix sum took " 
                 << "[TIME] " << contraction_timer_.Elapsed() << std::endl;
+#endif
 
     contraction_timer_.Restart();
     ComputeLocalContractionMapping();
+#ifndef NSTATUS
     if (rank_ == ROOT || config_.print_verbose)
       std::cout << "[STATUS] |-- R" << rank_ << " Computing local contraction mapping took " 
                 << "[TIME] " << contraction_timer_.Elapsed() << std::endl;
+#endif
 
     contraction_timer_.Restart();
     ExchangeGhostContractionMapping();
+#ifndef NSTATUS
     if (rank_ == ROOT || config_.print_verbose)
       std::cout << "[STATUS] |-- R" << rank_ << " Exchanging ghost contraction mapping took " 
                 << "[TIME] " << contraction_timer_.Elapsed() << std::endl;
+#endif
     
     contraction_timer_.Restart();
     GenerateLocalContractionEdges();
+#ifndef NSTATUS
     if (rank_ == ROOT || config_.print_verbose)
       std::cout << "[STATUS] |-- R" << rank_ << " Generating contraction edges took " 
                 << "[TIME] " << contraction_timer_.Elapsed() << std::endl;
+#endif
   }
 
   void PerformLocalContraction() {
@@ -493,7 +501,6 @@ class CAGBuilder {
     }
 
     VertexID number_of_ghost_vertices = ghost_pe.size();
-    VertexID number_of_edges = edges_.size();
 
     GraphOutputType cg(config_, rank_, size_);
 
@@ -501,6 +508,7 @@ class CAGBuilder {
     // Static graphs also take the number of edges
     if constexpr (std::is_same<GraphOutputType, StaticGraphCommunicator>::value
                   || std::is_same<GraphOutputType, StaticGraph>::value) {
+      VertexID number_of_edges = edges_.size();
       cg.StartConstruct(num_local_components_, 
                         number_of_ghost_vertices, 
                         number_of_edges,
@@ -576,7 +584,6 @@ class CAGBuilder {
     }
 
     VertexID number_of_ghost_vertices = ghost_pe.size();
-    VertexID number_of_edges = edges_.size();
     VertexID number_of_local_vertices = local_components_.size();
 
     GraphOutputType cg(config_, rank_, size_);
@@ -587,6 +594,7 @@ class CAGBuilder {
     // from has to be smallest id 
     if constexpr (std::is_same<GraphOutputType, StaticGraphCommunicator>::value
                   || std::is_same<GraphOutputType, StaticGraph>::value) {
+      VertexID number_of_edges = edges_.size();
       cg.StartConstruct(number_of_local_vertices, 
                         number_of_ghost_vertices, 
                         number_of_edges,

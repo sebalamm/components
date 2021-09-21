@@ -121,14 +121,18 @@ class LocalContraction {
       else 
         RunContraction(g);
     }
+#ifndef NSTATUS
     if (rank_ == ROOT || config_.print_verbose) {
       std::cout << "[STATUS] |- R" << rank_ << " Running contraction done" << std::endl;
     }
+#endif
 
     local_contraction_->UndoContraction();
+#ifndef NSTATUS
     if (rank_ == ROOT || config_.print_verbose) {
       std::cout << "[STATUS] |- R" << rank_ << " Undoing contraction done" << std::endl;
     }
+#endif
   }
 
   void FindLocalComponents(StaticGraph &g, std::vector<VertexID> &label) {
@@ -152,6 +156,7 @@ class LocalContraction {
 
   void RunContraction(DynamicGraphCommunicator &g) {
     VertexID global_vertices = g.GatherNumberOfGlobalVertices();
+#ifndef NSTATUS
     if (rank_ == ROOT || config_.print_verbose) {
       if (iteration_ == 1)
         std::cout << "[STATUS] |-- R" << rank_ << " Iteration " << iteration_ 
@@ -162,6 +167,7 @@ class LocalContraction {
                   << " [TIME] " << iteration_timer_.Elapsed() 
                   << " [ADD] " << global_vertices << std::endl;
     }
+#endif
     iteration_timer_.Restart();
 
     // Draw uniform deviate per local vertex
@@ -185,9 +191,11 @@ class LocalContraction {
 #endif
     });
     g.SendAndReceiveGhostVertices();
+#ifndef NSTATUS
     if (rank_ == ROOT || config_.print_verbose) {
       std::cout << "[STATUS] |-- R" << rank_ << " Computing and exchanging deviates done" << std::endl;
     }
+#endif
 
     // Perform update for local vertices
     // Find smallest label in N(v)
@@ -270,9 +278,11 @@ class LocalContraction {
     // Determine remaining active vertices
     local_contraction_->LocalContraction(initial_parents);
 
+#ifndef NSTATUS
     if (rank_ == ROOT || config_.print_verbose) {
       std::cout << "[STATUS] |-- R" << rank_ << " Local contraction done" << std::endl;
     }
+#endif
 
 #ifndef NDEBUG
     OutputStats<DynamicGraphCommunicator>(g);

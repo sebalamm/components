@@ -119,19 +119,25 @@ class ShortcutPropagation {
     // Iterate until converged
     do {
       iteration_timer_.Restart();
+#ifndef NSTATUS
       if (rank_ == ROOT || config_.print_verbose) 
         std::cout << "[STATUS] R" << rank_ << " Starting iteration " << iteration_ << std::endl;
+#endif
       PropagateLabels(g);
       FindMinLabels(g);
       if (number_of_hitters_ > 0) 
         FindHeavyHitters(g);
+#ifndef NSTATUS
       if (rank_ == ROOT || config_.print_verbose) 
         std::cout << "[STATUS] |- R" << rank_ << " Propagating labels took " 
                                    << "[TIME] " << iteration_timer_.Elapsed() << std::endl;
+#endif
       Shortcut(g);
+#ifndef NSTATUS
       if (rank_ == ROOT || config_.print_verbose) 
         std::cout << "[STATUS] |- R" << rank_ << " Building shortcuts took " 
                   << "[TIME] " << iteration_timer_.Elapsed() << std::endl;
+#endif
 #ifndef NDEBUG
       OutputStats<StaticGraphCommunicator>(g);
 #endif
@@ -239,9 +245,11 @@ class ShortcutPropagation {
       update_lists[labels_[v]].emplace_back(v);
     });
 
+#ifndef NSTATUS
     if (rank_ == ROOT || config_.print_verbose) 
       std::cout << "[STATUS] |-- R" << rank_ << " Filling buffers took " 
                 << "[TIME] " << shortcut_timer_.Elapsed() << std::endl;
+#endif
 
     // Send updates and requests
     int num_requests = 0;
@@ -263,9 +271,11 @@ class ShortcutPropagation {
       }
     }
 
+#ifndef NSTATUS
     if (rank_ == ROOT || config_.print_verbose) 
       std::cout << "[STATUS] |-- R" << rank_ << " Sending buffers took " 
                 << "[TIME] " << shortcut_timer_.Elapsed() << std::endl;
+#endif
 
     // Process local requests
     shortcut_timer_.Restart();
@@ -277,9 +287,11 @@ class ShortcutPropagation {
       }
     }
 
+#ifndef NSTATUS
     if (rank_ == ROOT || config_.print_verbose) 
       std::cout << "[STATUS] |-- R" << rank_ << " Resolving local requests took " 
                 << "[TIME] " << shortcut_timer_.Elapsed() << std::endl;
+#endif
 
     shortcut_timer_.Restart();
     std::vector<MPI_Status> statuses(num_requests);
@@ -350,9 +362,11 @@ class ShortcutPropagation {
       MPI_Test(&barrier_request, &ibarrier_done, &tst);
     }
 
+#ifndef NSTATUS
     if (rank_ == ROOT || config_.print_verbose) 
       std::cout << "[STATUS] |-- R" << rank_ << " Resolving remote requests took " 
                 << "[TIME] " << shortcut_timer_.Elapsed() << std::endl;
+#endif
 
     num_requests = 0;
     for (const auto &kv : request_buffers) {
@@ -374,9 +388,11 @@ class ShortcutPropagation {
       }
     }
 
+#ifndef NSTATUS
     if (rank_ == ROOT || config_.print_verbose) 
       std::cout << "[STATUS] |-- R" << rank_ << " Sending updates/answers took " 
                 << "[TIME] " << shortcut_timer_.Elapsed() << std::endl;
+#endif
 
     // Process request answers
     // Process local answers
@@ -395,9 +411,11 @@ class ShortcutPropagation {
       }
     }
 
+#ifndef NSTATUS
     if (rank_ == ROOT || config_.print_verbose) 
       std::cout << "[STATUS] |-- R" << rank_ << " Resolving local answers took " 
                 << "[TIME] " << shortcut_timer_.Elapsed() << std::endl;
+#endif
 
     // Process remote answers
     shortcut_timer_.Restart();
@@ -476,9 +494,11 @@ class ShortcutPropagation {
       }
     }
 
+#ifndef NSTATUS
     if (rank_ == ROOT || config_.print_verbose) 
       std::cout << "[STATUS] |-- R" << rank_ << " Resolving remote answers took " 
                 << "[TIME] " << shortcut_timer_.Elapsed() << std::endl;
+#endif
 
     CheckRequests(answer_requests);
     CheckRequests(update_requests);

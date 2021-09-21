@@ -51,22 +51,28 @@ class AllReduce {
 
     // Perform gather of graph on root 
     GatherGraphOnRoot(g);
+#ifndef NSTATUS
     if (rank_ == ROOT || config_.print_verbose)
       std::cout << "[STATUS] |-- R" << rank_ << " Gather on root took " 
                 << "[TIME] " << contraction_timer_.Elapsed() << std::endl;
+#endif
     
     contraction_timer_.Restart();
     FindComponentsOnRoot();
+#ifndef NSTATUS
     if (rank_ == ROOT || config_.print_verbose)
       std::cout << "[STATUS] |-- R" << rank_ << " Local computation on root took " 
                 << "[TIME] " << contraction_timer_.Elapsed() << std::endl;
+#endif
 
     contraction_timer_.Restart();
     // Distribute labels to other PEs
     DistributeLabelsFromRoot(g, g_labels);
+#ifndef NSTATUS
     if (rank_ == ROOT || config_.print_verbose)
       std::cout << "[STATUS] |-- R" << rank_ << " Distributing graph from root took " 
                 << "[TIME] " << contraction_timer_.Elapsed() << std::endl;
+#endif
   }
 
   void Output(GraphType &g) {
@@ -221,7 +227,6 @@ class AllReduce {
                  ROOT, MPI_COMM_WORLD);
 
     for (int i = 0; i < num_local_vertices; ++i) {
-      VertexID v = local_vertices_[i];
       g_labels[i] = local_labels_[i];
     }
   }

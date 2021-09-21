@@ -217,13 +217,17 @@ class DynamicContraction {
                     MPI_COMM_WORLD);
       comm_time_ += comm_timer_.Elapsed();
       local_iterations++;
+#ifndef NSTATUS
       if (rank_ == ROOT || config_.print_verbose)
         std::cout << "[STATUS] |--- R" << rank_ << " Convergence test took " 
                   << "[TIME] " << contraction_timer_.Elapsed() << std::endl;
+#endif
     }
+#ifndef NSTATUS
     if (rank_ == ROOT || config_.print_verbose) 
       std::cout << "[STATUS] |---- R" << rank_ << " Propagation done " 
                 << "[TIME] " << propagation_timer.Elapsed() << std::endl;
+#endif
 
     inserted_edges_.clear();
     propagated_edges_.clear();
@@ -406,7 +410,7 @@ class DynamicContraction {
     return !propagate;
   }
 
-  int ProcessDirectMessages() {
+  void ProcessDirectMessages() {
     // Handle receive buffers
     for (auto &kv : receive_buffers_) {
       auto &buffer = kv.second;
@@ -581,9 +585,11 @@ class DynamicContraction {
       // Update active graph portion
       AddRemovedEdges();
       UpdateGraphVertices();
+#ifndef NSTATUS
       if (rank_ == ROOT || config_.print_verbose)
         std::cout << "[STATUS] |-- R" << rank_ << " Updating edges took " 
                   << "[TIME] " << contraction_timer_.Elapsed() << std::endl;
+#endif
 
       contraction_timer_.Restart();
       // Update local labels
@@ -595,9 +601,11 @@ class DynamicContraction {
 #endif
                                rank_});
       });
+#ifndef NSTATUS
       if (rank_ == ROOT || config_.print_verbose)
         std::cout << "[STATUS] |-- R" << rank_ << " Updating payloads took " 
                   << "[TIME] " << contraction_timer_.Elapsed() << std::endl;
+#endif
 
       // Propagate labels
       int converged_globally = 0;
@@ -620,9 +628,11 @@ class DynamicContraction {
             converged_locally = 0;
           }
         });
+#ifndef NSTATUS
         if (rank_ == ROOT || config_.print_verbose) 
           std::cout << "[STATUS] |--- R" << rank_ << " Message exchange took " 
                     << "[TIME] " << contraction_timer_.Elapsed() << std::endl;
+#endif
 
         // Check if all PEs are done
         contraction_timer_.Restart();
@@ -634,9 +644,11 @@ class DynamicContraction {
                       MPI_MIN,
                       MPI_COMM_WORLD);
         comm_time_ += comm_timer_.Elapsed();
+#ifndef NSTATUS
         if (rank_ == ROOT || config_.print_verbose)
           std::cout << "[STATUS] |--- R" << rank_ << " Convergence test took " 
                     << "[TIME] " << contraction_timer_.Elapsed() << std::endl;
+#endif
       }
       // Vertices at current level are roots at previous one
       g_.ForallLocalVertices([&](VertexID v) {

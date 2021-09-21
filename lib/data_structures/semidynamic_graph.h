@@ -576,7 +576,6 @@ class SemidynamicGraph {
       condensed_component_sizes.set_empty_key(EmptyKey);
       condensed_component_sizes.set_deleted_key(DeleteKey);
       for (auto &cs : global_component_sizes) {
-        VertexID c = cs.first;
         VertexID size = cs.second;
         if (condensed_component_sizes.find(size) == end(condensed_component_sizes)) {
           condensed_component_sizes[size] = 0;
