@@ -200,7 +200,6 @@ class ExponentialContraction {
           std::cout << "[STATUS] |- R" << rank_ << " Resolving connectivity took " 
                     << "[TIME] " << contraction_timer_.Elapsed() << std::endl;
 #endif
-
         if (config_.replicate_high_degree) {
           RemoveReplicatedVertices(ccag);
         }
@@ -392,11 +391,12 @@ class ExponentialContraction {
   template <typename GraphType>
   void FindLocalComponents(GraphType &g, std::vector<VertexID> &label) {
     std::vector<bool> marked(g.GetVertexVectorSize(), false);
-    std::vector<VertexID> parent(g.GetVertexVectorSize(), 0);
+    std::vector<VertexID> parent(g.GetVertexVectorSize());
 
     g.ForallVertices([&](const VertexID v) {
-      VertexID gid = g.GetGlobalID(v);
       label[v] = g.GetGlobalID(v);
+      parent[v] = v;
+      marked[v] = false;
     });
 
     // Compute components
@@ -421,8 +421,8 @@ class ExponentialContraction {
 
     g.ForallVertices([&](const VertexID v) {
       label[v] = g.GetGlobalID(v);
+      parent[v] = v;
       marked[v] = false;
-      parent[v] = 0;
     });
 
     // Compute components
@@ -869,7 +869,7 @@ class ExponentialContraction {
     // Turn on remaining vertices and set their labels
     g.SetAllVerticesActive(true);
     g.ForallLocalVertices([&](const VertexID v) {
-      if (!resolved[v]) g.SetVertexLabel(v, g.GetGlobalID(v));
+      if (!resolved[v]) g.SetVertexLabel(v, rng_offset_ + g.GetGlobalID(v));
     });
   }
 
@@ -884,7 +884,7 @@ class ExponentialContraction {
     // Turn on remaining vertices and set their labels
     g.SetAllVerticesActive(true);
     g.ForallLocalVertices([&](const VertexID v) {
-      if (!resolved[v]) g_label[v] = g.GetGlobalID(v);
+      if (!resolved[v]) g_label[v] = rng_offset_ + g.GetGlobalID(v);
     });
   }
 
