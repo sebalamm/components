@@ -55,7 +55,7 @@ int main(int argn, char **argv) {
     StaticGraph CG = SG;
 
     // Determine labels
-    std::vector<VertexID> labels(CG.GetNumberOfVertices(), 0);
+    std::vector<VertexID> labels(CG.GetVertexVectorSize(), 0);
     CG.ForallLocalVertices([&](const VertexID v) {
       labels[v] = CG.GetGlobalID(v);
     });
@@ -91,7 +91,7 @@ int main(int argn, char **argv) {
     CG.ResetReceiveVolume();
 
     // Determine labels
-    std::vector<VertexID> labels(CG.GetNumberOfVertices(), 0);
+    std::vector<VertexID> labels(CG.GetVertexVectorSize(), 0);
     CG.ForallLocalVertices([&](const VertexID v) {
       labels[v] = CG.GetGlobalID(v);
     });

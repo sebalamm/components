@@ -150,6 +150,11 @@ class GraphIO {
     // if (rank == ROOT) std::cout << "done adding edges... mem " << Utility::GetFreePhysMem() << std::endl;
 
     g.FinishConstruct();
+
+    // Disable vertices that have no neighbors
+    g.ForallLocalVertices([&](const VertexID v) {
+      g.SetActive(v, g.GetVertexDegree(v) > 0);
+    });
   }
 
   template<typename GraphType>
@@ -263,6 +268,11 @@ class GraphIO {
     }
 
     g.FinishConstruct();
+
+    // Disable vertices that have no neighbors
+    g.ForallLocalVertices([&](const VertexID v) {
+      g.SetActive(v, g.GetVertexDegree(v) > 0);
+    });
   }
 
   template<typename GraphType>
@@ -362,6 +372,11 @@ class GraphIO {
     }
 
     g.FinishConstruct();
+
+    // Disable vertices that have no neighbors
+    g.ForallLocalVertices([&](const VertexID v) {
+      g.SetActive(v, g.GetVertexDegree(v) > 0);
+    });
   }
 
   template<typename GraphType>
@@ -623,6 +638,11 @@ class GraphIO {
     }
 
     g.FinishConstruct();
+
+    // Disable vertices that have no neighbors
+    g.ForallLocalVertices([&](const VertexID v) {
+      g.SetActive(v, g.GetVertexDegree(v) > 0);
+    });
   }
 
   template<typename GraphType>
@@ -856,6 +876,11 @@ class GraphIO {
     }
 
     g.FinishConstruct();
+
+    // Disable vertices that have no neighbors
+    g.ForallLocalVertices([&](const VertexID v) {
+      g.SetActive(v, g.GetVertexDegree(v) > 0);
+    });
   }
 
   template<typename GraphType>
@@ -1119,6 +1144,11 @@ class GraphIO {
     }
 
     g.FinishConstruct();
+
+    // Disable vertices that have no neighbors
+    g.ForallLocalVertices([&](const VertexID v) {
+      g.SetActive(v, g.GetVertexDegree(v) > 0);
+    });
   }
 
   static PEID GetPEFromOffset(const VertexID v, 
