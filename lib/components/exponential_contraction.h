@@ -468,7 +468,7 @@ class ExponentialContraction {
       if (replicated_vertices_.find(g.GetGlobalID(v)) == replicated_vertices_.end()) {
         std::exponential_distribution<LPFloat> distribution(config_.beta);
         std::default_random_engine
-            generator(static_cast<unsigned int>(g.GetGlobalID(v) + config_.seed + iteration_ * rng_offset_));
+            generator(static_cast<unsigned int>(g.GetGlobalID(v) + config_.seed + iteration_ * (rng_offset_ + config_.seed)));
         g.SetVertexPayload(v, {static_cast<VertexID>(weight * distribution(generator)),
                                g.GetVertexLabel(v),
 #ifdef TIEBREAK_DEGREE
@@ -492,7 +492,7 @@ class ExponentialContraction {
 #endif
       std::exponential_distribution<LPFloat> distribution(config_.beta);
       std::default_random_engine
-          generator(static_cast<unsigned int>(kv.second + config_.seed + iteration_ * rng_offset_));
+          generator(static_cast<unsigned int>(kv.second + config_.seed + iteration_ * (rng_offset_ + config_.seed)));
       g.SetVertexPayload(v, {static_cast<VertexID>(weight * distribution(generator)),
                              g.GetVertexLabel(v),
 #ifdef TIEBREAK_DEGREE
@@ -663,7 +663,7 @@ class ExponentialContraction {
       if (replicated_vertices_.find(g.GetGlobalID(v)) == replicated_vertices_.end()) {
         std::exponential_distribution<LPFloat> distribution(config_.beta);
         std::default_random_engine
-            generator(static_cast<unsigned int>(g.GetGlobalID(v) + config_.seed + iteration_ * rng_offset_));
+            generator(static_cast<unsigned int>(g.GetGlobalID(v) + config_.seed + iteration_ * (rng_offset_ + config_.seed)));
         VertexID vertex_round = static_cast<VertexID>(weight * distribution(generator));
         if (vertex_round > max_round) max_round = vertex_round;
 
@@ -692,7 +692,7 @@ class ExponentialContraction {
 #endif
       std::exponential_distribution<LPFloat> distribution(config_.beta);
       std::default_random_engine
-          generator(static_cast<unsigned int>(kv.second + config_.seed + iteration_ * rng_offset_));
+          generator(static_cast<unsigned int>(kv.second + config_.seed + iteration_ * (rng_offset_ + config_.seed)));
       g.SetVertexPayload(v, {static_cast<VertexID>(weight * distribution(generator)),
                              g.GetVertexLabel(v),
 #ifdef TIEBREAK_DEGREE
@@ -1017,7 +1017,7 @@ class ExponentialContraction {
     receive_buffers[rank_] = send_buffers[rank_];
     send_buffers[rank_].clear();
 
-    comm_time_ += CommunicationUtility::AllToAll(send_buffers, receive_buffers, rank_, size_, 993, config_.use_regular);
+    comm_time_ += CommunicationUtility::AllToAll(send_buffers, receive_buffers, rank_, size_, ExpTag, config_.use_regular);
     send_volume_ += CommunicationUtility::ClearBuffers(send_buffers);
 
     //////////////////////////////////////////
@@ -1209,7 +1209,7 @@ class ExponentialContraction {
     receive_buffers[rank_] = send_buffers[rank_];
     send_buffers[rank_].clear();
 
-    comm_time_ += CommunicationUtility::AllToAll(send_buffers, receive_buffers, rank_, size_, 993, config_.use_regular);
+    comm_time_ += CommunicationUtility::AllToAll(send_buffers, receive_buffers, rank_, size_, ExpTag, config_.use_regular);
     send_volume_ += CommunicationUtility::ClearBuffers(send_buffers);
 
     //////////////////////////////////////////
