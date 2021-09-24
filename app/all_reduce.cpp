@@ -39,25 +39,26 @@ int main(int argn, char **argv) {
   // Read command-line args
   Config conf;
   ParseParameters(argn, argv, conf);
+  if (rank == ROOT) PrintParameters(conf);
   int initial_seed = conf.seed;
 
-  StaticGraph G(conf, rank, size);
-  IOUtility::LoadGraph(G, conf, rank, size);
-  IOUtility::PrintGraphParams(G, conf, rank, size);
-
-  // WARMUP RUN
+#ifndef NWARMUP
   if (rank == ROOT) std::cout << "WARMUP RUN" << std::endl;
-
   {
+    StaticGraph G(conf, rank, size);
+    IOUtility::LoadGraph(G, conf, rank, size);
+
     // Determine labels
     std::vector<VertexID> labels(G.GetNumberOfVertices(), 0);
     G.ForallLocalVertices([&](const VertexID v) {
       labels[v] = G.GetGlobalID(v);
     });
+    MPI_Barrier(MPI_COMM_WORLD);
+
     AllReduce<StaticGraph> ar(conf, rank, size);
     ar.FindComponents(G, labels);
   }
-  MPI_Barrier(MPI_COMM_WORLD);
+#endif
 
   // ACTUAL RUN
   if (rank == ROOT) std::cout << "BENCH RUN" << std::endl;
@@ -71,20 +72,33 @@ int main(int argn, char **argv) {
     Timer t;
     double local_time = 0.0;
     double total_time = 0.0;
+    MPI_Barrier(MPI_COMM_WORLD);
+
+    t.Restart();
+    StaticGraph G(conf, rank, size);
+    IOUtility::LoadGraph(G, conf, rank, size);
+    if (i == 0) IOUtility::PrintGraphParams(G, conf, rank, size);
+
+    // Reset timers
+    SG.ResetCommTime();
+    SG.ResetSendVolume();
+    SG.ResetReceiveVolume();
 
     std::vector<VertexID> labels(G.GetNumberOfVertices(), 0);
     G.ForallLocalVertices([&](const VertexID v) {
       labels[v] = G.GetGlobalID(v);
     });
+    local_time = t.Elapsed();
+    std::cout << "IO rank=" << rank << " time=" << local_time << std::endl;
     MPI_Barrier(MPI_COMM_WORLD);
 
     // Determine labels
     t.Restart();
     AllReduce<StaticGraph> ar(conf, rank, size);
     ar.FindComponents(G, labels);
+    local_time = t.Elapsed();
 
     // Gather total time
-    local_time = t.Elapsed();
     MPI_Reduce(&local_time, &total_time, 1, MPI_DOUBLE, MPI_MAX, ROOT,
                MPI_COMM_WORLD);
     if (rank == ROOT) stats.Push(total_time);

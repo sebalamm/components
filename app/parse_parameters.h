@@ -34,7 +34,6 @@ void ParseParameters(int argn, char **argv,
   // RNG
   conf.seed = args.Get<int>("seed", 1);
 
-
   // I/O
   conf.input_type = args.Get<std::string>("input", "null");
   conf.input_file = args.Get<std::string>("in", "null");
@@ -98,6 +97,37 @@ void ParseParameters(int argn, char **argv,
   conf.gen_d = args.Get<float>("d", 16.0);
   conf.gen_p = args.Get<float>("p", 1.0);
   conf.gen_periodic = args.IsSet("periodic");
+}
+
+void PrintParameters(Config &conf) {
+  std::cout << "CONFIG" << std::endl;
+  std::cout << "type" << "\t\t" << conf.input_type << std::endl;
+  std::cout << "infile" << "\t\t" << conf.input_file << std::endl;
+  std::cout << "outfile" << "\t\t" << conf.output_file << std::endl;
+  std::cout << "seed" << "\t\t" << conf.seed << std::endl;
+  std::cout << "iterations" << "\t\t" << conf.iterations << std::endl;
+  std::cout << "beta" << "\t\t" << conf.beta << std::endl;
+  std::cout << "bfs" << "\t\t" << conf.use_bfs << std::endl;
+  std::cout << "lp iterations" << "\t\t" << conf.prop_iterations << std::endl;
+  std::cout << "contraction" << "\t\t" << conf.use_contraction << std::endl;
+  std::cout << "direct" << "\t\t" << conf.direct_contraction << std::endl;
+  std::cout << "single" << "\t\t" << conf.single_level_contraction << std::endl;
+  std::cout << "sequential" << "\t\t" << conf.sequential_limit << std::endl;
+  std::cout << "fixed seq" << "\t\t" << conf.fixed_limit << std::endl;
+  std::cout << "replicate" << "\t\t" << conf.replicate_high_degree << std::endl;
+  std::cout << "deg thres" << "\t\t" << conf.degree_threshold << std::endl;
+  std::cout << "regular a2a" << "\t\t" << conf.use_regular << std::endl;
+  std::cout << "overalloc" << "\t\t" << conf.overallocate << std::endl;
+  if (conf.input_type == "gen" || conf.input_type == "generator") {
+    std::cout << "gen" << "\t\t" << conf.gen << std::endl;
+    std::cout << "k" << "\t\t" << conf.gen_k << std::endl;
+    std::cout << "n" << "\t\t" << conf.gen_n << std::endl;
+    std::cout << "m" << "\t\t" << conf.gen_m << std::endl;
+    std::cout << "r" << "\t\t" << conf.gen_r << std::endl;
+    std::cout << "d" << "\t\t" << conf.gen_d << std::endl;
+    std::cout << "gamma" << "\t\t" << conf.gen_gamma << std::endl;
+    std::cout << "periodic" << "\t\t" << conf.gen_periodic << std::endl;
+  }
 }
 
 #endif

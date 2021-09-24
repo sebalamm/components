@@ -40,24 +40,27 @@ int main(int argn, char **argv) {
   // Read command-line args
   Config conf;
   ParseParameters(argn, argv, conf);
+  if (rank == ROOT) PrintParameters(conf);
   int initial_seed = conf.seed;
 
-  // WARMUP RUN
+#ifndef NWARMUP
   if (rank == ROOT) std::cout << "WARMUP RUN" << std::endl;
-
   {
     StaticGraphCommunicator G(conf, rank, size);
     IOUtility::LoadGraph(G, conf, rank, size);
-    IOUtility::PrintGraphParams(G, conf, rank, size);
+    G.ResetCommunicator();
 
     // Determine labels
     std::vector<VertexID> labels(G.GetNumberOfVertices(), 0);
     G.ForallLocalVertices([&](const VertexID v) {
       labels[v] = G.GetGlobalID(v);
     });
+    MPI_Barrier(MPI_COMM_WORLD);
+
     Propagation comp(conf, rank, size);
     comp.FindComponents(G, labels);
   }
+#endif
 
   // ACTUAL RUN
   if (rank == ROOT) std::cout << "BENCH RUN" << std::endl;
@@ -66,27 +69,39 @@ int main(int argn, char **argv) {
   for (int i = 0; i < conf.iterations; ++i) {
     int round_seed = initial_seed + i + 1000;
     conf.seed = round_seed;
-    StaticGraphCommunicator G(rank, size);
-    IOUtility::LoadGraph(G, conf, rank, size);
-    IOUtility::PrintGraphParams(G, conf, rank, size);
 
     Timer t;
     double local_time = 0.0;
     double total_time = 0.0;
+    MPI_Barrier(MPI_COMM_WORLD);
 
+    t.Restart();
+    StaticGraphCommunicator G(rank, size);
+    IOUtility::LoadGraph(G, conf, rank, size);
+    if (i == 0) IOUtility::PrintGraphParams(G, conf, rank, size);
+    G.ResetCommunicator();
+
+    // Reset timers
+    SG.ResetCommTime();
+    SG.ResetSendVolume();
+    SG.ResetReceiveVolume();
+
+    // Determine labels
     std::vector<VertexID> labels(G.GetNumberOfVertices(), 0);
     G.ForallLocalVertices([&](const VertexID v) {
       labels[v] = G.GetGlobalID(v);
     });
+    local_time = t.Elapsed();
+    std::cout << "IO rank=" << rank << " time=" << local_time << std::endl;
     MPI_Barrier(MPI_COMM_WORLD);
 
     // Determine labels
     t.Restart();
     Propagation comp(conf, rank, size);
     comp.FindComponents(G, labels);
+    local_time = t.Elapsed();
 
     // Gather total time
-    local_time = t.Elapsed();
     MPI_Reduce(&local_time, &total_time, 1, MPI_DOUBLE, MPI_MAX, ROOT,
                MPI_COMM_WORLD);
     if (rank == ROOT) stats.Push(total_time);

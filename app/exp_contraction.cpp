@@ -39,28 +39,26 @@ int main(int argn, char **argv) {
   // Read command-line args
   Config conf;
   ParseParameters(argn, argv, conf);
+  if (rank == ROOT) PrintParameters(conf);
   int initial_seed = conf.seed;
 
-  StaticGraph SG(conf, rank, size);
-  // DynamicGraph SG(rank, size);
-  // DynamicGraphCommunicator DG(rank, size);
-  MPI_Barrier(MPI_COMM_WORLD);
-  IOUtility::LoadGraph(SG, conf, rank, size);
-  IOUtility::PrintGraphParams(SG, conf, rank, size);
-
-  // WARMUP RUN
+#ifndef NWARMUP
   if (rank == ROOT) std::cout << "WARMUP RUN" << std::endl;
   {
-    ExponentialContraction comp(conf, rank, size);
-    StaticGraph CG = SG;
+    StaticGraph G(conf, rank, size);
+    IOUtility::LoadGraph(G, conf, rank, size);
 
     // Determine labels
-    std::vector<VertexID> labels(CG.GetVertexVectorSize(), 0);
-    CG.ForallLocalVertices([&](const VertexID v) {
-      labels[v] = CG.GetGlobalID(v);
+    std::vector<VertexID> labels(G.GetVertexVectorSize(), 0);
+    G.ForallLocalVertices([&](const VertexID v) {
+      labels[v] = G.GetGlobalID(v);
     });
-    comp.FindComponents(CG, labels);
+    MPI_Barrier(MPI_COMM_WORLD);
+
+    ExponentialContraction comp(conf, rank, size);
+    comp.FindComponents(G, labels);
   }
+#endif
 
   // ACTUAL RUN
   if (rank == ROOT) std::cout << "BENCH RUN" << std::endl;
@@ -81,28 +79,34 @@ int main(int argn, char **argv) {
     Timer t;
     float local_time = 0.0;
     float total_time = 0.0;
-
-    ExponentialContraction comp(conf, rank, size);
-    StaticGraph CG = SG;
-
-    // Reset timers
-    CG.ResetCommTime();
-    CG.ResetSendVolume();
-    CG.ResetReceiveVolume();
-
-    // Determine labels
-    std::vector<VertexID> labels(CG.GetVertexVectorSize(), 0);
-    CG.ForallLocalVertices([&](const VertexID v) {
-      labels[v] = CG.GetGlobalID(v);
-    });
     MPI_Barrier(MPI_COMM_WORLD);
 
     t.Restart();
-    comp.FindComponents(CG, labels);
+    StaticGraph G(conf, rank, size);
+    IOUtility::LoadGraph(G, conf, rank, size);
+    if (i == 0) IOUtility::PrintGraphParams(G, conf, rank, size);
+
+    // Reset timers
+    G.ResetCommTime();
+    G.ResetSendVolume();
+    G.ResetReceiveVolume();
+
+    // Determine labels
+    std::vector<VertexID> labels(G.GetVertexVectorSize(), 0);
+    G.ForallLocalVertices([&](const VertexID v) {
+      labels[v] = G.GetGlobalID(v);
+    });
+    local_time = t.Elapsed();
+    std::cout << "IO rank=" << rank << " time=" << local_time << std::endl;
+    MPI_Barrier(MPI_COMM_WORLD);
+
+    t.Restart();
+    ExponentialContraction comp(conf, rank, size);
+    comp.FindComponents(G, labels);
     local_time = t.Elapsed();
 
     // Print labels
-    CG.OutputComponents(labels);
+    G.OutputComponents(labels);
 
     // Gather total time
     MPI_Reduce(&local_time, &total_time, 1, MPI_FLOAT, MPI_MAX, ROOT,

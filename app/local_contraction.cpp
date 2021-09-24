@@ -39,37 +39,42 @@ int main(int argn, char **argv) {
   // Read command-line args
   Config conf;
   ParseParameters(argn, argv, conf);
+  if (rank == ROOT) PrintParameters(conf);
   int initial_seed = conf.seed;
 
-  // WARMUP RUN
+#ifndef NWARMUP
   if (rank == ROOT) std::cout << "WARMUP RUN" << std::endl;
-
   {
-    LocalContraction comp(conf, rank, size);
     if (conf.use_contraction) {
       StaticGraph G(conf, rank, size);
       IOUtility::LoadGraph(G, conf, rank, size);
-      IOUtility::PrintGraphParams(G, conf, rank, size);
 
       // Determine labels
       std::vector<VertexID> labels(G.GetNumberOfVertices(), 0);
       G.ForallLocalVertices([&](const VertexID v) {
         labels[v] = G.GetGlobalID(v);
       });
+      MPI_Barrier(MPI_COMM_WORLD);
+
+      LocalContraction comp(conf, rank, size);
       comp.FindComponents(G, labels);
     } else {
       DynamicGraphCommunicator G(conf, rank, size);
       IOUtility::LoadGraph(G, conf, rank, size);
-      IOUtility::PrintGraphParams(G, conf, rank, size);
+      G.ResetCommunicator();
 
       // Determine labels
       std::vector<VertexID> labels(G.GetNumberOfVertices(), 0);
       G.ForallLocalVertices([&](const VertexID v) {
         labels[v] = G.GetGlobalID(v);
       });
+      MPI_Barrier(MPI_COMM_WORLD);
+
+      LocalContraction comp(conf, rank, size);
       comp.FindComponents(G, labels);
     }
   }
+#endif
 
   // ACTUAL RUN
   if (rank == ROOT) std::cout << "BENCH RUN" << std::endl;
@@ -82,39 +87,58 @@ int main(int argn, char **argv) {
     Timer t;
     double local_time = 0.0;
     double total_time = 0.0;
+    MPI_Barrier(MPI_COMM_WORLD);
 
-    LocalContraction comp(conf, rank, size);
     if (conf.use_contraction) {
+      t.Restart();
       StaticGraph G(conf, rank, size);
       IOUtility::LoadGraph(G, conf, rank, size);
-      IOUtility::PrintGraphParams(G, conf, rank, size);
+      if (i == 0) IOUtility::PrintGraphParams(G, conf, rank, size);
+
+      // Reset timers
+      SG.ResetCommTime();
+      SG.ResetSendVolume();
+      SG.ResetReceiveVolume();
 
       // Determine labels
       std::vector<VertexID> labels(G.GetNumberOfVertices(), 0);
       G.ForallLocalVertices([&](const VertexID v) {
         labels[v] = G.GetGlobalID(v);
       });
+      local_time = t.Elapsed();
+      std::cout << "IO rank=" << rank << " time=" << local_time << std::endl;
       MPI_Barrier(MPI_COMM_WORLD);
 
       t.Restart();
+      LocalContraction comp(conf, rank, size);
       comp.FindComponents(G, labels);
       local_time = t.Elapsed();
       
       // Print labels
       G.OutputComponents(labels);
     } else {
+      t.Restart();
       DynamicGraphCommunicator G(conf, rank, size);
       IOUtility::LoadGraph(G, conf, rank, size);
-      IOUtility::PrintGraphParams(G, conf, rank, size);
+      if (i == 0) IOUtility::PrintGraphParams(G, conf, rank, size);
+      G.ResetCommunicator();
+
+      // Reset timers
+      SG.ResetCommTime();
+      SG.ResetSendVolume();
+      SG.ResetReceiveVolume();
 
       // Determine labels
       std::vector<VertexID> labels(G.GetNumberOfVertices(), 0);
       G.ForallLocalVertices([&](const VertexID v) {
         labels[v] = G.GetGlobalID(v);
       });
+      local_time = t.Elapsed();
+      std::cout << "IO rank=" << rank << " time=" << local_time << std::endl;
       MPI_Barrier(MPI_COMM_WORLD);
 
       t.Restart();
+      LocalContraction comp(conf, rank, size);
       comp.FindComponents(G, labels);
       local_time = t.Elapsed();
       
