@@ -49,7 +49,7 @@ int main(int argn, char **argv) {
     IOUtility::LoadGraph(G, conf, rank, size);
 
     // Determine labels
-    std::vector<VertexID> labels(G.GetNumberOfVertices(), 0);
+    std::vector<VertexID> labels(G.GetVertexVectorSize(), 0);
     G.ForallLocalVertices([&](const VertexID v) {
       labels[v] = G.GetGlobalID(v);
     });
@@ -80,11 +80,11 @@ int main(int argn, char **argv) {
     if (i == 0) IOUtility::PrintGraphParams(G, conf, rank, size);
 
     // Reset timers
-    SG.ResetCommTime();
-    SG.ResetSendVolume();
-    SG.ResetReceiveVolume();
+    G.ResetCommTime();
+    G.ResetSendVolume();
+    G.ResetReceiveVolume();
 
-    std::vector<VertexID> labels(G.GetNumberOfVertices(), 0);
+    std::vector<VertexID> labels(G.GetVertexVectorSize(), 0);
     G.ForallLocalVertices([&](const VertexID v) {
       labels[v] = G.GetGlobalID(v);
     });

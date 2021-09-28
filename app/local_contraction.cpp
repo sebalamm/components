@@ -96,9 +96,9 @@ int main(int argn, char **argv) {
       if (i == 0) IOUtility::PrintGraphParams(G, conf, rank, size);
 
       // Reset timers
-      SG.ResetCommTime();
-      SG.ResetSendVolume();
-      SG.ResetReceiveVolume();
+      G.ResetCommTime();
+      G.ResetSendVolume();
+      G.ResetReceiveVolume();
 
       // Determine labels
       std::vector<VertexID> labels(G.GetNumberOfVertices(), 0);
@@ -124,9 +124,9 @@ int main(int argn, char **argv) {
       G.ResetCommunicator();
 
       // Reset timers
-      SG.ResetCommTime();
-      SG.ResetSendVolume();
-      SG.ResetReceiveVolume();
+      G.ResetCommTime();
+      G.ResetSendVolume();
+      G.ResetReceiveVolume();
 
       // Determine labels
       std::vector<VertexID> labels(G.GetNumberOfVertices(), 0);

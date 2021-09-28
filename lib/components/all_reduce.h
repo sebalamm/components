@@ -92,6 +92,7 @@ class AllReduce {
 
   // Vertex distribution
   std::vector<int> num_vertices_per_pe_;
+  std::vector<VertexID> reverse_vertex_map_;
   
   // Local information
   std::vector<VertexID> local_vertices_;
@@ -112,11 +113,9 @@ class AllReduce {
       google::dense_hash_map<VertexID, int> vertex_map; 
       vertex_map.set_empty_key(EmptyKey);
       vertex_map.set_deleted_key(DeleteKey);
-      std::vector<VertexID> reverse_vertex_map(global_vertices_.size());
       int current_vertex = 0;
       for (const VertexID &v : global_vertices_) {
-        vertex_map[v] = current_vertex;
-        reverse_vertex_map[current_vertex++] = v;
+        vertex_map[v] = current_vertex++;
       }
 
       // Build edge lists
@@ -136,13 +135,12 @@ class AllReduce {
       }
       sg.FinishConstruct();
       FindLocalComponents(sg, global_labels_);
-
     }
   }
 
   void FindLocalComponents(StaticGraph &g, std::vector<VertexID> &label) {
-    std::vector<bool> marked(g.GetNumberOfVertices(), false);
-    std::vector<VertexID> parent(g.GetNumberOfVertices(), 0);
+    std::vector<bool> marked(g.GetVertexVectorSize(), false);
+    std::vector<VertexID> parent(g.GetVertexVectorSize(), 0);
 
     g.ForallVertices([&](const VertexID v) {
       label[v] = global_labels_[v];
@@ -160,7 +158,16 @@ class AllReduce {
   }
 
   void InitLocalData(GraphType &g, std::vector<VertexID> g_labels) {
+    // Prealloc vectors
+    local_vertices_.clear(); local_vertices_.reserve(g.GetNumberOfLocalVertices());
+    local_labels_.clear(); local_labels_.reserve(g.GetNumberOfLocalVertices());
+    local_edges_.clear(); local_edges_.reserve(g.GetNumberOfEdges());
+
+    // Build vertex map
+    reverse_vertex_map_.resize(g.GetNumberOfLocalVertices());
+    int current_vertex = 0;
     g.ForallLocalVertices([&](const VertexID &v) {
+      reverse_vertex_map_[current_vertex++] = v;
       local_vertices_.push_back(g.GetGlobalID(v));
       local_labels_.push_back(g_labels[v]);
       g.ForallNeighbors(v, [&](const VertexID &w) {
@@ -173,22 +180,31 @@ class AllReduce {
     // Gather local labels/vertices
     int num_local_vertices = local_vertices_.size();
     int num_local_edges = local_edges_.size();
+#ifndef NSTATUS
+    std::cout << "[STATUS] |- R" << rank_ << " Vertices to gather " << num_local_vertices << std::endl;
+    std::cout << "[STATUS] |- R" << rank_ << " Edges to gather " << num_local_edges << std::endl;
+#endif
 
     // Gather number of vertices/edges for each PE
-    std::vector<int> num_edges(size_);
+    std::vector<int> num_edges;
+    if (rank_ == ROOT) num_edges.resize(size_, 0);
     MPI_Gather(&num_local_vertices, 1, MPI_INT, &num_vertices_per_pe_[0], 1, MPI_INT, ROOT, MPI_COMM_WORLD);
     MPI_Gather(&num_local_edges, 1, MPI_INT, &num_edges[0], 1, MPI_INT, ROOT, MPI_COMM_WORLD);
 
     // Compute displacements
-    std::vector<int> displ_vertices(size_);
-    std::vector<int> displ_edges(size_);
+    std::vector<int> displ_vertices;
+    std::vector<int> displ_edges;
     int num_global_vertices = 0;
     int num_global_edges = 0;
-    for (PEID i = 0; i < size_; ++i) {
-      displ_vertices[i] = num_global_vertices;
-      displ_edges[i] = num_global_edges;
-      num_global_vertices += num_vertices_per_pe_[i];
-      num_global_edges += num_edges[i];
+    if (rank_ == ROOT) {
+      displ_vertices.resize(size_, 0);
+      displ_edges.resize(size_, 0);
+      for (PEID i = 0; i < size_; ++i) {
+        displ_vertices[i] = num_global_vertices;
+        displ_edges[i] = num_global_edges;
+        num_global_vertices += num_vertices_per_pe_[i];
+        num_global_edges += num_edges[i];
+      }
     }
 
     // Build datatype for edge
@@ -197,9 +213,11 @@ class AllReduce {
     MPI_Type_commit(&MPI_EDGE);
     
     // Gather vertices/edges and labels for each PE
-    global_vertices_.resize(num_global_vertices);
-    global_labels_.resize(num_global_vertices);
-    global_edges_.resize(num_global_edges);
+    if (rank_ == ROOT) { 
+      global_vertices_.resize(num_global_vertices);
+      global_labels_.resize(num_global_vertices);
+      global_edges_.resize(num_global_edges);
+    }
     MPI_Gatherv(&local_vertices_[0], num_local_vertices, MPI_VERTEX,
                 &global_vertices_[0], &num_vertices_per_pe_[0], &displ_vertices[0], MPI_VERTEX,
                 ROOT, MPI_COMM_WORLD);
@@ -227,7 +245,7 @@ class AllReduce {
                  ROOT, MPI_COMM_WORLD);
 
     for (int i = 0; i < num_local_vertices; ++i) {
-      g_labels[i] = local_labels_[i];
+      g_labels[reverse_vertex_map_[i]] = local_labels_[i];
     }
   }
 

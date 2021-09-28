@@ -577,10 +577,10 @@ class StaticGraph {
         components.emplace_back(kv.first, kv.second);
       std::sort(begin(components), end(components));
 
-      // std::cout << "COMPONENTS [ ";
-      // for (auto &comp : components)
-      //   std::cout << "size=" << comp.first << " (num=" << comp.second << ") ";
-      // std::cout << "]" << std::endl;
+      std::cout << "COMPONENTS [ ";
+      for (auto &comp : components)
+        std::cout << "size=" << comp.first << " (num=" << comp.second << ") ";
+      std::cout << "]" << std::endl;
 
       VertexID total_num_no_isolated = 0;
       for (auto &comp : components)

@@ -906,22 +906,8 @@ class ExponentialContraction {
   }
 
   void RunSequentialCC(DynamicGraphCommunicator &g) {
-    // Build vertex mapping 
-    google::dense_hash_map<VertexID, int> vertex_map; 
-    vertex_map.set_empty_key(EmptyKey);
-    vertex_map.set_deleted_key(DeleteKey);
-    std::vector<VertexID> reverse_vertex_map(g.GetLocalVertexVectorSize());
-    int current_vertex = 0;
-    g.ForallLocalVertices([&](const VertexID v) {
-      vertex_map[v] = current_vertex;
-      reverse_vertex_map[current_vertex++] = v;
-    });
-
     // Init labels
     std::vector<VertexID> labels(g.GetLocalVertexVectorSize());
-    for (VertexID i = 0; i < labels.size(); ++i) {
-      labels[i] = g.GetVertexLabel(reverse_vertex_map[i]);
-    }
     g.ForallLocalVertices([&](const VertexID v) {
       labels[v] = g.GetVertexLabel(v);
     });
@@ -931,7 +917,7 @@ class ExponentialContraction {
     ar.FindComponents(g, labels);
 
     g.ForallLocalVertices([&](const VertexID v) {
-      g.SetVertexLabel(v, labels[vertex_map[v]]);
+      g.SetVertexLabel(v, labels[v]);
     });
   }
 
@@ -950,23 +936,22 @@ class ExponentialContraction {
     // Determine high degree vertices
     VertexID global_vertices = g.GatherNumberOfGlobalVertices();
     std::vector<std::pair<VertexID, VertexID>> high_degree_vertices;
-    VertexID avg_max_deg = Utility::ComputeAverageMaxDegree(g, rank_, size_, comm_time_);
+    // VertexID avg_max_deg = Utility::ComputeAverageMaxDegree(g, rank_, size_, comm_time_);
     // Use sqrt(n) as a degree threshold
-    config_.degree_threshold = static_cast<VertexID>(config_.degree_threshold*sqrt(global_vertices));
+    VertexID degree_limit = static_cast<VertexID>(config_.degree_threshold*sqrt(global_vertices));
 #ifndef NSTATUS
     if (rank_ == ROOT || config_.print_verbose) 
-      std::cout << "[STATUS] |- R" << rank_ << " High degree threshold " << config_.degree_threshold
+      std::cout << "[STATUS] |- R" << rank_ << " High degree threshold " << degree_limit
                 << " [TIME] " << contraction_timer_.Elapsed() << std::endl;
 #endif
-    Utility::SelectHighDegreeVertices(g, config_.degree_threshold, high_degree_vertices);
+    Utility::SelectHighDegreeVertices(g, degree_limit, high_degree_vertices);
     // std::cout << "[STATUS] |- R" << rank_ << " Num high degree to distributed " 
     //           << high_degree_vertices.size() << std::endl;
     // Split high degree vertices into one layer of proxies with degree sqrt(n)
-    SplitHighDegreeVerticesSqrtEdge(g, avg_max_deg, high_degree_vertices);
+    SplitHighDegreeVerticesSqrtEdge(g, high_degree_vertices);
   }
 
   void SplitHighDegreeVerticesSqrtEdge(DynamicGraphCommunicator &g,
-                                         const VertexID &avg_max_deg,
                                          std::vector<std::pair<VertexID, VertexID>> &high_degree_vertices) {
     // Compute offset for IDs of replicated vertices
     VertexID num_global_vertices = g.GatherNumberOfGlobalVertices(false);
@@ -1038,10 +1023,10 @@ class ExponentialContraction {
     // Compute distribution of replicates
     //////////////////////////////////////////
     std::uniform_int_distribution<PEID> dist(0, size_ - 1);
-    PEID num_replicates = std::min(size_ - 1, static_cast<PEID>(config_.degree_threshold));
     // This now also includes ghosts
     for (VertexID i = 0; i < high_degree_vertices.size(); ++i) {
       VertexID v = high_degree_vertices[i].first;
+      PEID num_replicates = std::min(size_ - 1, static_cast<PEID>(sqrt(high_degree_vertices[i].second)));
       VertexID vertex_seed = config_.seed + g.GetGlobalID(v);
       PEID taboo_rank = g.GetPE(v);
       // If we compute the repl_vertices_id here, this should be recomputed consistently
