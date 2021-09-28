@@ -1231,6 +1231,12 @@ class GraphIO {
                                   std::vector<std::pair<VertexID, VertexID>> &edge_list) {
     VertexID edge_counter = 0;
 
+    // Skip lines until from
+    for (VertexID i = 0; i < local_from; ++i) {
+      in.ignore(std::numeric_limits<std::streamsize>::max(),'\n');
+      edge_counter++;
+    }
+
     std::string line;
     while (std::getline(in, line)) {
       if (edge_counter > local_to) break;
