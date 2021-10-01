@@ -30,6 +30,8 @@
 #include <sstream>
 #include <vector>
 
+#include "ips4o.hpp"
+#include "connect_io.h"
 #include "config.h"
 #include "utils.h"
 #include "comm_utils.h"
@@ -407,6 +409,13 @@ class GraphIO {
 
     config.n = number_of_global_vertices;
     config.m = number_of_global_edges;
+    if (rank == ROOT) {
+      std::cout << "INITAL GLOBAL INPUT"
+                << " s=" << config.seed
+                << " p=" << size
+                << " n=" << number_of_global_vertices
+                << " m=" << number_of_global_edges << std::endl;
+    }
 
     // Read the lines i*ceil(m/size) to (i+1)*floor(m/size) lines of that file
     VertexID leftover_edges = number_of_global_edges % size;
@@ -423,7 +432,15 @@ class GraphIO {
     VertexID last_vertex = 0;
     std::pair<VertexID, VertexID> first_vertex_range 
       = {std::numeric_limits<VertexID>::max(), std::numeric_limits<VertexID>::max()};
-    ParseEdgeFilestream(in, from, to, first_vertex, last_vertex, first_vertex_range, edge_list);
+
+    // TODO: Connect IO
+    //Object of the graph generator class
+    mxx::comm mxx_comm;
+    conn::graphGen::GraphFileParser<char *, VertexID> connect_g(edge_list, first_vertex, last_vertex, first_vertex_range, config.input_file, mxx_comm);
+    connect_g.populateEdgeList();
+
+    // OLD IO
+    // ParseEdgeFilestream(in, from, to, first_vertex, last_vertex, first_vertex_range, edge_list);
 
     // Determine local and ghost vertices
     google::dense_hash_set<VertexID> ghost_vertices; 
@@ -626,6 +643,12 @@ class GraphIO {
       g.AddGhostVertex(duplicate_ghosts[v].first, duplicate_ghosts[v].second);
     }
 
+    // Transform edgelist to local IDs
+    for (VertexID i = 0; i < edge_list.size(); ++i) {
+      edge_list[i].first = g.GetLocalID(edge_list[i].first);
+      edge_list[i].second = g.GetLocalID(edge_list[i].second);
+    }
+
     // Sort edges for static graphs
     if constexpr (std::is_same<GraphType, StaticGraphCommunicator>::value
                   || std::is_same<GraphType, StaticGraph>::value) {
@@ -634,7 +657,7 @@ class GraphIO {
 
     // Finally add edges
     for (auto &edge : edge_list) {
-      g.AddEdge(g.GetLocalID(edge.first), edge.second, g.GetPE(g.GetLocalID(edge.second)));
+      g.AddEdge(edge.first, g.GetGlobalID(edge.second), g.GetPE(edge.second));
     }
 
     g.FinishConstruct();
@@ -1266,7 +1289,7 @@ class GraphIO {
 
         if (source == first_local_vertex) {
           if (first_local_vertex_range.first == std::numeric_limits<VertexID>::max()) {
-          first_local_vertex_range.first = target;
+            first_local_vertex_range.first = target;
           } 
           first_local_vertex_range.second = target;
         }
@@ -1292,13 +1315,8 @@ class GraphIO {
 
   template <typename GraphType>
   static void SortEdges(const GraphType &g, std::vector<std::pair<VertexID, VertexID>> &edge_list) {
-    std::sort(edge_list.begin(), edge_list.end(), [&](auto &left, auto &right) {
-        VertexID lhs_source = g.GetLocalID(left.first);
-        VertexID lhs_target = g.GetLocalID(left.second);
-        VertexID rhs_source = g.GetLocalID(right.first);
-        VertexID rhs_target = g.GetLocalID(right.second);
-        return (lhs_source < rhs_source
-                  || (lhs_source == rhs_source && lhs_target < rhs_target));
+    ips4o::sort(edge_list.begin(), edge_list.end(), [&](auto &left, auto &right) {
+        return left < right;
     });
   }
 };

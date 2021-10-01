@@ -31,6 +31,18 @@ set(CMAKE_CXX_LINK_FLAGS "${CMAKE_CXX_LINK_FLAGS} ${MPI_LINK_FLAGS}")
 add_subdirectory(extern/kagen)
 # add_subdirectory(extern/KaHIP)
 
+add_subdirectory("${PROJECT_SOURCE_DIR}/extern/ips4o")
+
+include_directories("${PROJECT_SOURCE_DIR}/extern/mxx/include")
+include_directories("${PROJECT_SOURCE_DIR}/extern")
+
+add_subdirectory("${PROJECT_SOURCE_DIR}/extern/bliss")   #BLISS cmake needs to be executed
+include_directories("${PROJECT_SOURCE_DIR}/extern/bliss/src/")
+include_directories("${PROJECT_SOURCE_DIR}/extern/bliss/ext/")
+
+#include our build directory for bliss config files
+include_directories("${CMAKE_BINARY_DIR}")
+
 include_directories(
           app
           lib
@@ -72,7 +84,7 @@ set(SOURCES
 )
 
 add_executable(exponential ${SOURCES} "app/exp_contraction.cpp")
-# add_executable(allreduce ${SOURCES} "app/all_reduce.cpp")
+add_executable(allreduce ${SOURCES} "app/all_reduce.cpp")
 # add_executable(local ${SOURCES} "app/local_contraction.cpp")
 # add_executable(shortcuts ${SOURCES} "app/shortcuts.cpp")
 # add_executable(labels ${SOURCES} "app/labels.cpp")
@@ -81,11 +93,12 @@ set(LIBS
         spooky
         sampling
         ${MPI_LIBRARIES}
+        ips4o
         # asan
         )
 
 target_link_libraries(exponential LINK_PUBLIC ${LIBS})
-# target_link_libraries(allreduce LINK_PUBLIC ${LIBS})
+target_link_libraries(allreduce LINK_PUBLIC ${LIBS})
 # target_link_libraries(local LINK_PUBLIC ${LIBS})
 # target_link_libraries(shortcuts LINK_PUBLIC ${LIBS})
 # target_link_libraries(labels LINK_PUBLIC ${LIBS})

@@ -106,12 +106,14 @@ class IOUtility {
     MPI_Reduce(&cut_local, &max_cut, 1, MPI_VERTEX, MPI_MAX, ROOT,
                MPI_COMM_WORLD);
 
-    std::cout << "LOCAL INPUT" 
-              << " rank=" << rank
-              << " n=" << n_local 
-              << " m=" << m_local 
-              << " c=" << cut_local 
-              << " max_d=" << highest_degree << std::endl;
+    if (config.print_verbose) {
+      std::cout << "LOCAL INPUT" 
+                << " rank=" << rank
+                << " n=" << n_local 
+                << " m=" << m_local 
+                << " c=" << cut_local 
+                << " max_d=" << highest_degree << std::endl;
+    }
     if (rank == ROOT) {
       std::cout << "GLOBAL INPUT"
                 << " s=" << config.seed

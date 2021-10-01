@@ -106,7 +106,7 @@ int main(int argn, char **argv) {
     local_time = t.Elapsed();
 
     // Print labels
-    G.OutputComponents(labels);
+    // G.OutputComponents(labels);
 
     // Gather total time
     MPI_Reduce(&local_time, &total_time, 1, MPI_FLOAT, MPI_MAX, ROOT,
@@ -137,12 +137,14 @@ int main(int argn, char **argv) {
     if (rank == ROOT) global_recv_stats.Push(total_recv_volume);
   }
 
-  std::cout << "LOCAL RESULT rank=" << rank << " runner=exp"
-            << " time=" << stats.Avg() << " stddev=" << stats.Stddev()
-            << " comm_time=" << comm_stats.Avg() << " stddev=" << comm_stats.Stddev()
-            << " send_volume=" << send_stats.Avg() << " stddev=" << send_stats.Stddev()
-            << " recv_volume=" << recv_stats.Avg() << " stddev=" << recv_stats.Stddev()
-            << " iterations=" << conf.iterations << std::endl;
+  if (conf.print_verbose) {
+    std::cout << "LOCAL RESULT rank=" << rank << " runner=exp"
+              << " time=" << stats.Avg() << " stddev=" << stats.Stddev()
+              << " comm_time=" << comm_stats.Avg() << " stddev=" << comm_stats.Stddev()
+              << " send_volume=" << send_stats.Avg() << " stddev=" << send_stats.Stddev()
+              << " recv_volume=" << recv_stats.Avg() << " stddev=" << recv_stats.Stddev()
+              << " iterations=" << conf.iterations << std::endl;
+  }
   if (rank == ROOT) {
     std::cout << "GLOBAL RESULT runner=exp"
               << " time=" << global_stats.Avg() << " stddev=" << global_stats.Stddev()

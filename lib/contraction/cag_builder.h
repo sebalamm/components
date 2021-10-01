@@ -548,6 +548,12 @@ class CAGBuilder {
       cg.AddGhostVertex(kv.first, kv.second);
     }
 
+    // Transform edgelist to local IDs
+    for (VertexID i = 0; i < edges_.size(); ++i) {
+      std::get<0>(edges_[i]) = cg.GetLocalID(std::get<0>(edges_[i]));
+      std::get<1>(edges_[i]) = cg.GetLocalID(std::get<1>(edges_[i]));
+    }
+
     // Sort edges for static graphs
     if constexpr (std::is_same<GraphOutputType, StaticGraphCommunicator>::value
                   || std::is_same<GraphOutputType, StaticGraph>::value) {
@@ -555,7 +561,7 @@ class CAGBuilder {
     }
 
     for (auto &edge : edges_) {
-      cg.AddEdge(cg.GetLocalID(std::get<0>(edge)), std::get<1>(edge), std::get<2>(edge));
+      cg.AddEdge(std::get<0>(edge), cg.GetGlobalID(std::get<1>(edge)), std::get<2>(edge));
     }
 
     cg.FinishConstruct();
@@ -633,6 +639,12 @@ class CAGBuilder {
       cg.AddGhostVertex(kv.first, kv.second);
     }
 
+    // Transform edgelist to local IDs
+    for (VertexID i = 0; i < edges_.size(); ++i) {
+      std::get<0>(edges_[i]) = cg.GetLocalID(std::get<0>(edges_[i]));
+      std::get<1>(edges_[i]) = cg.GetLocalID(std::get<1>(edges_[i]));
+    }
+
     // Sort edges for static graphs
     if constexpr (std::is_same<GraphOutputType, StaticGraphCommunicator>::value
                   || std::is_same<GraphOutputType, StaticGraph>::value) {
@@ -640,7 +652,7 @@ class CAGBuilder {
     }
 
     for (auto &edge : edges_) {
-      cg.AddEdge(cg.GetLocalID(std::get<0>(edge)), std::get<1>(edge), std::get<2>(edge));
+      cg.AddEdge(std::get<0>(edge), cg.GetGlobalID(std::get<1>(edge)), std::get<2>(edge));
     }
 
     cg.FinishConstruct();
@@ -654,13 +666,8 @@ class CAGBuilder {
 
   template <typename GraphOutputType>
   static void SortEdges(const GraphOutputType &g, std::vector<std::tuple<VertexID, VertexID, PEID>> &edge_list) {
-    std::sort(edge_list.begin(), edge_list.end(), [&](std::tuple<VertexID, VertexID, PEID> &left, std::tuple<VertexID, VertexID, PEID> &right) {
-        VertexID lhs_source = g.GetLocalID(std::get<0>(left));
-        VertexID lhs_target = g.GetLocalID(std::get<1>(left));
-        VertexID rhs_source = g.GetLocalID(std::get<0>(right));
-        VertexID rhs_target = g.GetLocalID(std::get<1>(right));
-        return (lhs_source < rhs_source
-                  || (lhs_source == rhs_source && lhs_target < rhs_target));
+    ips4o::sort(edge_list.begin(), edge_list.end(), [&](auto &left, auto &right) {
+        return left < right;
     });
   }
 };
