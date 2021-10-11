@@ -50,7 +50,7 @@ int main(int argn, char **argv) {
       IOUtility::LoadGraph(G, conf, rank, size);
 
       // Determine labels
-      std::vector<VertexID> labels(G.GetNumberOfVertices(), 0);
+      std::vector<VertexID> labels(G.GetVertexVectorSize(), 0);
       G.ForallLocalVertices([&](const VertexID v) {
         labels[v] = G.GetGlobalID(v);
       });
@@ -59,12 +59,12 @@ int main(int argn, char **argv) {
       ShortcutPropagation comp(conf, rank, size);
       comp.FindComponents(G, labels);
     } else {
-      StaticGraphCommunicator G;
+      StaticGraphCommunicator G(conf, rank, size);
       IOUtility::LoadGraph(G, conf, rank, size);
       G.ResetCommunicator();
 
       // Determine labels
-      std::vector<VertexID> labels(G.GetNumberOfVertices(), 0);
+      std::vector<VertexID> labels(G.GetVertexVectorSize(), 0);
       G.ForallLocalVertices([&](const VertexID v) {
         labels[v] = G.GetGlobalID(v);
       });
@@ -104,7 +104,7 @@ int main(int argn, char **argv) {
       G.ResetReceiveVolume();
 
       // Determine labels
-      std::vector<VertexID> labels(G.GetNumberOfVertices(), 0);
+      std::vector<VertexID> labels(G.GetVertexVectorSize(), 0);
       G.ForallLocalVertices([&](const VertexID v) {
         labels[v] = G.GetGlobalID(v);
       });
@@ -118,10 +118,10 @@ int main(int argn, char **argv) {
       local_time = t.Elapsed();
 
       // Print labels
-      G.OutputComponents(labels);
+      // G.OutputComponents(labels);
     } else {
       t.Restart();
-      StaticGraphCommunicator G;
+      StaticGraphCommunicator G(conf, rank, size);
       IOUtility::LoadGraph(G, conf, rank, size);
       if (i == 0) IOUtility::PrintGraphParams(G, conf, rank, size);
       G.ResetCommunicator();
@@ -132,7 +132,7 @@ int main(int argn, char **argv) {
       G.ResetReceiveVolume();
 
       // Determine labels
-      std::vector<VertexID> labels(G.GetNumberOfVertices(), 0);
+      std::vector<VertexID> labels(G.GetVertexVectorSize(), 0);
       G.ForallLocalVertices([&](const VertexID v) {
         labels[v] = G.GetGlobalID(v);
       });
@@ -146,7 +146,7 @@ int main(int argn, char **argv) {
       local_time = t.Elapsed();
 
       // Print labels
-      G.OutputComponents(labels);
+      // G.OutputComponents(labels);
     }
 
     // Gather total time
@@ -156,9 +156,11 @@ int main(int argn, char **argv) {
     if (rank == ROOT) global_stats.Push(total_time);
   }
 
-  std::cout << "LOCAL RESULT rank=" << rank << " runner=exp"
-            << " time=" << stats.Avg() << " stddev=" << stats.Stddev()
-            << " iterations=" << conf.iterations << std::endl;
+  if (conf.print_verbose) {
+    std::cout << "LOCAL RESULT rank=" << rank << " runner=exp"
+              << " time=" << stats.Avg() << " stddev=" << stats.Stddev()
+              << " iterations=" << conf.iterations << std::endl;
+  }
   if (rank == ROOT) {
     std::cout << "GLOBAL RESULT runner=exp"
               << " time=" << global_stats.Avg() << " stddev=" << global_stats.Stddev()

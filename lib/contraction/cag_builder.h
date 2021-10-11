@@ -537,10 +537,11 @@ class CAGBuilder {
     if constexpr (std::is_same<GraphOutputType, StaticGraphCommunicator>::value
                   || std::is_same<GraphOutputType, DynamicGraphCommunicator>::value
                   || std::is_same<GraphOutputType, SemidynamicGraphCommunicator>::value) {
-      for (VertexID v = 0; v < num_local_components_; v++) {
-          cg.SetVertexLabel(v, from + v);
+      cg.AllocatePayloads();
+      cg.ForallLocalVertices([&](const VertexID v) {
+          cg.SetVertexLabel(v, cg.GetGlobalID(v));
           cg.SetVertexRoot(v, rank_);
-      }
+      });
     }
 
     // Initialize ghost vertices
@@ -628,6 +629,7 @@ class CAGBuilder {
     if constexpr (std::is_same<GraphOutputType, StaticGraphCommunicator>::value
                   || std::is_same<GraphOutputType, DynamicGraphCommunicator>::value
                   || std::is_same<GraphOutputType, SemidynamicGraphCommunicator>::value) {
+      cg.AllocatePayloads();
       cg.ForallLocalVertices([&](const VertexID v) {
           cg.SetVertexLabel(v, cg.GetGlobalID(v));
           cg.SetVertexRoot(v, rank_);

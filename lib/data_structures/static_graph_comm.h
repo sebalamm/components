@@ -68,7 +68,7 @@ class StaticGraphCommunicator : public StaticGraph {
   void SampleVertexNeighborhood(const VertexID &v, const float sampling_factor);
 
   void AllocatePayloads() {
-    vertex_payload_.resize(vertex_counter_);
+    vertex_payload_.resize(GetVertexVectorSize());
   }
 
   void SetVertexPayload(VertexID v, VertexPayload &&msg, bool propagate = true);

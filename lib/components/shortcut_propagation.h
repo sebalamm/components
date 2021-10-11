@@ -51,6 +51,8 @@ class ShortcutPropagation {
 
   template <typename GraphType>
   void FindComponents(GraphType &g, std::vector<VertexID> &g_labels) {
+    VertexID global_vertices = g.GatherNumberOfGlobalVertices();
+    rng_offset_ = global_vertices;
     if constexpr (std::is_same<GraphType, StaticGraph>::value) {
       FindLocalComponents(g, g_labels);
 
@@ -60,9 +62,13 @@ class ShortcutPropagation {
 #ifndef NDEBUG
       OutputStats<StaticGraph>(cag);
 #endif
+#ifndef NSTATUS
+      if (rank_ == ROOT || config_.print_verbose) 
+        std::cout << "[STATUS] R" << rank_ << " Computed first cag " << std::endl;
+#endif
 
       // Keep contraction labeling for later
-      std::vector<VertexID> cag_labels(cag.GetNumberOfVertices(), 0);
+      std::vector<VertexID> cag_labels(cag.GetVertexVectorSize(), 0);
       FindLocalComponents(cag, cag_labels);
 
       CAGBuilder<StaticGraph> 
@@ -70,6 +76,10 @@ class ShortcutPropagation {
       auto ccag = second_contraction.BuildComponentAdjacencyGraph<StaticGraphCommunicator>();
 #ifndef NDEBUG
       OutputStats<StaticGraphCommunicator>(ccag);
+#endif
+#ifndef NSTATUS
+      if (rank_ == ROOT || config_.print_verbose) 
+        std::cout << "[STATUS] R" << rank_ << " Computed second cag " << std::endl;
 #endif
 
       PerformShortcutting(ccag);
@@ -97,6 +107,7 @@ class ShortcutPropagation {
 
   // Counters
   unsigned int iteration_;
+  VertexID rng_offset_;
 
   // Local labels
   std::vector<VertexID> labels_;
@@ -112,9 +123,9 @@ class ShortcutPropagation {
 
   void PerformShortcutting(StaticGraphCommunicator &g) {
     // Init 
-    labels_.resize(g.GetNumberOfLocalVertices());
+    labels_.resize(g.GetLocalVertexVectorSize());
     g.ForallLocalVertices([&](const VertexID v) { labels_[v] = g.GetGlobalID(v); });
-    ranks_.resize(g.GetNumberOfLocalVertices(), rank_);
+    ranks_.resize(g.GetLocalVertexVectorSize(), rank_);
 
     // Iterate until converged
     do {
@@ -147,11 +158,13 @@ class ShortcutPropagation {
   }
 
   void FindLocalComponents(StaticGraph &g, std::vector<VertexID> &label) {
-    std::vector<bool> marked(g.GetNumberOfVertices(), false);
-    std::vector<VertexID> parent(g.GetNumberOfVertices(), 0);
+    std::vector<bool> marked(g.GetVertexVectorSize(), false);
+    std::vector<VertexID> parent(g.GetVertexVectorSize(), 0);
 
     g.ForallVertices([&](const VertexID v) {
       label[v] = g.GetGlobalID(v);
+      parent[v] = v;
+      marked[v] = false;
     });
 
     // Compute components
@@ -202,7 +215,7 @@ class ShortcutPropagation {
       const VertexID target = labels_[v];
       if (number_hits.find(target) == end(number_hits))
         number_hits[target] = 0;
-      if (++number_hits[target] > g.GetNumberOfLocalVertices() / number_of_hitters_) {
+      if (++number_hits[target] > g.GetLocalVertexVectorSize() / number_of_hitters_) {
         heavy_hitters_.insert(labels_[v]);
         if (heavy_hitters_.size() >= number_of_hitters_) return;
       }
@@ -213,9 +226,14 @@ class ShortcutPropagation {
     google::dense_hash_map<PEID, VertexBuffer> update_buffers;
     update_buffers.set_empty_key(EmptyKey);
     update_buffers.set_deleted_key(DeleteKey);
+
     google::dense_hash_map<PEID, VertexBuffer> request_buffers;
     request_buffers.set_empty_key(EmptyKey);
     request_buffers.set_deleted_key(DeleteKey);
+
+    google::dense_hash_map<PEID, VertexBuffer> receive_buffers;
+    receive_buffers.set_empty_key(EmptyKey);
+    receive_buffers.set_deleted_key(DeleteKey);
 
     google::dense_hash_map<VertexID, std::vector<VertexID>> update_lists;
     update_lists.set_empty_key(EmptyKey);
@@ -251,32 +269,6 @@ class ShortcutPropagation {
                 << "[TIME] " << shortcut_timer_.Elapsed() << std::endl;
 #endif
 
-    // Send updates and requests
-    int num_requests = 0;
-    for (const auto &kv : request_buffers) {
-      PEID pe = kv.first;
-      if (pe == rank_) continue;
-      if (request_buffers[pe].size() > 0) num_requests++;
-    }
-    std::vector<MPI_Request> answer_requests(num_requests);
-
-    shortcut_timer_.Restart();
-    int req = 0;
-    for (const auto &kv : request_buffers) {
-      PEID pe = kv.first;
-      if (pe == rank_) continue;
-      if (request_buffers[pe].size() > 0) {
-        MPI_Issend(request_buffers[pe].data(), request_buffers[pe].size(), MPI_VERTEX, pe, 
-                   7 * size_ + pe, MPI_COMM_WORLD, &answer_requests[req++]);
-      }
-    }
-
-#ifndef NSTATUS
-    if (rank_ == ROOT || config_.print_verbose) 
-      std::cout << "[STATUS] |-- R" << rank_ << " Sending buffers took " 
-                << "[TIME] " << shortcut_timer_.Elapsed() << std::endl;
-#endif
-
     // Process local requests
     shortcut_timer_.Restart();
     if (request_buffers[rank_].size() > 0) {
@@ -286,6 +278,7 @@ class ShortcutPropagation {
         update_buffers[rank_].emplace_back(g.GetVertexRoot(g.GetLocalID(request)));
       }
     }
+    request_buffers[rank_].clear();
 
 #ifndef NSTATUS
     if (rank_ == ROOT || config_.print_verbose) 
@@ -294,103 +287,21 @@ class ShortcutPropagation {
 #endif
 
     shortcut_timer_.Restart();
-    std::vector<MPI_Status> statuses(num_requests);
-    int isend_done = 0;
-    while(isend_done == 0) {
-      // Check for messages
-      int iprobe_success = 0;
-      MPI_Status st{};
-      MPI_Iprobe(MPI_ANY_SOURCE, 7 * size_ + rank_, MPI_COMM_WORLD, &iprobe_success, &st);
-      if (iprobe_success) {
-        int message_length;
-        MPI_Get_count(&st, MPI_VERTEX, &message_length);
-        VertexBuffer message(message_length);
-        MPI_Status rst{};
-        MPI_Recv(&message[0], message_length, MPI_VERTEX, st.MPI_SOURCE,
-                 st.MPI_TAG, MPI_COMM_WORLD, &rst);
-        // Request
-        if (st.MPI_TAG == 7 * size_ + rank_) {
-          if (st.MPI_SOURCE == rank_) {
-            std::cout << "[ERROR] R" << rank_ << " self message!" << std::endl;
-            exit(1);
-          }
-          for (const VertexID &m : message) {
-            update_buffers[st.MPI_SOURCE].emplace_back(m);
-            update_buffers[st.MPI_SOURCE].emplace_back(g.GetVertexLabel(g.GetLocalID(m)));
-            update_buffers[st.MPI_SOURCE].emplace_back(g.GetVertexRoot(g.GetLocalID(m)));
-          }
-        } else std::cout << "Unexpected tag." << std::endl;
+    CommunicationUtility::AllToAll(request_buffers, receive_buffers, rank_, size_, ExpTag, config_.use_regular);
+    CommunicationUtility::ClearBuffers(request_buffers);
+
+    for (auto &kv : receive_buffers) {
+      for (const VertexID &m : kv.second) {
+        update_buffers[kv.first].emplace_back(m);
+        update_buffers[kv.first].emplace_back(g.GetVertexLabel(g.GetLocalID(m)));
+        update_buffers[kv.first].emplace_back(g.GetVertexRoot(g.GetLocalID(m)));
       }
-
-      // Check if all ISend successful
-      isend_done = 0;
-      MPI_Testall(num_requests, answer_requests.data(), &isend_done, statuses.data());
     }
-
-    MPI_Request barrier_request;
-    MPI_Ibarrier(MPI_COMM_WORLD, &barrier_request);
-
-    int ibarrier_done = 0;
-    while(ibarrier_done == 0) {
-      // Check for messages
-      int iprobe_success = 0;
-      MPI_Status st{};
-      MPI_Iprobe(MPI_ANY_SOURCE, 7 * size_ + rank_, MPI_COMM_WORLD, &iprobe_success, &st);
-      if (iprobe_success) {
-        int message_length;
-        MPI_Get_count(&st, MPI_VERTEX, &message_length);
-        VertexBuffer message(message_length);
-        MPI_Status rst{};
-        MPI_Recv(&message[0], message_length, MPI_VERTEX, st.MPI_SOURCE,
-                 st.MPI_TAG, MPI_COMM_WORLD, &rst);
-        // Request
-        if (st.MPI_TAG == 7 * size_ + rank_) {
-          if (st.MPI_SOURCE == rank_) {
-            std::cout << "[ERROR] R" << rank_ << " self message!" << std::endl;
-            exit(1);
-          }
-          for (const VertexID &m : message) {
-            update_buffers[st.MPI_SOURCE].emplace_back(m);
-            update_buffers[st.MPI_SOURCE].emplace_back(g.GetVertexLabel(g.GetLocalID(m)));
-            update_buffers[st.MPI_SOURCE].emplace_back(g.GetVertexRoot(g.GetLocalID(m)));
-          }
-        } else std::cout << "Unexpected tag." << std::endl;
-      }
-
-      // Check if all reached Ibarrier
-      MPI_Status tst{};
-      MPI_Test(&barrier_request, &ibarrier_done, &tst);
-    }
+    CommunicationUtility::ClearBuffers(receive_buffers);
 
 #ifndef NSTATUS
     if (rank_ == ROOT || config_.print_verbose) 
       std::cout << "[STATUS] |-- R" << rank_ << " Resolving remote requests took " 
-                << "[TIME] " << shortcut_timer_.Elapsed() << std::endl;
-#endif
-
-    num_requests = 0;
-    for (const auto &kv : request_buffers) {
-      PEID pe = kv.first;
-      if (pe == rank_) continue;
-      if (update_buffers[pe].size() > 0) num_requests++;
-    }
-    std::vector<MPI_Request> update_requests(num_requests);
-
-    shortcut_timer_.Restart();
-    statuses.resize(num_requests);
-    req = 0;
-    for (const auto &kv : request_buffers) {
-      PEID pe = kv.first;
-      if (pe == rank_) continue;
-      if (update_buffers[pe].size() > 0) {
-        MPI_Issend(update_buffers[pe].data(), update_buffers[pe].size(), MPI_VERTEX, pe, 
-                   72 * size_ + pe, MPI_COMM_WORLD, &update_requests[req++]);
-      }
-    }
-
-#ifndef NSTATUS
-    if (rank_ == ROOT || config_.print_verbose) 
-      std::cout << "[STATUS] |-- R" << rank_ << " Sending updates/answers took " 
                 << "[TIME] " << shortcut_timer_.Elapsed() << std::endl;
 #endif
 
@@ -410,6 +321,7 @@ class ShortcutPropagation {
         }
       }
     }
+    update_buffers[rank_].clear();
 
 #ifndef NSTATUS
     if (rank_ == ROOT || config_.print_verbose) 
@@ -419,103 +331,29 @@ class ShortcutPropagation {
 
     // Process remote answers
     shortcut_timer_.Restart();
-    VertexBuffer receive_buffer;
-    isend_done = 0;
-    while(!isend_done) {
-      // Check for messages
-      int iprobe_success = 0;
-      MPI_Status st{};
-      MPI_Iprobe(MPI_ANY_SOURCE, 72 * size_ + rank_, MPI_COMM_WORLD, &iprobe_success, &st);
-      if (iprobe_success) {
-        int message_length;
-        MPI_Get_count(&st, MPI_VERTEX, &message_length);
-        VertexBuffer message(message_length);
-        MPI_Status rst{};
-        MPI_Recv(&message[0], message_length, MPI_VERTEX, st.MPI_SOURCE,
-                 st.MPI_TAG, MPI_COMM_WORLD, &rst);
-        // Request
-        if (st.MPI_TAG == 72 * size_ + rank_) {
-          if (st.MPI_SOURCE == rank_) {
-            std::cout << "[ERROR] R" << rank_ << " self message!" << std::endl;
-            exit(1);
+    CommunicationUtility::AllToAll(update_buffers, receive_buffers, rank_, size_, ExpTag, config_.use_regular);
+    CommunicationUtility::ClearBuffers(update_buffers);
+
+    for (auto &kv : receive_buffers) {
+        for (VertexID i = 0; i < kv.second.size(); i += 3) {
+        const VertexID target = kv.second[i];
+        const VertexID label = kv.second[i + 1];
+        const VertexID root = kv.second[i + 2];
+        for (const VertexID v : update_lists[target]) {
+          if (label < labels_[v]) {
+            labels_[v] = label;
+            ranks_[v] = root;
           }
-          for (const auto &m : message) {
-            receive_buffer.emplace_back(m);
-          }
-        } else std::cout << "Unexpected tag." << std::endl;
-      }
-
-      // Check if all ISend successful
-      isend_done = 0;
-      MPI_Testall(num_requests, update_requests.data(), &isend_done, statuses.data());
-    }
-
-    MPI_Ibarrier(MPI_COMM_WORLD, &barrier_request);
-
-    ibarrier_done = 0;
-    while(!ibarrier_done) {
-      // Check for messages
-      int iprobe_success = 0;
-      MPI_Status st{};
-      MPI_Iprobe(MPI_ANY_SOURCE, 72 * size_ + rank_, MPI_COMM_WORLD, &iprobe_success, &st);
-      if (iprobe_success) {
-        int message_length;
-        MPI_Get_count(&st, MPI_VERTEX, &message_length);
-        VertexBuffer message(message_length);
-        MPI_Status rst{};
-        MPI_Recv(&message[0], message_length, MPI_VERTEX, st.MPI_SOURCE,
-                 st.MPI_TAG, MPI_COMM_WORLD, &rst);
-        // Request
-        if (st.MPI_TAG == 72 * size_ + rank_) {
-          if (st.MPI_SOURCE == rank_) {
-            std::cout << "[ERROR] R" << rank_ << " self message!" << std::endl;
-            exit(1);
-          }
-          for (const auto &request : message) {
-            receive_buffer.emplace_back(request);
-          }
-        } else std::cout << "Unexpected tag." << std::endl;
-      }
-
-      // Check if all reached Ibarrier
-      MPI_Status tst{};
-      MPI_Test(&barrier_request, &ibarrier_done, &tst);
-    }
-
-    for (VertexID i = 0; i < receive_buffer.size(); i += 3) {
-      const VertexID target = receive_buffer[i];
-      const VertexID label = receive_buffer[i + 1];
-      const VertexID root = receive_buffer[i + 2];
-      for (const VertexID v : update_lists[target]) {
-        if (label < labels_[v]) {
-          labels_[v] = label;
-          ranks_[v] = root;
         }
       }
     }
+    CommunicationUtility::ClearBuffers(receive_buffers);
 
 #ifndef NSTATUS
     if (rank_ == ROOT || config_.print_verbose) 
       std::cout << "[STATUS] |-- R" << rank_ << " Resolving remote answers took " 
                 << "[TIME] " << shortcut_timer_.Elapsed() << std::endl;
 #endif
-
-    CheckRequests(answer_requests);
-    CheckRequests(update_requests);
-  }
-
-  void CheckRequests(std::vector<MPI_Request> &requests) {
-    unsigned int unresolved_requests = 0;
-    for (unsigned int i = 0; i < requests.size(); ++i) {
-      if (requests[i] != MPI_REQUEST_NULL) {
-        MPI_Request_free(&requests[i]);
-        unresolved_requests++;
-      }
-    }
-    if (unresolved_requests > 0) {
-      std::cerr << "R" << rank_ << " Error unresolved requests in shortcut propagation" << std::endl;
-      exit(0);
-    }
   }
 
   bool CheckConvergence(StaticGraphCommunicator &g) {
@@ -539,9 +377,16 @@ class ShortcutPropagation {
 
   void ApplyToLocalComponents(StaticGraphCommunicator &cag, 
                               StaticGraph &g, std::vector<VertexID> &g_label) {
+    std::vector<bool> resolved(g.GetLocalVertexVectorSize(), false);
     g.ForallLocalVertices([&](const VertexID v) {
       VertexID cv = cag.GetLocalID(g.GetContractionVertex(v));
       g_label[v] = cag.GetVertexLabel(cv);
+      resolved[v] = true;
+    });
+    // Turn on remaining vertices and set their labels
+    g.SetAllVerticesActive(true);
+    g.ForallLocalVertices([&](const VertexID v) {
+      if (!resolved[v]) g_label[v] = rng_offset_ + g.GetGlobalID(v);
     });
   }
 
@@ -549,9 +394,16 @@ class ShortcutPropagation {
                               std::vector<VertexID> &cag_label, 
                               StaticGraph &g, 
                               std::vector<VertexID> &g_label) {
+    std::vector<bool> resolved(g.GetLocalVertexVectorSize(), false);
     g.ForallLocalVertices([&](const VertexID v) {
       VertexID cv = cag.GetLocalID(g.GetContractionVertex(v));
       g_label[v] = cag_label[cv];
+      resolved[v] = true;
+    });
+    // Turn on remaining vertices and set their labels
+    g.SetAllVerticesActive(true);
+    g.ForallLocalVertices([&](const VertexID v) {
+      if (!resolved[v]) g_label[v] = g.GetGlobalID(v);
     });
   }
 
